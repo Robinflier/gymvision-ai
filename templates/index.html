@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+	<title>GymVision AI</title>
+	<link rel="manifest" href="/static/manifest.webmanifest">
+	<meta name="theme-color" content="#0f0f10">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<link rel="stylesheet" href="/static/styles.css">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+	<div class="phone-shell">
+		<div class="content hidden" id="home-content">
+		<header class="topbar">
+			<div class="brand brand-logo"><img src="/logo.png" alt="GymVision" /></div>
+			<div class="icons streak">
+				<img src="/flame.png" alt="streak" class="streak-img" />
+				<div id="streak-count" class="streak-count">0</div>
+			</div>
+		</header>
+			<section class="card summary">
+				<div class="summary-left">
+					<div class="summary-number" id="result-title">Add an exercise</div>
+					<button id="prediction-toggle" class="prediction-toggle hidden" type="button">Wrong exercise?</button>
+				</div>
+				<div class="summary-right">
+					<div class="ring" id="confidence-ring"></div>
+					<div class="ring-label">
+						<div class="ring-label-title">Confidence</div>
+						<div class="ring-label-value" id="ring-confidence">—</div>
+					</div>
+				</div>
+			</section>
+
+			<section class="card prediction-options hidden" id="prediction-options">
+				<div class="prediction-options-title">Is this wrong? Pick another:</div>
+				<div class="prediction-options-list" id="prediction-options-list"></div>
+			</section>
+
+			<section class="card prediction-options hidden" id="prediction-refine">
+				<div class="prediction-options-title" id="prediction-refine-title">What are you doing exactly?</div>
+				<div class="prediction-options-list" id="prediction-refine-list"></div>
+			</section>
+
+			<section class="quick-stats">
+				<div class="qs-item"><span id="qs-muscle-1">—</span><label>Primary</label></div>
+				<div class="qs-item"><span id="qs-muscle-2">—</span><label>Secondary</label></div>
+				<div class="qs-item"><span id="qs-muscle-3">—</span><label>Support</label></div>
+			</section>
+
+			<section class="controls card">
+				<div class="uploader">
+					<video id="camera" autoplay playsinline class="camera"></video>
+					<canvas id="snapshot" class="camera hidden"></canvas>
+					<img id="manual-preview" class="manual-preview hidden" alt="Exercise reference" />
+
+					<div class="home-exercise-selector">
+						<div class="home-exercise-selector-header">
+							<button type="button" id="home-open-exercise-selector" class="btn home-exercise-selector-btn">
+								Select exercise
+							</button>
+						</div>
+					</div>
+
+					<div class="or-divider">or</div>
+					<div class="btn-row">
+						<label class="btn">
+							<input type="file" id="fileInput" accept="image/*" capture="environment" hidden>
+							Take photo
+						</label>
+						<button id="classify" class="btn primary" disabled>AI Detect</button>
+					</div>
+				</div>
+			</section>
+
+			<section class="card details">
+				<h3 id="machine-name">No machine detected</h3>
+				<div id="machine-custom" class="machine-custom hidden">
+					<select id="machine-custom-select" class="hidden"></select>
+					<input id="machine-custom-input" type="text" placeholder='Describe movement' autocomplete="off" />
+				</div>
+				<p class="confidence" id="confidence">Instruction video</p>
+				<div class="video-wrap">
+					<iframe id="video" src="" title="How-to video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+				</div>
+			</section>
+
+			<section class="recent-scans card">
+				<h3 style="padding:16px 16px 8px;margin:0">Recent scans</h3>
+				<div id="recent-scans-list" class="recent-scans-list"></div>
+			</section>
+		</div>
+
+		<div class="content" id="workouts-content">
+			<header class="topbar">
+				<div class="brand brand-logo"><img src="/logo.png" alt="GymVision" /></div>
+				<div class="icons streak">
+					<img src="/flame.png" alt="streak" class="streak-img" />
+					<div id="streak-count-workouts" class="streak-count">0</div>
+				</div>
+			</header>
+			<button id="continue-workout-btn" class="btn primary start-workout-btn hidden" style="margin:22px 22px 12px;width:calc(100% - 44px);display:none">Continue workout</button>
+			<div id="start-workout-buttons" style="display:flex;gap:10px;margin:22px 22px 20px;">
+				<button id="ai-workout-btn" class="btn primary" style="flex:1">AI Workout</button>
+				<button id="manual-workout-btn" class="btn" style="flex:1">Manual Workout</button>
+			</div>
+			<h2 style="padding:0 22px 12px;margin:0;font-size:24px;font-weight:800">Your Workouts <span id="workouts-count" style="color:var(--sub);font-size:14px">(0)</span></h2>
+			<ul id="workouts-list" class="workouts-main-list"></ul>
+		</div>
+
+		<div class="content hidden" id="workout-builder-content">
+			<header class="topbar">
+				<div class="brand brand-logo"><img src="/logo.png" alt="GymVision" /></div>
+				<div class="icons streak">
+					<img src="/flame.png" alt="streak" class="streak-img" />
+					<div id="streak-count-workout-builder" class="streak-count">0</div>
+				</div>
+			</header>
+			<div class="workout-builder-wrapper">
+				<div class="workout-builder-top-buttons">
+					<button id="back-to-workouts" class="btn">Back to workouts</button>
+					<button id="save-workout" class="btn primary">Save Workout</button>
+				</div>
+				<section class="card workout" id="workout">
+					<div class="workout-header">
+						<div class="workout-header-top">
+							<label for="workout-name" class="workout-label">Workout name:</label>
+							<div id="workout-timer" class="workout-timer-value">00:00</div>
+						</div>
+						<input id="workout-name" class="workout-name" placeholder="Workout name" value="Workout" />
+					</div>
+					<ul id="workout-list" class="workout-list"></ul>
+					<div class="save-success hidden" id="save-success">✓ Saved</div>
+				</section>
+			</div>
+		</div>
+
+		<div class="content hidden" id="progress-content">
+			<header class="topbar">
+				<div class="brand brand-logo"><img src="/logo.png" alt="GymVision" /></div>
+				<div class="icons streak">
+					<img src="/flame.png" alt="streak" class="streak-img" />
+					<div id="streak-count-progress" class="streak-count">0</div>
+				</div>
+			</header>
+			<section class="card progress-chart-card">
+				<div class="progress-chart-header">
+					<h3>Weight Chart</h3>
+					<input type="date" id="progress-date" class="progress-chart-date-input" required>
+				</div>
+				<div class="progress-chart-wrapper">
+					<canvas id="progress-chart"></canvas>
+					<div id="progress-empty" class="progress-empty">No data yet</div>
+					<div id="progress-y-labels" class="progress-y-labels"></div>
+					<div id="progress-x-labels" class="progress-x-labels"></div>
+					<div id="progress-tooltip" class="progress-tooltip"></div>
+				</div>
+				<form id="progress-form" class="progress-inline-form">
+					<div class="progress-weight-group">
+						<label for="progress-weight" class="progress-weight-label">Weight</label>
+						<div class="progress-weight-input-wrapper">
+							<input type="number" id="progress-weight" step="0.1" min="0" placeholder="" required>
+							<span class="progress-inline-unit">kg</span>
+						</div>
+					</div>
+					<button type="submit" class="btn primary progress-inline-submit">Save</button>
+				</form>
+			</section>
+
+			<section class="card progress-muscle-card">
+				<div class="progress-muscle-header">
+					<h3>Muscle Focus</h3>
+					<div class="progress-muscle-filters" role="group" aria-label="Range filter">
+						<button class="progress-filter-btn active" data-range="week">Week</button>
+						<button class="progress-filter-btn" data-range="month">Month</button>
+						<button class="progress-filter-btn" data-range="year">Year</button>
+						<button class="progress-filter-btn" data-range="all">All</button>
+					</div>
+				</div>
+				<div class="progress-muscle-content">
+					<div class="progress-muscle-chart-wrapper">
+						<canvas id="progress-muscle-chart"></canvas>
+						<div id="progress-muscle-empty" class="progress-empty">No workouts in this range</div>
+						<div id="progress-muscle-center" class="progress-muscle-center-label"></div>
+					</div>
+					<ul id="progress-muscle-legend" class="progress-muscle-legend"></ul>
+				</div>
+			</section>
+
+			<section class="card progress-exercise-insights-card">
+				<div class="progress-pr-header">
+					<h3>Exercise Insights</h3>
+				</div>
+				<div class="progress-pr-selector">
+					<button type="button" id="progress-open-exercise-selector" class="btn progress-pr-select-btn">
+						Select exercise
+					</button>
+				</div>
+				<div id="progress-pr-results" class="progress-pr-results">
+				</div>
+			</section>
+
+			<section class="card progress-pr-timeline-card">
+				<div class="progress-pr-header">
+					<h3>Personal Records Timeline</h3>
+				</div>
+				<div id="progress-pr-timeline" class="progress-pr-timeline">
+					<div class="progress-pr-empty">No personal records yet. Complete workouts to see your PRs!</div>
+				</div>
+			</section>
+
+			<section class="card progress-overload-card">
+				<div class="progress-pr-header">
+					<h3>Progressive Overload Tracker</h3>
+				</div>
+				<div id="progress-overload-tracker" class="progress-overload-tracker">
+					<div class="progress-pr-empty">Complete more workouts to track your progress.</div>
+				</div>
+			</section>
+
+			
+		</div>
+
+		<div class="content hidden" id="settings-content">
+			<header class="topbar">
+				<div class="brand brand-logo"><img src="/logo.png" alt="GymVision" /></div>
+				<div class="icons streak">
+					<img src="/flame.png" alt="streak" class="streak-img" />
+					<div id="streak-count-settings" class="streak-count">0</div>
+				</div>
+			</header>
+			<div style="padding: 22px;">
+				<h2 style="margin:0 0 30px;font-size:24px;font-weight:800;color:#fff">Settings</h2>
+				<div class="card" style="padding: 20px; margin-bottom: 20px;">
+					<div style="margin-bottom: 15px;">
+						<div style="color: #888; font-size: 14px; margin-bottom: 5px;">Logged in as</div>
+						<div style="color: #fff; font-size: 18px; font-weight: 600;" id="settings-username">—</div>
+					</div>
+					<div style="color: #888; font-size: 14px;" id="settings-email">—</div>
+				</div>
+				<button id="logout-btn" class="auth-button" style="width: 100%; padding: 14px; background: #ef4444; color: #fff; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif;">
+					Log Out
+				</button>
+			</div>
+		</div>
+
+		<div class="content hidden" id="vision-content">
+			<header class="topbar">
+				<div class="brand brand-logo"><img src="/logo.png" alt="GymVision" /></div>
+				<div class="icons streak">
+					<img src="/flame.png" alt="streak" class="streak-img" />
+					<div id="streak-count-vision" class="streak-count">0</div>
+				</div>
+			</header>
+			<div style="padding: 22px; display: flex; flex-direction: column; height: calc(100% - 60px);">
+				<div id="vision-chat-messages" style="flex: 1; overflow-y: auto; margin-bottom: 16px; display: flex; flex-direction: column; gap: 12px;">
+					<div class="vision-message vision-message-bot">
+						<div class="vision-avatar">
+							<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+								<circle cx="12" cy="12" r="10" stroke="var(--accent)" stroke-width="2" fill="rgba(124,92,255,0.1)"/>
+								<circle cx="12" cy="12" r="4" fill="var(--accent)"/>
+								<path d="M2 12s3-4 10-4 10 4 10 4" stroke="var(--accent)" stroke-width="2" fill="none" stroke-linecap="round"/>
+							</svg>
+						</div>
+					<div class="vision-message-content">
+						Hi! I'm Vision, your personal AI workout builder. Tell me what you want to train and I'll create it instantly.
+					</div>
+					</div>
+				</div>
+				<div class="vision-quick-suggestions">
+					<button type="button" class="vision-example-btn" data-example="Create a 5 exercise push workout">Create a 5 exercise push workout</button>
+					<button type="button" class="vision-example-btn" data-example="Full body workout">Full body workout</button>
+					<button type="button" class="vision-example-btn" data-example="Just pushups workout">Just pushups workout</button>
+					<button type="button" class="vision-example-btn" data-example="Legs mainly quads workout">Legs mainly quads workout</button>
+				</div>
+				<div style="display: flex; gap: 8px;">
+					<input type="text" id="vision-input" placeholder="What do you want to train today?" style="flex: 1; background: #1a1a1d; border: 1px solid #2b2b34; border-radius: 12px; padding: 12px 16px; color: #fff; font-size: 14px; font-family: 'Inter', sans-serif;" />
+					<button id="vision-send-btn" style="background: var(--accent); border: none; border-radius: 12px; padding: 12px 24px; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif;">Send</button>
+				</div>
+			</div>
+		</div>
+
+	<div id="exercise-selector" class="exercise-selector hidden">
+		<div class="exercise-selector-panel">
+			<div class="exercise-selector-header">
+				<h3>Select exercise</h3>
+				<button id="exercise-selector-close" class="exercise-selector-close" type="button">✕</button>
+			</div>
+			<div class="exercise-selector-search">
+				<input type="text" id="exercise-selector-search" placeholder="Search exercise..." autocomplete="off" />
+			</div>
+			<div class="exercise-selector-muscles-row">
+				<div class="exercise-selector-muscles" id="exercise-selector-muscles"></div>
+			</div>
+			<div class="exercise-selector-or">or</div>
+			<div class="exercise-selector-ai-detect">
+				<button type="button" id="exercise-selector-ai-detect" class="btn primary">
+					AI detect
+				</button>
+				<input type="file" id="exercise-selector-file" accept="image/*" capture="environment" hidden>
+			</div>
+			<div id="exercise-selector-predictions" class="exercise-selector-predictions"></div>
+			<div class="exercise-selector-results" id="exercise-selector-results"></div>
+		</div>
+	</div>
+
+	<div id="exercise-video-modal" class="video-modal hidden">
+		<div class="video-modal-backdrop"></div>
+		<div class="video-modal-content">
+			<button id="exercise-video-close" class="video-modal-close" type="button">✕</button>
+			<div class="video-modal-frame">
+				<iframe id="exercise-video-frame" src="" title="Exercise video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+			</div>
+		</div>
+	</div>
+
+	<footer class="navbar">
+			<button class="nav-btn active" data-tab="workouts">
+				<img src="/nav/dumbell.png" alt="Workouts" class="nav-icon" />
+				<span>Workouts</span>
+			</button>
+			<button class="nav-btn" data-tab="progress">
+				<img src="/nav/progress.png" alt="Progress" class="nav-icon" />
+				<span>Progress</span>
+			</button>
+			<button class="nav-btn" data-tab="settings">
+				<img src="/nav/settings.png" alt="Settings" class="nav-icon" />
+				<span>Settings</span>
+			</button>
+		</footer>
+	</div>
+
+	<script src="/static/app.js"></script>
+	<script>
+		if ('serviceWorker' in navigator) {
+			navigator.serviceWorker.register('/static/sw.js').catch(()=>{});
+		}
+	</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">GymVision AI</string>
+    <string name="title_activity_main">GymVision AI</string>
+    <string name="package_name">com.gymvision.ai</string>
+    <string name="custom_url_scheme">com.gymvision.ai</string>
+</resources>

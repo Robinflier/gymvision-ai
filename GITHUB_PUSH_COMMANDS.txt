@@ -1,0 +1,24 @@
+# Commands om code naar GitHub te pushen
+# Voer deze uit in Terminal, één voor één
+
+# 1. Ga naar je project folder
+cd /Users/robinflier/Documents/GV_AI
+
+# 2. Verwijder oude remote (als die er is)
+git remote remove origin
+
+# 3. Voeg nieuwe remote toe (vervang 'gymvision-ai' als je andere naam hebt gekozen)
+git remote add origin https://github.com/Pourify/gymvision-ai.git
+
+# 4. Add alle bestanden
+git add .
+
+# 5. Commit
+git commit -m "Initial commit - GymVision AI backend and mobile app"
+
+# 6. Push naar GitHub
+git push -u origin main
+
+# Als je een error krijgt over "main" branch, probeer:
+# git push -u origin master
+

@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Database
+*.db
+gymvision.db
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+
+# Node
+node_modules/
+npm-debug.log
+
+# Capacitor
+ios/Pods/
+android/.gradle/
+android/app/build/
+
+# ML Models (too large for git)
+*.pt
+*.h5
+*.pkl
+
+# Build files
+dist/
+build/
+*.egg-info/
+
