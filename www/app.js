@@ -27,16 +27,32 @@ async function apiCall(endpoint, options = {}) {
 		...options
 	};
 	
-	const res = await fetch(url, defaultOptions);
-	if (!res.ok && res.status === 401) {
-		// Not authenticated, try to auto-login (for native app)
-		if (window.Capacitor) {
+	try {
+		let res = await fetch(url, defaultOptions);
+		
+		// If unauthorized, try to auto-login and retry (for native app)
+		if (!res.ok && res.status === 401 && window.Capacitor) {
+			console.log('Unauthorized, attempting auto-login...');
 			await checkAuth();
 			// Retry the request
-			return fetch(url, defaultOptions);
+			res = await fetch(url, defaultOptions);
 		}
+		
+		// Log error details for debugging
+		if (!res.ok) {
+			const errorText = await res.text();
+			console.error(`API call failed: ${url}`, {
+				status: res.status,
+				statusText: res.statusText,
+				error: errorText
+			});
+		}
+		
+		return res;
+	} catch (error) {
+		console.error(`API call error: ${url}`, error);
+		throw error;
 	}
-	return res;
 }
 
 function createDefaultSets(count = DEFAULT_SET_COUNT) {
@@ -130,19 +146,27 @@ async function checkAuth() {
 	if (window.Capacitor) {
 		try {
 			// First check if already authenticated
-			const checkRes = await fetch(`${API_BASE_URL}/check-auth`);
+			const checkRes = await fetch(`${API_BASE_URL}/check-auth`, {
+				credentials: 'include'
+			});
 			const checkData = await checkRes.json();
 			
 			if (!checkData.authenticated) {
+				console.log('Not authenticated, attempting auto-login...');
 				// Auto-login to native user account
 				const loginRes = await fetch(`${API_BASE_URL}/native-login`, {
 					method: 'POST',
-					headers: { 'Content-Type': 'application/json' }
+					headers: { 'Content-Type': 'application/json' },
+					credentials: 'include'
 				});
 				const loginData = await loginRes.json();
 				if (loginData.authenticated) {
 					console.log('Auto-logged in to native app account');
+				} else {
+					console.error('Auto-login failed:', loginData);
 				}
+			} else {
+				console.log('Already authenticated');
 			}
 		} catch (e) {
 			console.error('Native app auth failed:', e);
@@ -1485,7 +1509,9 @@ async function saveWorkout() {
 		switchTab('workouts');
 	} catch (error) {
 		console.error('Failed to save workout:', error);
-		alert('Failed to save workout. Please try again.');
+		// Show more detailed error message
+		const errorMsg = error.message || 'Unknown error';
+		alert(`Failed to save workout: ${errorMsg}. Please check your connection and try again.`);
 	}
 }
 
@@ -1501,8 +1527,10 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 			if (res.ok) {
 				const data = await res.json();
 				workouts = data.workouts || [];
+				console.log(`Loaded ${workouts.length} workouts from backend`);
 			} else {
-				console.error('Failed to load workouts from backend');
+				const errorText = await res.text();
+				console.error('Failed to load workouts from backend:', res.status, errorText);
 				// Fallback to localStorage
 				workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
 			}
@@ -1747,13 +1775,6 @@ function getExerciseImageCandidates(exercise) {
 	}
 	if (label === 'chinning dipping' || label === 'leg raise tower') {
 		addPath('/images/chinningdipping.jpg');
-	}
-	// Special cases for exercises with specific image file names
-	if (label === 'hip thrust' || exercise.key === 'hip_thrust') {
-		addPath('/images/hiptrust.jpg');
-	}
-	if (label === 'cable kickback' || exercise.key === 'cable_kickback') {
-		addPath('/images/cablekickbacks.jpg');
 	}
 	
 	const displaySlug = slugifyForImage(exercise.display);
