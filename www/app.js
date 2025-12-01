@@ -1748,6 +1748,13 @@ function getExerciseImageCandidates(exercise) {
 	if (label === 'chinning dipping' || label === 'leg raise tower') {
 		addPath('/images/chinningdipping.jpg');
 	}
+	// Special cases for exercises with specific image file names
+	if (label === 'hip thrust' || exercise.key === 'hip_thrust') {
+		addPath('/images/hiptrust.jpg');
+	}
+	if (label === 'cable kickback' || exercise.key === 'cable_kickback') {
+		addPath('/images/cablekickbacks.jpg');
+	}
 	
 	const displaySlug = slugifyForImage(exercise.display);
 	if (displaySlug) addBase(displaySlug);
