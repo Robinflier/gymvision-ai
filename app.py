@@ -1284,7 +1284,6 @@ def model_classes():
 
 
 @app.route("/chat", methods=["POST"])
-@login_required
 def chat():
 	"""AI chatbot endpoint for fitness-related questions."""
 	if not GROQ_AVAILABLE:
