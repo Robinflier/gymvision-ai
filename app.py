@@ -482,6 +482,26 @@ def init_db():
 			expires_at TIMESTAMP
 		)
 	""")
+	cursor.execute("""
+		CREATE TABLE IF NOT EXISTS workouts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			date TEXT NOT NULL,
+			exercises TEXT NOT NULL,
+			duration INTEGER,
+			volume REAL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		)
+	""")
+	# Create index for faster queries
+	try:
+		cursor.execute("CREATE INDEX IF NOT EXISTS idx_workouts_user_id ON workouts(user_id)")
+		cursor.execute("CREATE INDEX IF NOT EXISTS idx_workouts_date ON workouts(date)")
+	except sqlite3.OperationalError:
+		pass  # Indexes might already exist
 	conn.commit()
 	conn.close()
 	print("[INFO] Database initialized")
@@ -865,6 +885,129 @@ def native_login():
 		"username": username,
 		"email": "native@app.local"
 	})
+
+
+# ========== WORKOUTS API ==========
+
+@app.route("/api/workouts", methods=["GET"])
+@login_required
+def get_workouts():
+	"""Get all workouts for the current user."""
+	conn = get_db_connection()
+	workouts = conn.execute(
+		"SELECT id, name, date, exercises, duration, volume, created_at, updated_at FROM workouts WHERE user_id = ? ORDER BY date DESC",
+		(current_user.id,)
+	).fetchall()
+	conn.close()
+	
+	result = []
+	for w in workouts:
+		result.append({
+			"id": w["id"],
+			"name": w["name"],
+			"date": w["date"],
+			"exercises": json.loads(w["exercises"]),
+			"duration": w["duration"],
+			"volume": w["volume"]
+		})
+	
+	return jsonify({"workouts": result})
+
+
+@app.route("/api/workouts", methods=["POST"])
+@login_required
+def create_workout():
+	"""Create a new workout for the current user."""
+	data = request.get_json()
+	if not data:
+		return jsonify({"error": "No data provided"}), 400
+	
+	name = data.get("name", "").strip()
+	date = data.get("date")
+	exercises = data.get("exercises", [])
+	duration = data.get("duration")
+	volume = data.get("volume")
+	
+	if not name or not date or not exercises:
+		return jsonify({"error": "Name, date, and exercises are required"}), 400
+	
+	conn = get_db_connection()
+	cursor = conn.execute(
+		"INSERT INTO workouts (user_id, name, date, exercises, duration, volume) VALUES (?, ?, ?, ?, ?, ?)",
+		(current_user.id, name, date, json.dumps(exercises), duration, volume)
+	)
+	workout_id = cursor.lastrowid
+	conn.commit()
+	conn.close()
+	
+	return jsonify({"success": True, "id": workout_id}), 201
+
+
+@app.route("/api/workouts/<int:workout_id>", methods=["PUT"])
+@login_required
+def update_workout(workout_id):
+	"""Update an existing workout."""
+	# Check if workout belongs to user
+	conn = get_db_connection()
+	workout = conn.execute(
+		"SELECT user_id FROM workouts WHERE id = ?", (workout_id,)
+	).fetchone()
+	
+	if not workout:
+		conn.close()
+		return jsonify({"error": "Workout not found"}), 404
+	
+	if workout["user_id"] != current_user.id:
+		conn.close()
+		return jsonify({"error": "Unauthorized"}), 403
+	
+	data = request.get_json()
+	if not data:
+		return jsonify({"error": "No data provided"}), 400
+	
+	name = data.get("name", "").strip()
+	date = data.get("date")
+	exercises = data.get("exercises", [])
+	duration = data.get("duration")
+	volume = data.get("volume")
+	
+	if not name or not date or not exercises:
+		conn.close()
+		return jsonify({"error": "Name, date, and exercises are required"}), 400
+	
+	conn.execute(
+		"UPDATE workouts SET name = ?, date = ?, exercises = ?, duration = ?, volume = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		(name, date, json.dumps(exercises), duration, volume, workout_id)
+	)
+	conn.commit()
+	conn.close()
+	
+	return jsonify({"success": True})
+
+
+@app.route("/api/workouts/<int:workout_id>", methods=["DELETE"])
+@login_required
+def delete_workout(workout_id):
+	"""Delete a workout."""
+	# Check if workout belongs to user
+	conn = get_db_connection()
+	workout = conn.execute(
+		"SELECT user_id FROM workouts WHERE id = ?", (workout_id,)
+	).fetchone()
+	
+	if not workout:
+		conn.close()
+		return jsonify({"error": "Workout not found"}), 404
+	
+	if workout["user_id"] != current_user.id:
+		conn.close()
+		return jsonify({"error": "Unauthorized"}), 403
+	
+	conn.execute("DELETE FROM workouts WHERE id = ?", (workout_id,))
+	conn.commit()
+	conn.close()
+	
+	return jsonify({"success": True})
 
 
 # ========== MAIN APP ROUTES ==========

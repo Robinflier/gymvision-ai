@@ -12,8 +12,32 @@ const DEFAULT_SET_COUNT = 3;
 
 // API Base URL - in Capacitor, point to backend server
 const API_BASE_URL = window.Capacitor 
-	? 'http://192.168.68.103:5000'  // Change this to your Mac's IP or deployed server URL
+	? 'https://gymvision-ai.onrender.com'  // Render deployed backend
 	: '';  // In web mode, use relative URLs
+
+// Helper function for API calls with credentials
+async function apiCall(endpoint, options = {}) {
+	const url = `${API_BASE_URL}${endpoint}`;
+	const defaultOptions = {
+		credentials: 'include',  // Include cookies for session
+		headers: {
+			'Content-Type': 'application/json',
+			...options.headers
+		},
+		...options
+	};
+	
+	const res = await fetch(url, defaultOptions);
+	if (!res.ok && res.status === 401) {
+		// Not authenticated, try to auto-login (for native app)
+		if (window.Capacitor) {
+			await checkAuth();
+			// Retry the request
+			return fetch(url, defaultOptions);
+		}
+	}
+	return res;
+}
 
 function createDefaultSets(count = DEFAULT_SET_COUNT) {
 	return Array.from({ length: count }, () => ({ weight: '', reps: '' }));
@@ -1367,7 +1391,7 @@ function capitalizeFirstLetter(str) {
 	return firstChar.toUpperCase() + str.slice(1);
 }
 
-function saveWorkout() {
+async function saveWorkout() {
 	if (!currentWorkout) return;
 	
 	const workoutName = document.getElementById('workout-name');
@@ -1389,48 +1413,109 @@ function saveWorkout() {
 	}
 	currentWorkout.duration = duration;
 	
-	// Save to localStorage for now
-	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	const date = editingWorkoutId ? (currentWorkout.date || new Date().toISOString()) : new Date().toISOString();
+	const volume = calculateWorkoutVolume(currentWorkout);
+	
 	const payload = {
-				...currentWorkout,
-		id: editingWorkoutId || currentWorkout.id || Date.now(),
-		date: editingWorkoutId ? (currentWorkout.date || new Date().toISOString()) : new Date().toISOString()
+		name: currentWorkout.name || 'Workout',
+		date: date,
+		exercises: currentWorkout.exercises,
+		duration: duration,
+		volume: volume
 	};
 	
-	if (editingWorkoutId) {
-		const idx = workouts.findIndex(w => w.id === editingWorkoutId);
-		if (idx >= 0) {
-			workouts[idx] = payload;
+	try {
+		if (API_BASE_URL && window.Capacitor) {
+			// Use backend API
+			if (editingWorkoutId) {
+				// Update existing workout
+				const res = await apiCall(`/api/workouts/${editingWorkoutId}`, {
+					method: 'PUT',
+					body: JSON.stringify(payload)
+				});
+				if (!res.ok) throw new Error('Failed to update workout');
+			} else {
+				// Create new workout
+				const res = await apiCall('/api/workouts', {
+					method: 'POST',
+					body: JSON.stringify(payload)
+				});
+				if (!res.ok) throw new Error('Failed to save workout');
+				const data = await res.json();
+				editingWorkoutId = data.id; // Store the ID for future edits
+			}
 		} else {
-			workouts.push(payload);
+			// Fallback to localStorage for web mode or if no backend
+			const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+			const fullPayload = {
+				...payload,
+				id: editingWorkoutId || currentWorkout.id || Date.now()
+			};
+			
+			if (editingWorkoutId) {
+				const idx = workouts.findIndex(w => w.id === editingWorkoutId);
+				if (idx >= 0) {
+					workouts[idx] = fullPayload;
+				} else {
+					workouts.push(fullPayload);
+				}
+			} else {
+				workouts.push(fullPayload);
+			}
+			localStorage.setItem('workouts', JSON.stringify(workouts));
 		}
-	} else {
-		workouts.push(payload);
+		
+		// Update streak only for new workouts (not edits)
+		if (!editingWorkoutId) {
+			updateStreak();
+		}
+		
+		editingWorkoutId = null;
+		clearWorkoutDraft();
+		
+		const saveSuccess = document.getElementById('save-success');
+		if (saveSuccess) {
+			saveSuccess.classList.remove('hidden');
+			setTimeout(() => {
+				saveSuccess.classList.add('hidden');
+			}, 2000);
+		}
+		
+		await loadWorkouts();
+		switchTab('workouts');
+	} catch (error) {
+		console.error('Failed to save workout:', error);
+		alert('Failed to save workout. Please try again.');
 	}
-	localStorage.setItem('workouts', JSON.stringify(workouts));
-	
-	// Update streak only for new workouts (not edits)
-	if (!editingWorkoutId) {
-		updateStreak();
-	}
-	
-	editingWorkoutId = null;
-	clearWorkoutDraft();
-	
-	const saveSuccess = document.getElementById('save-success');
-	if (saveSuccess) {
-		saveSuccess.classList.remove('hidden');
-		setTimeout(() => {
-			saveSuccess.classList.add('hidden');
-		}, 2000);
-	}
-	
-	loadWorkouts(workouts);
-	switchTab('workouts');
 }
 
-function loadWorkouts(prefetchedWorkouts = null) {
-	const workouts = prefetchedWorkouts ?? JSON.parse(localStorage.getItem('workouts') || '[]');
+async function loadWorkouts(prefetchedWorkouts = null) {
+	let workouts = [];
+	
+	if (prefetchedWorkouts) {
+		workouts = prefetchedWorkouts;
+	} else if (API_BASE_URL && window.Capacitor) {
+		// Load from backend API
+		try {
+			const res = await apiCall('/api/workouts');
+			if (res.ok) {
+				const data = await res.json();
+				workouts = data.workouts || [];
+			} else {
+				console.error('Failed to load workouts from backend');
+				// Fallback to localStorage
+				workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+			}
+		} catch (error) {
+			console.error('Error loading workouts:', error);
+			// Fallback to localStorage
+			workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		}
+	} else {
+		// Use localStorage for web mode or if no backend
+		workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	}
+	
 	const workoutsList = document.getElementById('workouts-list');
 	const workoutsCount = document.getElementById('workouts-count');
 	
@@ -1862,11 +1947,30 @@ function formatVolume(volumeKg) {
 	return `${Math.round(volumeKg).toLocaleString()} kg`;
 }
 
-function deleteWorkout(id) {
-	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-	const filtered = workouts.filter(workout => workout.id !== id);
-	localStorage.setItem('workouts', JSON.stringify(filtered));
-	loadWorkouts();
+async function deleteWorkout(id) {
+	if (!confirm('Are you sure you want to delete this workout?')) {
+		return;
+	}
+	
+	try {
+		if (API_BASE_URL && window.Capacitor) {
+			// Delete from backend
+			const res = await apiCall(`/api/workouts/${id}`, {
+				method: 'DELETE'
+			});
+			if (!res.ok) throw new Error('Failed to delete workout');
+		} else {
+			// Fallback to localStorage
+			const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+			const filtered = workouts.filter(workout => workout.id !== id);
+			localStorage.setItem('workouts', JSON.stringify(filtered));
+		}
+		
+		await loadWorkouts();
+	} catch (error) {
+		console.error('Failed to delete workout:', error);
+		alert('Failed to delete workout. Please try again.');
+	}
 }
 
 function editWorkout(workout) {
