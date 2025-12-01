@@ -889,14 +889,45 @@ def native_login():
 
 # ========== WORKOUTS API ==========
 
+def get_current_user_id():
+	"""Get current user ID, supporting both web and native app."""
+	if current_user.is_authenticated:
+		return current_user.id
+	
+	# For native app, try to get user from session or auto-login
+	# Check if there's a native user session
+	from flask import session
+	if 'user_id' in session:
+		return session['user_id']
+	
+	# Try to auto-login for native app
+	try:
+		conn = get_db_connection()
+		user = conn.execute(
+			"SELECT id FROM users WHERE email = ?", ("native@app.local",)
+		).fetchone()
+		conn.close()
+		if user:
+			# Create a minimal user object
+			user_obj = User(user[0], "native@app.local", "Native App User")
+			login_user(user_obj, remember=True)
+			return user_obj.id
+	except:
+		pass
+	
+	return None
+
 @app.route("/api/workouts", methods=["GET"])
-@login_required
 def get_workouts():
 	"""Get all workouts for the current user."""
+	user_id = get_current_user_id()
+	if not user_id:
+		return jsonify({"error": "Not authenticated"}), 401
+	
 	conn = get_db_connection()
 	workouts = conn.execute(
 		"SELECT id, name, date, exercises, duration, volume, created_at, updated_at FROM workouts WHERE user_id = ? ORDER BY date DESC",
-		(current_user.id,)
+		(user_id,)
 	).fetchall()
 	conn.close()
 	
@@ -915,9 +946,12 @@ def get_workouts():
 
 
 @app.route("/api/workouts", methods=["POST"])
-@login_required
 def create_workout():
 	"""Create a new workout for the current user."""
+	user_id = get_current_user_id()
+	if not user_id:
+		return jsonify({"error": "Not authenticated"}), 401
+	
 	data = request.get_json()
 	if not data:
 		return jsonify({"error": "No data provided"}), 400
@@ -934,7 +968,7 @@ def create_workout():
 	conn = get_db_connection()
 	cursor = conn.execute(
 		"INSERT INTO workouts (user_id, name, date, exercises, duration, volume) VALUES (?, ?, ?, ?, ?, ?)",
-		(current_user.id, name, date, json.dumps(exercises), duration, volume)
+		(user_id, name, date, json.dumps(exercises), duration, volume)
 	)
 	workout_id = cursor.lastrowid
 	conn.commit()
@@ -944,9 +978,12 @@ def create_workout():
 
 
 @app.route("/api/workouts/<int:workout_id>", methods=["PUT"])
-@login_required
 def update_workout(workout_id):
 	"""Update an existing workout."""
+	user_id = get_current_user_id()
+	if not user_id:
+		return jsonify({"error": "Not authenticated"}), 401
+	
 	# Check if workout belongs to user
 	conn = get_db_connection()
 	workout = conn.execute(
@@ -957,7 +994,7 @@ def update_workout(workout_id):
 		conn.close()
 		return jsonify({"error": "Workout not found"}), 404
 	
-	if workout["user_id"] != current_user.id:
+	if workout["user_id"] != user_id:
 		conn.close()
 		return jsonify({"error": "Unauthorized"}), 403
 	
@@ -986,9 +1023,12 @@ def update_workout(workout_id):
 
 
 @app.route("/api/workouts/<int:workout_id>", methods=["DELETE"])
-@login_required
 def delete_workout(workout_id):
 	"""Delete a workout."""
+	user_id = get_current_user_id()
+	if not user_id:
+		return jsonify({"error": "Not authenticated"}), 401
+	
 	# Check if workout belongs to user
 	conn = get_db_connection()
 	workout = conn.execute(
@@ -999,7 +1039,7 @@ def delete_workout(workout_id):
 		conn.close()
 		return jsonify({"error": "Workout not found"}), 404
 	
-	if workout["user_id"] != current_user.id:
+	if workout["user_id"] != user_id:
 		conn.close()
 		return jsonify({"error": "Unauthorized"}), 403
 	

@@ -50,8 +50,16 @@ async function apiCall(endpoint, options = {}) {
 		
 		return res;
 	} catch (error) {
-		console.error(`API call error: ${url}`, error);
-		throw error;
+		// Better error logging
+		const errorMessage = error.message || String(error);
+		const errorName = error.name || 'UnknownError';
+		console.error(`API call error: ${url}`, {
+			name: errorName,
+			message: errorMessage,
+			stack: error.stack,
+			toString: error.toString()
+		});
+		throw new Error(`Network error: ${errorMessage}. Please check your connection.`);
 	}
 }
 
