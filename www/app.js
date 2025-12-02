@@ -155,30 +155,30 @@ async function checkAuth() {
 		try {
 			// First check if already authenticated
 			const checkRes = await fetch(`${API_BASE_URL}/check-auth`, {
-				credentials: 'include'
+				credentials: 'include',
+				signal: AbortSignal.timeout(5000) // 5 second timeout
 			});
 			const checkData = await checkRes.json();
 			
 			if (!checkData.authenticated) {
-				console.log('Not authenticated, attempting auto-login...');
 				// Auto-login to native user account
 				const loginRes = await fetch(`${API_BASE_URL}/native-login`, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					credentials: 'include'
+					credentials: 'include',
+					signal: AbortSignal.timeout(5000) // 5 second timeout
 				});
 				const loginData = await loginRes.json();
 				if (loginData.authenticated) {
-					console.log('Auto-logged in to native app account');
-				} else {
-					console.error('Auto-login failed:', loginData);
+					console.log('✓ Backend connected');
 				}
-			} else {
-				console.log('Already authenticated');
 			}
 		} catch (e) {
-			console.error('Native app auth failed:', e);
-			console.log('Backend server may not be running. Some features may not work.');
+			// Silently fail - app works with localStorage anyway
+			// Only log if it's not a timeout/network error
+			if (e.name !== 'AbortError' && e.name !== 'TypeError') {
+				console.warn('Backend connection issue (app works offline):', e.message);
+			}
 		}
 		return;
 	}
@@ -1457,46 +1457,26 @@ async function saveWorkout() {
 	};
 	
 	try {
-		if (API_BASE_URL && window.Capacitor) {
-			// Use backend API
-			if (editingWorkoutId) {
-				// Update existing workout
-				const res = await apiCall(`/api/workouts/${editingWorkoutId}`, {
-					method: 'PUT',
-					body: JSON.stringify(payload)
-				});
-				if (!res.ok) throw new Error('Failed to update workout');
-			} else {
-				// Create new workout
-				const res = await apiCall('/api/workouts', {
-					method: 'POST',
-					body: JSON.stringify(payload)
-				});
-				if (!res.ok) throw new Error('Failed to save workout');
-				const data = await res.json();
-				editingWorkoutId = data.id; // Store the ID for future edits
-			}
-		} else {
-			// Fallback to localStorage for web mode or if no backend
-			const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-			const fullPayload = {
-				...payload,
-				id: editingWorkoutId || currentWorkout.id || Date.now()
-			};
-			
-			if (editingWorkoutId) {
-				const idx = workouts.findIndex(w => w.id === editingWorkoutId);
-				if (idx >= 0) {
-					workouts[idx] = fullPayload;
-				} else {
-					workouts.push(fullPayload);
-				}
+		// Always save to localStorage first (for immediate feedback)
+		const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		const fullPayload = {
+			...payload,
+			id: editingWorkoutId || currentWorkout.id || Date.now()
+		};
+		
+		if (editingWorkoutId) {
+			const idx = workouts.findIndex(w => w.id === editingWorkoutId);
+			if (idx >= 0) {
+				workouts[idx] = fullPayload;
 			} else {
 				workouts.push(fullPayload);
 			}
-			localStorage.setItem('workouts', JSON.stringify(workouts));
+		} else {
+			workouts.push(fullPayload);
 		}
+		localStorage.setItem('workouts', JSON.stringify(workouts));
 		
+		// Update UI immediately (don't wait for backend)
 		// Update streak only for new workouts (not edits)
 		if (!editingWorkoutId) {
 			updateStreak();
@@ -1513,8 +1493,64 @@ async function saveWorkout() {
 			}, 2000);
 		}
 		
-		await loadWorkouts();
+		// Update UI immediately with the new workouts array
+		loadWorkouts(workouts);
 		switchTab('workouts');
+		
+		// Then try to sync to backend in background (non-blocking)
+		if (API_BASE_URL && window.Capacitor) {
+			// Don't await - do this in background so it doesn't block
+			setTimeout(() => {
+				(async () => {
+					try {
+						// Ensure we're authenticated first (with timeout)
+						await Promise.race([
+							checkAuth(),
+							new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
+						]).catch(() => {}); // Ignore timeout errors
+						
+						if (editingWorkoutId) {
+							// Update existing workout
+							const res = await Promise.race([
+								apiCall(`/api/workouts/${editingWorkoutId}`, {
+									method: 'PUT',
+									body: JSON.stringify(payload)
+								}),
+								new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+							]);
+							if (res && res.ok) {
+								console.debug('✓ Synced workout to backend');
+							}
+						} else {
+							// Create new workout
+							const res = await Promise.race([
+								apiCall('/api/workouts', {
+									method: 'POST',
+									body: JSON.stringify(payload)
+								}),
+								new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+							]);
+							if (res && res.ok) {
+								const data = await res.json();
+								// Update local storage with backend ID
+								const currentWorkouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+								const idx = currentWorkouts.findIndex(w => w.id === fullPayload.id);
+								if (idx >= 0) {
+									currentWorkouts[idx].id = data.id;
+									localStorage.setItem('workouts', JSON.stringify(currentWorkouts));
+								}
+								console.debug('✓ Synced workout to backend');
+							}
+						}
+					} catch (backendError) {
+						// Silently fail - workout is already saved locally
+						if (backendError.message !== 'Timeout') {
+							console.debug('Backend sync unavailable (saved locally)');
+						}
+					}
+				})();
+			}, 100); // Small delay to ensure UI updates first
+		}
 	} catch (error) {
 		console.error('Failed to save workout:', error);
 		// Show more detailed error message
@@ -1528,28 +1564,44 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 	
 	if (prefetchedWorkouts) {
 		workouts = prefetchedWorkouts;
-	} else if (API_BASE_URL && window.Capacitor) {
-		// Load from backend API
-		try {
-			const res = await apiCall('/api/workouts');
-			if (res.ok) {
-				const data = await res.json();
-				workouts = data.workouts || [];
-				console.log(`Loaded ${workouts.length} workouts from backend`);
-			} else {
-				const errorText = await res.text();
-				console.error('Failed to load workouts from backend:', res.status, errorText);
-				// Fallback to localStorage
-				workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-			}
-		} catch (error) {
-			console.error('Error loading workouts:', error);
-			// Fallback to localStorage
-			workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-		}
 	} else {
-		// Use localStorage for web mode or if no backend
+		// Always load from localStorage first (for immediate display)
 		workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		
+		// Then try to sync from backend (if available and in native app)
+		if (API_BASE_URL && window.Capacitor) {
+			try {
+				// Ensure we're authenticated first (with timeout)
+				await Promise.race([
+					checkAuth(),
+					new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+				]).catch(() => {}); // Ignore timeout errors
+				
+				const res = await Promise.race([
+					apiCall('/api/workouts'),
+					new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+				]);
+				
+				if (res && res.ok) {
+					const data = await res.json();
+					const backendWorkouts = data.workouts || [];
+					
+					if (backendWorkouts.length > 0) {
+						// Merge backend workouts with local (backend takes priority)
+						workouts = backendWorkouts;
+						// Update localStorage with backend data
+						localStorage.setItem('workouts', JSON.stringify(workouts));
+						console.log(`✓ Synced ${workouts.length} workouts from backend`);
+					}
+				}
+			} catch (error) {
+				// Silently fail - app works with localStorage
+				// Only log if it's not a timeout
+				if (error.message !== 'Timeout') {
+					console.debug('Backend sync unavailable (using local storage)');
+				}
+			}
+		}
 	}
 	
 	const workoutsList = document.getElementById('workouts-list');
@@ -1989,20 +2041,42 @@ async function deleteWorkout(id) {
 	}
 	
 	try {
-		if (API_BASE_URL && window.Capacitor) {
-			// Delete from backend
-			const res = await apiCall(`/api/workouts/${id}`, {
-				method: 'DELETE'
-			});
-			if (!res.ok) throw new Error('Failed to delete workout');
-		} else {
-			// Fallback to localStorage
-			const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-			const filtered = workouts.filter(workout => workout.id !== id);
-			localStorage.setItem('workouts', JSON.stringify(filtered));
-		}
+		// Always delete from localStorage first (for immediate feedback)
+		const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		const filtered = workouts.filter(workout => workout.id !== id);
+		localStorage.setItem('workouts', JSON.stringify(filtered));
 		
-		await loadWorkouts();
+		// Update UI immediately (don't wait for backend)
+		loadWorkouts(filtered);
+		
+		// Then try to delete from backend in background (non-blocking)
+		if (API_BASE_URL && window.Capacitor) {
+			setTimeout(() => {
+				(async () => {
+					try {
+						await Promise.race([
+							checkAuth(),
+							new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
+						]).catch(() => {});
+						
+						const res = await Promise.race([
+							apiCall(`/api/workouts/${id}`, {
+								method: 'DELETE'
+							}),
+							new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+						]);
+						if (res && res.ok) {
+							console.debug('✓ Deleted workout from backend');
+						}
+					} catch (backendError) {
+						// Silently fail - workout is already deleted locally
+						if (backendError.message !== 'Timeout') {
+							console.debug('Backend delete unavailable (deleted locally)');
+						}
+					}
+				})();
+			}, 100);
+		}
 	} catch (error) {
 		console.error('Failed to delete workout:', error);
 		alert('Failed to delete workout. Please try again.');
@@ -3092,6 +3166,9 @@ function initVision() {
 	}
 }
 
+// Track if video modal is initialized to prevent duplicate listeners
+let videoModalInitialized = false;
+
 function initExerciseVideoModal() {
 	const modal = document.getElementById('exercise-video-modal');
 	const frame = document.getElementById('exercise-video-frame');
@@ -3109,11 +3186,19 @@ function initExerciseVideoModal() {
 		if (el) el.addEventListener('click', closeModal);
 	});
 	
+	// Only add click listener once
+	if (videoModalInitialized) return;
+	videoModalInitialized = true;
+	
 	document.addEventListener('click', async (e) => {
 		const btn = e.target.closest('.exercise-info-btn');
 		if (!btn) return;
-		e.preventDefault();
-		e.stopPropagation();
+		
+		// Only prevent default if it's actually the button being clicked
+		if (e.target.closest('.exercise-info-btn') === btn) {
+			e.preventDefault();
+			e.stopPropagation();
+		}
 		
 		// Find the exercise card container
 		const exerciseCard = btn.closest('.workout-exercise, .workout-edit-exercise');
@@ -3155,17 +3240,51 @@ function initExerciseVideoModal() {
 			}
 		}
 		
+		// Extract video ID from any YouTube URL format
+		let videoId = null;
+		
+		if (videoUrl.includes('youtube.com/embed/')) {
+			// Already an embed URL, extract ID
+			videoId = videoUrl.match(/embed\/([^?&]+)/)?.[1];
+		} else if (videoUrl.includes('youtube.com/watch')) {
+			// Watch URL
+			videoId = videoUrl.match(/[?&]v=([^&]+)/)?.[1];
+		} else if (videoUrl.includes('youtu.be/')) {
+			// Short URL
+			videoId = videoUrl.match(/youtu\.be\/([^?&]+)/)?.[1];
+		}
+		
+		if (!videoId) {
+			console.error('Could not extract video ID from URL:', videoUrl);
+			alert('Invalid video URL');
+			return;
+		}
+		
+		const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+		
+		// On iOS (Capacitor), YouTube iframes don't work reliably (Error 153)
+		// Open video directly in YouTube app/browser instead
+		if (window.Capacitor) {
+			(async () => {
+				try {
+					const { Browser } = await import('@capacitor/browser');
+					await Browser.open({ url: watchUrl });
+				} catch (err) {
+					// Fallback if Browser plugin fails
+					window.open(watchUrl, '_blank');
+				}
+			})();
+			return; // Don't try to embed on iOS
+		}
+		
+		// On desktop/web: Try to embed the video
+		const embedUrl = `https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1&playsinline=1&controls=1&fs=1`;
+		
 		// Create inline video container
 		const videoContainer = document.createElement('div');
 		videoContainer.className = 'exercise-video-inline';
-		videoContainer.innerHTML = `
-			<button class="exercise-video-inline-close" type="button" aria-label="Close video">✕</button>
-			<div class="exercise-video-inline-frame">
-				<iframe src="${escapeHtmlAttr(videoUrl)}" title="Exercise video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-			</div>
-		`;
 		
-		// Insert after the header, before sets
+		// Insert container first
 		const setsContainer = exerciseCard.querySelector('.workout-edit-sets, .workout-view-sets');
 		if (setsContainer) {
 			exerciseCard.insertBefore(videoContainer, setsContainer);
@@ -3173,14 +3292,35 @@ function initExerciseVideoModal() {
 			exerciseCard.appendChild(videoContainer);
 		}
 		
-		// Close button handler
-		const closeBtn = videoContainer.querySelector('.exercise-video-inline-close');
-		if (closeBtn) {
-			closeBtn.addEventListener('click', (e) => {
-				e.stopPropagation();
-				videoContainer.remove();
-			});
-		}
+		// Create close button
+		const closeBtn = document.createElement('button');
+		closeBtn.className = 'exercise-video-inline-close';
+		closeBtn.type = 'button';
+		closeBtn.setAttribute('aria-label', 'Close video');
+		closeBtn.textContent = '✕';
+		closeBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			videoContainer.remove();
+		});
+		
+		// Create frame div
+		const frameDiv = document.createElement('div');
+		frameDiv.className = 'exercise-video-inline-frame';
+		
+		// Create iframe
+		const iframe = document.createElement('iframe');
+		iframe.src = embedUrl;
+		iframe.title = 'Exercise video';
+		iframe.frameBorder = '0';
+		iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+		iframe.allowFullscreen = true;
+		iframe.setAttribute('webkitallowfullscreen', 'true');
+		iframe.setAttribute('mozallowfullscreen', 'true');
+		iframe.style.cssText = 'width: 100%; height: 100%; border: 0; background: #000;';
+		
+		frameDiv.appendChild(iframe);
+		videoContainer.appendChild(closeBtn);
+		videoContainer.appendChild(frameDiv);
 	});
 }
 

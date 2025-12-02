@@ -10,35 +10,6 @@ let workoutStartTime = null;
 const WORKOUT_DRAFT_KEY = 'currentWorkoutDraft';
 const DEFAULT_SET_COUNT = 3;
 
-// API Base URL - in Capacitor, point to backend server
-const API_BASE_URL = window.Capacitor 
-	? 'https://gymvision-ai.onrender.com'  // Render deployed backend
-	: '';  // In web mode, use relative URLs
-
-// Helper function for API calls with credentials
-async function apiCall(endpoint, options = {}) {
-	const url = `${API_BASE_URL}${endpoint}`;
-	const defaultOptions = {
-		credentials: 'include',  // Include cookies for session
-		headers: {
-			'Content-Type': 'application/json',
-			...options.headers
-		},
-		...options
-	};
-	
-	const res = await fetch(url, defaultOptions);
-	if (!res.ok && res.status === 401) {
-		// Not authenticated, try to auto-login (for native app)
-		if (window.Capacitor) {
-			await checkAuth();
-			// Retry the request
-			return fetch(url, defaultOptions);
-		}
-	}
-	return res;
-}
-
 function createDefaultSets(count = DEFAULT_SET_COUNT) {
 	return Array.from({ length: count }, () => ({ weight: '', reps: '' }));
 }
@@ -93,67 +64,29 @@ function isBodyweightExercise(exercise) {
 
 // ========== INITIALIZATION ==========
 document.addEventListener('DOMContentLoaded', () => {
-	try {
-		initNavigation();
-		initTabs();
-		initFileUpload();
-		initManualInput();
-		initExerciseSelector();
-		initWorkoutBuilder();
-		initProgress();
-		initSettings();
-		initVision();
+	initNavigation();
+	initTabs();
+	initFileUpload();
+	initManualInput();
+	initExerciseSelector();
+	initWorkoutBuilder();
+	initProgress();
+	initSettings();
+	initVision();
 		initExerciseVideoModal();
-		initExerciseCard();
-		loadStreak();
-		loadRecentScans();
-		loadExercises();
-		loadWorkouts();
-		checkAuth();
-		updateWorkoutStartButton(); // Initial check on page load
-		
-		// Show home content by default
-		switchTab('home');
-	} catch (error) {
-		console.error('Error initializing app:', error);
-		// Ensure at least home content is visible even if there's an error
-		const homeContent = document.getElementById('home-content');
-		if (homeContent) {
-			homeContent.classList.remove('hidden');
-		}
-	}
+	initExerciseCard();
+	loadStreak();
+	loadRecentScans();
+	loadExercises();
+	loadWorkouts();
+	checkAuth();
+	updateWorkoutStartButton(); // Initial check on page load
 });
 
 // ========== AUTHENTICATION ==========
 async function checkAuth() {
-	// In Capacitor native app, auto-login to native user account
-	if (window.Capacitor) {
-		try {
-			// First check if already authenticated
-			const checkRes = await fetch(`${API_BASE_URL}/check-auth`);
-			const checkData = await checkRes.json();
-			
-			if (!checkData.authenticated) {
-				// Auto-login to native user account
-				const loginRes = await fetch(`${API_BASE_URL}/native-login`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' }
-				});
-				const loginData = await loginRes.json();
-				if (loginData.authenticated) {
-					console.log('Auto-logged in to native app account');
-				}
-			}
-		} catch (e) {
-			console.error('Native app auth failed:', e);
-			console.log('Backend server may not be running. Some features may not work.');
-		}
-		return;
-	}
-	
-	// Web mode: normal auth check
 	try {
-		const res = await fetch(`${API_BASE_URL}/check-auth`);
+		const res = await fetch('/check-auth');
 		const data = await res.json();
 		if (!data.authenticated) {
 			window.location.href = '/login';
@@ -272,7 +205,7 @@ function initFileUpload() {
 				const formData = new FormData();
 				formData.append('image', file);
 				
-				const res = await fetch(`${API_BASE_URL}/predict`, {
+				const res = await fetch('/predict', {
 					method: 'POST',
 					body: formData
 				});
@@ -513,7 +446,7 @@ function initManualInput() {
 
 async function selectExerciseByName(name) {
 	try {
-		const res = await fetch(`${API_BASE_URL}/exercise-info`, {
+		const res = await fetch('/exercise-info', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ exercise: name })
@@ -527,7 +460,7 @@ async function selectExerciseByName(name) {
 
 async function selectExercise(key) {
 	try {
-		const res = await fetch(`${API_BASE_URL}/exercise-info`, {
+		const res = await fetch('/exercise-info', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ exercise: key })
@@ -805,7 +738,7 @@ function showExerciseRefinementsInSelector(refinementOptions, selectorEl) {
 				let exerciseData = exercise;
 				if (!exerciseData) {
 					try {
-						const res = await fetch(`${API_BASE_URL}/exercise-info`, {
+						const res = await fetch('/exercise-info', {
 							method: 'POST',
 							headers: { 'Content-Type': 'application/json' },
 							body: JSON.stringify({ exercise: exerciseName })
@@ -1143,7 +1076,7 @@ function renderExerciseInfoButton(exercise) {
 	const hasVideoAttr = videoUrl ? 'data-has-video="true"' : 'data-has-video="false"';
 	const exerciseIdAttr = escapeHtmlAttr(exercise.key || exercise.display || '');
 	return `<button type="button" class="exercise-info-btn" data-video="${videoAttr}" data-exercise="${exerciseIdAttr}" ${hasVideoAttr} title="Watch exercise video" aria-label="Watch exercise video">
-		<img src="/question.png" alt="" draggable="false">
+		<img src="/static/question.png" alt="" draggable="false">
 	</button>`;
 }
 
@@ -1193,7 +1126,7 @@ async function addExerciseToWorkout(exercise) {
 	let exerciseData = exercise;
 	if (typeof exercise === 'string' || (exercise && !exercise.display)) {
 		try {
-			const res = await fetch(`${API_BASE_URL}/exercise-info`, {
+			const res = await fetch('/exercise-info', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ exercise: exercise.key || exercise })
@@ -1251,12 +1184,12 @@ function renderWorkoutList() {
 			<div class="workout-edit-exercise-header">
 				<div class="workout-edit-exercise-title">
 					${buildExerciseThumb(ex, 'small')}
-					<div class="workout-exercise-name">${ex.display || ex.key}</div>
+						<div class="workout-exercise-name">${ex.display || ex.key}</div>
 				</div>
 				<div class="workout-exercise-actions">
 					${infoButtonHtml}
-				<button class="workout-edit-exercise-delete" aria-label="Remove exercise">
-					<img src="/close.png" alt="" />
+					<button class="workout-edit-exercise-delete" aria-label="Remove exercise">
+						<img src="/static/close.png" alt="" />
 					</button>
 				</div>
 			</div>
@@ -1314,8 +1247,8 @@ function renderWorkoutList() {
 					<input type="number" class="workout-edit-set-input reps" placeholder="${repsPlaceholder}" inputmode="numeric" value="${set.reps ?? ''}" aria-label="Set reps">
 				</div>
 				<div class="action-col">
-				<button type="button" class="workout-edit-set-delete" aria-label="Delete set">
-					<img src="/close.png" alt="">
+					<button type="button" class="workout-edit-set-delete" aria-label="Delete set">
+						<img src="/static/close.png" alt="">
 					</button>
 				</div>
 			`;
@@ -1326,8 +1259,8 @@ function renderWorkoutList() {
 			
 			if (weightInput) {
 				weightInput.addEventListener('input', (e) => {
-					ex.sets[setIdx].weight = e.target.value ? Number(e.target.value) : '';
-					saveWorkoutDraft();
+				ex.sets[setIdx].weight = e.target.value ? Number(e.target.value) : '';
+				saveWorkoutDraft();
 				});
 			}
 			
@@ -1391,7 +1324,7 @@ function capitalizeFirstLetter(str) {
 	return firstChar.toUpperCase() + str.slice(1);
 }
 
-async function saveWorkout() {
+function saveWorkout() {
 	if (!currentWorkout) return;
 	
 	const workoutName = document.getElementById('workout-name');
@@ -1413,109 +1346,48 @@ async function saveWorkout() {
 	}
 	currentWorkout.duration = duration;
 	
-	const date = editingWorkoutId ? (currentWorkout.date || new Date().toISOString()) : new Date().toISOString();
-	const volume = calculateWorkoutVolume(currentWorkout);
-	
+	// Save to localStorage for now
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
 	const payload = {
-		name: currentWorkout.name || 'Workout',
-		date: date,
-		exercises: currentWorkout.exercises,
-		duration: duration,
-		volume: volume
+				...currentWorkout,
+		id: editingWorkoutId || currentWorkout.id || Date.now(),
+		date: editingWorkoutId ? (currentWorkout.date || new Date().toISOString()) : new Date().toISOString()
 	};
 	
-	try {
-		if (API_BASE_URL && window.Capacitor) {
-			// Use backend API
-			if (editingWorkoutId) {
-				// Update existing workout
-				const res = await apiCall(`/api/workouts/${editingWorkoutId}`, {
-					method: 'PUT',
-					body: JSON.stringify(payload)
-				});
-				if (!res.ok) throw new Error('Failed to update workout');
-			} else {
-				// Create new workout
-				const res = await apiCall('/api/workouts', {
-					method: 'POST',
-					body: JSON.stringify(payload)
-				});
-				if (!res.ok) throw new Error('Failed to save workout');
-				const data = await res.json();
-				editingWorkoutId = data.id; // Store the ID for future edits
-			}
+	if (editingWorkoutId) {
+		const idx = workouts.findIndex(w => w.id === editingWorkoutId);
+		if (idx >= 0) {
+			workouts[idx] = payload;
 		} else {
-			// Fallback to localStorage for web mode or if no backend
-			const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-			const fullPayload = {
-				...payload,
-				id: editingWorkoutId || currentWorkout.id || Date.now()
-			};
-			
-			if (editingWorkoutId) {
-				const idx = workouts.findIndex(w => w.id === editingWorkoutId);
-				if (idx >= 0) {
-					workouts[idx] = fullPayload;
-				} else {
-					workouts.push(fullPayload);
-				}
-			} else {
-				workouts.push(fullPayload);
-			}
-			localStorage.setItem('workouts', JSON.stringify(workouts));
-		}
-		
-		// Update streak only for new workouts (not edits)
-		if (!editingWorkoutId) {
-			updateStreak();
-		}
-		
-		editingWorkoutId = null;
-		clearWorkoutDraft();
-		
-		const saveSuccess = document.getElementById('save-success');
-		if (saveSuccess) {
-			saveSuccess.classList.remove('hidden');
-			setTimeout(() => {
-				saveSuccess.classList.add('hidden');
-			}, 2000);
-		}
-		
-		await loadWorkouts();
-		switchTab('workouts');
-	} catch (error) {
-		console.error('Failed to save workout:', error);
-		alert('Failed to save workout. Please try again.');
-	}
-}
-
-async function loadWorkouts(prefetchedWorkouts = null) {
-	let workouts = [];
-	
-	if (prefetchedWorkouts) {
-		workouts = prefetchedWorkouts;
-	} else if (API_BASE_URL && window.Capacitor) {
-		// Load from backend API
-		try {
-			const res = await apiCall('/api/workouts');
-			if (res.ok) {
-				const data = await res.json();
-				workouts = data.workouts || [];
-			} else {
-				console.error('Failed to load workouts from backend');
-				// Fallback to localStorage
-				workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-			}
-		} catch (error) {
-			console.error('Error loading workouts:', error);
-			// Fallback to localStorage
-			workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+			workouts.push(payload);
 		}
 	} else {
-		// Use localStorage for web mode or if no backend
-		workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		workouts.push(payload);
+	}
+	localStorage.setItem('workouts', JSON.stringify(workouts));
+	
+	// Update streak only for new workouts (not edits)
+	if (!editingWorkoutId) {
+		updateStreak();
 	}
 	
+	editingWorkoutId = null;
+	clearWorkoutDraft();
+	
+	const saveSuccess = document.getElementById('save-success');
+	if (saveSuccess) {
+		saveSuccess.classList.remove('hidden');
+		setTimeout(() => {
+			saveSuccess.classList.add('hidden');
+		}, 2000);
+	}
+	
+	loadWorkouts(workouts);
+	switchTab('workouts');
+}
+
+function loadWorkouts(prefetchedWorkouts = null) {
+	const workouts = prefetchedWorkouts ?? JSON.parse(localStorage.getItem('workouts') || '[]');
 	const workoutsList = document.getElementById('workouts-list');
 	const workoutsCount = document.getElementById('workouts-count');
 	
@@ -1556,13 +1428,13 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 						<div class="workout-summary">${workout.name || 'Workout'}</div>
 						<div class="workout-actions">
 							<button class="workout-reuse-btn" title="Reuse workout">
-								<img src="/refresh-button.png" alt="Reuse" />
+								<img src="/static/refresh-button.png" alt="Reuse" />
 						</button>
 							<button class="workout-edit-btn" title="Inline edit">
-								<img src="/pencil.png" alt="Details" />
+								<img src="/static/pencil.png" alt="Details" />
 						</button>
 							<button class="workout-delete-btn" title="Delete workout">
-								<img src="/close.png" alt="Delete" />
+								<img src="/static/close.png" alt="Delete" />
 						</button>
 					</div>
 				</div>
@@ -1659,13 +1531,13 @@ function buildWorkoutExercisesMarkup(workout) {
 		return `
 			<div class="workout-exercise workout-view-exercise">
 				<div class="workout-view-header">
-					<div class="workout-exercise-main">
-						${buildExerciseThumb(exercise)}
+				<div class="workout-exercise-main">
+					${buildExerciseThumb(exercise)}
 						<div class="workout-exercise-name">${exercise.display || exercise.key || 'Exercise'}</div>
 					</div>
 					<div class="workout-view-actions">
 						${infoButtonHtml}
-					</div>
+				</div>
 				</div>
 				<div class="workout-edit-sets view-mode ${isBodyweight ? 'bodyweight' : ''}">
 					<div class="workout-edit-set-row workout-edit-set-header">
@@ -1747,13 +1619,6 @@ function getExerciseImageCandidates(exercise) {
 	}
 	if (label === 'chinning dipping' || label === 'leg raise tower') {
 		addPath('/images/chinningdipping.jpg');
-	}
-	// Special cases for exercises with specific image file names
-	if (label === 'hip thrust' || exercise.key === 'hip_thrust') {
-		addPath('/images/hiptrust.jpg');
-	}
-	if (label === 'cable kickback' || exercise.key === 'cable_kickback') {
-		addPath('/images/cablekickbacks.jpg');
 	}
 	
 	const displaySlug = slugifyForImage(exercise.display);
@@ -1879,8 +1744,8 @@ function resumeWorkoutDraft() {
 		setWorkoutTimerDisplay(currentWorkout.duration || 0);
 	} else {
 		// New workout - start the timer
-		workoutStartTime = draftStartTime || Date.now();
-		startWorkoutTimer();
+	workoutStartTime = draftStartTime || Date.now();
+	startWorkoutTimer();
 	}
 	
 	const workoutName = document.getElementById('workout-name');
@@ -1954,30 +1819,11 @@ function formatVolume(volumeKg) {
 	return `${Math.round(volumeKg).toLocaleString()} kg`;
 }
 
-async function deleteWorkout(id) {
-	if (!confirm('Are you sure you want to delete this workout?')) {
-		return;
-	}
-	
-	try {
-		if (API_BASE_URL && window.Capacitor) {
-			// Delete from backend
-			const res = await apiCall(`/api/workouts/${id}`, {
-				method: 'DELETE'
-			});
-			if (!res.ok) throw new Error('Failed to delete workout');
-		} else {
-			// Fallback to localStorage
-			const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-			const filtered = workouts.filter(workout => workout.id !== id);
-			localStorage.setItem('workouts', JSON.stringify(filtered));
-		}
-		
-		await loadWorkouts();
-	} catch (error) {
-		console.error('Failed to delete workout:', error);
-		alert('Failed to delete workout. Please try again.');
-	}
+function deleteWorkout(id) {
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	const filtered = workouts.filter(workout => workout.id !== id);
+	localStorage.setItem('workouts', JSON.stringify(filtered));
+	loadWorkouts();
 }
 
 function editWorkout(workout) {
@@ -2066,9 +1912,9 @@ function initProgress() {
 				});
 				// Add the new entry with both date and dayKey for consistency
 				filteredProgress.push({
-					date: now.toISOString(),
+						date: now.toISOString(),
 					dayKey: dayKey, // Ensure dayKey is always set
-					weight: value
+						weight: value
 				});
 				// Ensure all existing entries also have dayKey
 				const normalizedProgress = filteredProgress.map(p => ({
@@ -2325,8 +2171,8 @@ function renderWeightChart(progress) {
 				month: 'short'
 			});
 			xLabelsEl.appendChild(label);
-		});
-	}
+				});
+			}
 	// Store hover points on the canvas for interactive tooltip
 	canvas.__weightPoints = hoverPoints;
 
@@ -2423,17 +2269,17 @@ async function renderMuscleFocus(workouts) {
 		// Show all workouts regardless of date
 		filtered = workouts;
 	} else {
-		const now = new Date();
-		const msPerDay = 24 * 60 * 60 * 1000;
-		let days = 7;
-		if (range === 'month') days = 30;
-		else if (range === 'year') days = 365;
-		const cutoff = now.getTime() - days * msPerDay;
+	const now = new Date();
+	const msPerDay = 24 * 60 * 60 * 1000;
+	let days = 7;
+	if (range === 'month') days = 30;
+	else if (range === 'year') days = 365;
+	const cutoff = now.getTime() - days * msPerDay;
 
 		filtered = workouts.filter(w => {
-			const d = new Date(w.date || now);
-			return d.getTime() >= cutoff;
-		});
+		const d = new Date(w.date || now);
+		return d.getTime() >= cutoff;
+	});
 	}
 
 	if (!filtered.length) {
@@ -2442,36 +2288,44 @@ async function renderMuscleFocus(workouts) {
 	}
 	if (empty) empty.classList.add('hidden');
 
-	// First, fill in missing muscle data from allExercises (local data)
+	// First, fetch missing muscle data for exercises that don't have it
+	const exercisesNeedingMuscles = [];
 	filtered.forEach(workout => {
 		(workout.exercises || []).forEach(ex => {
 			if (!ex.muscles || ex.muscles.length === 0) {
-				// Try to find muscle data from allExercises
-				const exerciseKey = ex.key || ex.display;
-				const foundExercise = allExercises.find(e => 
-					(e.key === exerciseKey) || 
-					(e.display === exerciseKey) ||
-					(e.display === ex.display) ||
-					(e.key === ex.key)
-				);
-				if (foundExercise && foundExercise.muscles && foundExercise.muscles.length > 0) {
-					ex.muscles = foundExercise.muscles;
-					// Update in localStorage
-					const allWorkouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-					const workoutIndex = allWorkouts.findIndex(w => w.id === workout.id);
-					if (workoutIndex >= 0) {
-						const exIndex = allWorkouts[workoutIndex].exercises.findIndex(e => 
-							(e.key || e.display) === (ex.key || ex.display)
-						);
-						if (exIndex >= 0) {
-							allWorkouts[workoutIndex].exercises[exIndex].muscles = foundExercise.muscles;
-							localStorage.setItem('workouts', JSON.stringify(allWorkouts));
-						}
-					}
-				}
+				exercisesNeedingMuscles.push({ exercise: ex, workout: workout });
 			}
 		});
 	});
+	
+	// Fetch all missing muscle data in parallel
+	await Promise.all(exercisesNeedingMuscles.map(async ({ exercise, workout }) => {
+		try {
+			const res = await fetch('/exercise-info', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ exercise: exercise.key || exercise.display })
+			});
+			const data = await res.json();
+			if (data.muscles && data.muscles.length > 0) {
+				exercise.muscles = data.muscles;
+				// Update in localStorage
+				const allWorkouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+				const workoutIndex = allWorkouts.findIndex(w => w.id === workout.id);
+				if (workoutIndex >= 0) {
+					const exIndex = allWorkouts[workoutIndex].exercises.findIndex(e => 
+						(e.key || e.display) === (exercise.key || exercise.display)
+					);
+					if (exIndex >= 0) {
+						allWorkouts[workoutIndex].exercises[exIndex].muscles = data.muscles;
+						localStorage.setItem('workouts', JSON.stringify(allWorkouts));
+					}
+				}
+			}
+		} catch (e) {
+			console.error('Failed to fetch exercise muscles:', e);
+		}
+	}));
 	
 	// Now calculate muscle totals
 	const muscleTotals = {};
@@ -2661,34 +2515,34 @@ function handleExerciseInsightsForName(name) {
 		`;
 	} else {
 		// Find best sets for weighted exercises
-		let bestWeightSet = null;
-		let bestVolumeSet = null;
-		allSets.forEach(s => {
-			const volume = (s.weight || 0) * (s.reps || 0);
-			if (!bestWeightSet || s.weight > bestWeightSet.weight) {
-				bestWeightSet = { ...s, volume };
-			}
-			if (!bestVolumeSet || volume > bestVolumeSet.volume) {
-				bestVolumeSet = { ...s, volume };
-			}
-		});
+	let bestWeightSet = null;
+	let bestVolumeSet = null;
+	allSets.forEach(s => {
+		const volume = (s.weight || 0) * (s.reps || 0);
+		if (!bestWeightSet || s.weight > bestWeightSet.weight) {
+			bestWeightSet = { ...s, volume };
+		}
+		if (!bestVolumeSet || volume > bestVolumeSet.volume) {
+			bestVolumeSet = { ...s, volume };
+		}
+	});
 
-		results.innerHTML = `
-			<div class="progress-pr-result">
-				<div class="progress-pr-result-title">Top weight set</div>
-				<div class="progress-pr-result-meta">
-					<span><strong>${entry.name}</strong></span>
-					<span>${bestWeightSet.weight} kg × ${bestWeightSet.reps}</span>
-				</div>
+	results.innerHTML = `
+		<div class="progress-pr-result">
+			<div class="progress-pr-result-title">Top weight set</div>
+			<div class="progress-pr-result-meta">
+				<span><strong>${entry.name}</strong></span>
+				<span>${bestWeightSet.weight} kg × ${bestWeightSet.reps}</span>
 			</div>
-			<div class="progress-pr-result">
-				<div class="progress-pr-result-title">Top volume set</div>
-				<div class="progress-pr-result-meta">
-					<span><strong>${entry.name}</strong></span>
-					<span>${bestVolumeSet.weight} kg × ${bestVolumeSet.reps} (${bestVolumeSet.volume} kg)</span>
-				</div>
+		</div>
+		<div class="progress-pr-result">
+			<div class="progress-pr-result-title">Top volume set</div>
+			<div class="progress-pr-result-meta">
+				<span><strong>${entry.name}</strong></span>
+				<span>${bestVolumeSet.weight} kg × ${bestVolumeSet.reps} (${bestVolumeSet.volume} kg)</span>
 			</div>
-		`;
+		</div>
+	`;
 	}
 
 	// Chart removed for now – only cards shown
@@ -2925,14 +2779,8 @@ function initSettings() {
 		logoutBtn.addEventListener('click', async () => {
 			if (confirm('Are you sure you want to log out?')) {
 				try {
-					if (!window.Capacitor) {
-						await fetch(`${API_BASE_URL}/logout`, { method: 'POST' });
-						window.location.href = '/login';
-					} else {
-						// In native app, just clear local storage
-						localStorage.clear();
-						console.log('Logged out (native app)');
-					}
+					await fetch('/logout', { method: 'POST' });
+					window.location.href = '/login';
 				} catch (e) {
 					console.error('Logout failed:', e);
 				}
@@ -2942,17 +2790,8 @@ function initSettings() {
 }
 
 function loadSettings() {
-	// Skip in Capacitor native app (no backend server)
-	if (window.Capacitor) {
-		const usernameEl = document.getElementById('settings-username');
-		const emailEl = document.getElementById('settings-email');
-		if (usernameEl) usernameEl.textContent = 'Native App User';
-		if (emailEl) emailEl.textContent = '—';
-		return;
-	}
-	
 	// Load user info
-	fetch(`${API_BASE_URL}/check-auth`)
+	fetch('/check-auth')
 		.then(res => res.json())
 		.then(data => {
 			if (data.authenticated) {
@@ -2982,7 +2821,7 @@ function initVision() {
 		});
 	}
 	
-		if (sendBtn && input) {
+	if (sendBtn && input) {
 		const sendMessage = async () => {
 			const message = input.value.trim();
 			if (!message) return;
@@ -3004,7 +2843,7 @@ function initVision() {
 					}
 					: null;
 				
-				const res = await fetch(`${API_BASE_URL}/chat`, {
+				const res = await fetch('/chat', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ 
@@ -3213,27 +3052,12 @@ function initExerciseCard() {
 
 // ========== UTILITY FUNCTIONS ==========
 async function loadExercises() {
-	// In Capacitor native app, load from local JSON file
-	if (window.Capacitor) {
-		try {
-			const res = await fetch('./exercises.json');
-			const data = await res.json();
-			allExercises = data.exercises || [];
-			console.log(`Loaded ${allExercises.length} exercises from local file`);
-		} catch (e) {
-			console.error('Failed to load exercises from local file:', e);
-			allExercises = [];
-		}
-	} else {
-		// In web mode, load from server
-		try {
-			const res = await fetch(`${API_BASE_URL}/exercises`);
-			const data = await res.json();
-			allExercises = data.exercises || [];
-		} catch (e) {
-			console.error('Failed to load exercises:', e);
-			allExercises = [];
-		}
+	try {
+		const res = await fetch('/exercises');
+		const data = await res.json();
+		allExercises = data.exercises || [];
+	} catch (e) {
+		console.error('Failed to load exercises:', e);
 	}
 }
 
