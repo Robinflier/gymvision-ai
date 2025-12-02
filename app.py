@@ -630,8 +630,12 @@ def login():
 		conn.close()
 		
 		if user and check_password_hash(user["password_hash"], password):
-			# Check if email is verified
-			if not user["email_verified"]:
+			# For native app, skip email verification check
+			# For web, require email verification
+			is_native = 'capacitor' in request.headers.get('User-Agent', '').lower() or \
+			            request.headers.get('X-Capacitor', '') == 'true'
+			
+			if not is_native and not user["email_verified"]:
 				return jsonify({
 					"error": "Email not verified. Please verify your email first.",
 					"needs_verification": True,
@@ -678,44 +682,63 @@ def register():
 				conn.close()
 				return jsonify({"error": "Email or username already exists"}), 400
 			
-			# Create new user (not verified yet)
+			# Check if this is a native app request
+			is_native = 'capacitor' in request.headers.get('User-Agent', '').lower() or \
+			            request.headers.get('X-Capacitor', '') == 'true'
+			
+			# For native app, auto-verify email. For web, require verification.
+			email_verified = 1 if is_native else 0
+			
+			# Create new user
 			password_hash = generate_password_hash(password)
 			cursor = conn.execute(
-				"INSERT INTO users (email, username, password_hash, email_verified) VALUES (?, ?, ?, 0)",
-				(email, username, password_hash)
+				"INSERT INTO users (email, username, password_hash, email_verified) VALUES (?, ?, ?, ?)",
+				(email, username, password_hash, email_verified)
 			)
 			conn.commit()
 			user_id = cursor.lastrowid
 			
-			# Generate and save verification code
-			code = generate_verification_code()
-			from datetime import timedelta
-			expires_at = (datetime.now() + timedelta(minutes=10)).isoformat()
-			conn.execute(
-				"INSERT INTO verification_codes (email, code, expires_at) VALUES (?, ?, ?)",
-				(email, code, expires_at)
-			)
-			conn.commit()
-			conn.close()
-			
-			# Send verification email
-			email_sent = send_verification_email(email, code)
-			if email_sent:
+			if is_native:
+				# Native app: auto-login after registration
+				conn.close()
+				user_obj = User(user_id, email, username)
+				login_user(user_obj, remember=True)
 				return jsonify({
 					"success": True,
-					"message": "Account created. Please check your email for verification code.",
+					"message": "Account created successfully",
 					"email": email
 				})
 			else:
-				# For development: return code in response if email fails
-				# TODO: Remove this in production!
-				print(f"[DEBUG] Email failed. Verification code for {email}: {code}")
-				return jsonify({
-					"success": True,
-					"message": f"Account created. Email could not be sent. Your verification code is: {code}",
-					"email": email,
-					"code": code  # Only for development!
-				})
+				# Web: require email verification
+				# Generate and save verification code
+				code = generate_verification_code()
+				from datetime import timedelta
+				expires_at = (datetime.now() + timedelta(minutes=10)).isoformat()
+				conn.execute(
+					"INSERT INTO verification_codes (email, code, expires_at) VALUES (?, ?, ?)",
+					(email, code, expires_at)
+				)
+				conn.commit()
+				conn.close()
+				
+				# Send verification email
+				email_sent = send_verification_email(email, code)
+				if email_sent:
+					return jsonify({
+						"success": True,
+						"message": "Account created. Please check your email for verification code.",
+						"email": email
+					})
+				else:
+					# For development: return code in response if email fails
+					# TODO: Remove this in production!
+					print(f"[DEBUG] Email failed. Verification code for {email}: {code}")
+					return jsonify({
+						"success": True,
+						"message": f"Account created. Email could not be sent. Your verification code is: {code}",
+						"email": email,
+						"code": code  # Only for development!
+					})
 		except sqlite3.IntegrityError:
 			conn.close()
 			return jsonify({"error": "Email or username already exists"}), 400
