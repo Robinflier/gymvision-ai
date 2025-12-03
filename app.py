@@ -837,6 +837,11 @@ def reset_password_redirect():
 			<button id="openAppBtn" class="button" style="display: none;">Open GymVision AI App</button>
 		</div>
 		<script>
+			console.log('Reset password page loaded');
+			console.log('Full URL:', window.location.href);
+			console.log('Hash:', window.location.hash);
+			console.log('Search:', window.location.search);
+			
 			// Read hash from URL (Supabase sends tokens in hash)
 			const hash = window.location.hash.substring(1);
 			const search = window.location.search.substring(1);
@@ -848,18 +853,22 @@ def reset_password_redirect():
 			let token = null; // For verify token format
 			
 			if (hash) {
+				console.log('Parsing hash:', hash);
 				const hashParams = new URLSearchParams(hash);
 				accessToken = hashParams.get('access_token');
 				refreshToken = hashParams.get('refresh_token');
 				type = hashParams.get('type');
+				console.log('From hash - accessToken:', accessToken ? 'found' : 'not found', 'type:', type);
 			}
 			
 			if (search && !accessToken) {
+				console.log('Parsing search:', search);
 				const searchParams = new URLSearchParams(search);
 				accessToken = searchParams.get('access_token');
 				refreshToken = searchParams.get('refresh_token');
 				type = searchParams.get('type');
 				token = searchParams.get('token'); // Verify token format
+				console.log('From search - accessToken:', accessToken ? 'found' : 'not found', 'type:', type);
 			}
 			
 			// Build deep link for mobile app
@@ -867,26 +876,38 @@ def reset_password_redirect():
 			
 			if (type === 'recovery' && accessToken) {
 				// Standard Supabase format with access_token
+				// Use hash format for deep link (Supabase style)
 				deepLink = `gymvisionai://reset-password#access_token=${encodeURIComponent(accessToken)}&type=recovery${refreshToken ? '&refresh_token=' + encodeURIComponent(refreshToken) : ''}`;
+				console.log('Built deep link with access_token');
 			} else if (token && type === 'recovery') {
 				// Verify token format
 				deepLink = `gymvisionai://reset-password?token=${encodeURIComponent(token)}&type=recovery`;
+				console.log('Built deep link with verify token');
 			}
 			
 			if (deepLink) {
+				console.log('Deep link:', deepLink.substring(0, 100) + '...');
+				
+				// Update status
+				document.getElementById('status').textContent = 'Opening GymVision AI app...';
+				
 				// Try to open the app immediately
 				window.location.href = deepLink;
 				
-				// Show button as fallback
+				// Show button as fallback after 2 seconds
 				setTimeout(function() {
 					document.getElementById('status').textContent = 'If the app didn\'t open automatically, click the button below:';
 					document.getElementById('openAppBtn').style.display = 'inline-block';
 					document.getElementById('openAppBtn').onclick = function() {
+						console.log('Button clicked, opening:', deepLink.substring(0, 100) + '...');
 						window.location.href = deepLink;
 					};
-				}, 1000);
+				}, 2000);
 			} else {
 				// No valid token found
+				console.error('No valid token found in URL');
+				console.error('Hash:', hash);
+				console.error('Search:', search);
 				document.getElementById('status').textContent = 'Invalid or expired reset link. Please request a new one.';
 				document.getElementById('openAppBtn').style.display = 'none';
 			}
