@@ -785,6 +785,103 @@ def verify_email():
 	return render_template("verify.html", email=email)
 
 
+@app.route("/reset-password", methods=["GET"])
+def reset_password_redirect():
+	"""Redirect password reset token to mobile app deep link."""
+	token = request.args.get("token")
+	type_param = request.args.get("type")
+	
+	# If this is a recovery token from Supabase
+	if token and type_param == "recovery":
+		# Redirect to mobile app deep link
+		# The app will handle the token and show reset password screen
+		deep_link = f"gymvisionai://reset-password?token={token}&type={type_param}"
+		
+		# Return HTML that redirects to the deep link
+		# This works when opened in a browser - it will try to open the app
+		return f"""
+		<!DOCTYPE html>
+		<html>
+		<head>
+			<meta charset="utf-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1">
+			<title>Reset Password - GymVision AI</title>
+			<style>
+				body {{
+					font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+					display: flex;
+					align-items: center;
+					justify-content: center;
+					min-height: 100vh;
+					margin: 0;
+					background: #0f0f10;
+					color: #fff;
+				}}
+				.container {{
+					text-align: center;
+					padding: 20px;
+				}}
+				.button {{
+					display: inline-block;
+					padding: 14px 28px;
+					background: #7c5cff;
+					color: #fff;
+					text-decoration: none;
+					border-radius: 12px;
+					font-weight: 600;
+					margin-top: 20px;
+				}}
+			</style>
+		</head>
+		<body>
+			<div class="container">
+				<h1>Reset Your Password</h1>
+				<p>Opening GymVision AI app...</p>
+				<a href="{deep_link}" class="button">Open App</a>
+				<script>
+					// Try to open the app immediately
+					window.location.href = "{deep_link}";
+					
+					// Fallback: if app doesn't open, show button
+					setTimeout(function() {{
+						document.querySelector('.button').style.display = 'inline-block';
+					}}, 1000);
+				</script>
+			</div>
+		</body>
+		</html>
+		"""
+	
+	# If no token, show error
+	return """
+	<!DOCTYPE html>
+	<html>
+	<head>
+		<meta charset="utf-8">
+		<title>Invalid Reset Link</title>
+		<style>
+			body {
+				font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				min-height: 100vh;
+				margin: 0;
+				background: #0f0f10;
+				color: #fff;
+			}
+		</style>
+	</head>
+	<body>
+		<div>
+			<h1>Invalid Reset Link</h1>
+			<p>The password reset link is invalid or has expired.</p>
+		</div>
+	</body>
+	</html>
+	""", 400
+
+
 @app.route("/resend-code", methods=["POST"])
 def resend_verification_code():
 	"""Resend verification code."""
