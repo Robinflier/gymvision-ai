@@ -10,11 +10,26 @@ from collections import defaultdict
 from difflib import get_close_matches
 from werkzeug.security import generate_password_hash, check_password_hash
 
+# Load environment variables from .env file (for local development)
+try:
+	from dotenv import load_dotenv
+	load_dotenv()
+except ImportError:
+	# python-dotenv not installed, continue without it
+	pass
+
 from flask import Flask, jsonify, render_template, request, send_from_directory, redirect, url_for, flash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_mail import Mail, Message
 from flask_cors import CORS
 import secrets
+
+try:
+	from supabase import create_client, Client
+	SUPABASE_AVAILABLE = True
+except Exception:
+	SUPABASE_AVAILABLE = False
+	Client = None
 
 try:
 	from ultralytics import YOLO  # type: ignore
@@ -131,8 +146,8 @@ app = Flask(
 )
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production-2024")  # Change in production!
 
-# Enable CORS for native app API calls
-CORS(app, resources={r"/*": {"origins": "*"}})
+# Enable CORS for all routes (needed for Capacitor/iOS app)
+CORS(app, resources={r"/api/*": {"origins": "*"}, r"/*": {"origins": "*"}})
 
 # Flask-Mail setup
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
@@ -482,26 +497,6 @@ def init_db():
 			expires_at TIMESTAMP
 		)
 	""")
-	cursor.execute("""
-		CREATE TABLE IF NOT EXISTS workouts (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			user_id INTEGER NOT NULL,
-			name TEXT NOT NULL,
-			date TEXT NOT NULL,
-			exercises TEXT NOT NULL,
-			duration INTEGER,
-			volume REAL,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-		)
-	""")
-	# Create index for faster queries
-	try:
-		cursor.execute("CREATE INDEX IF NOT EXISTS idx_workouts_user_id ON workouts(user_id)")
-		cursor.execute("CREATE INDEX IF NOT EXISTS idx_workouts_date ON workouts(date)")
-	except sqlite3.OperationalError:
-		pass  # Indexes might already exist
 	conn.commit()
 	conn.close()
 	print("[INFO] Database initialized")
@@ -630,12 +625,8 @@ def login():
 		conn.close()
 		
 		if user and check_password_hash(user["password_hash"], password):
-			# For native app, skip email verification check
-			# For web, require email verification
-			is_native = 'capacitor' in request.headers.get('User-Agent', '').lower() or \
-			            request.headers.get('X-Capacitor', '') == 'true'
-			
-			if not is_native and not user["email_verified"]:
+			# Check if email is verified
+			if not user["email_verified"]:
 				return jsonify({
 					"error": "Email not verified. Please verify your email first.",
 					"needs_verification": True,
@@ -651,7 +642,11 @@ def login():
 	# GET request - show login page
 	if current_user.is_authenticated:
 		return redirect(url_for("index"))
-	return render_template("login.html")
+	# Load Supabase config from environment variables (safe to expose - these are public anon keys)
+	# Ensure we always pass strings, never None
+	supabase_url = os.getenv("SUPABASE_URL") or ""
+	supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or ""
+	return render_template("login.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -682,63 +677,44 @@ def register():
 				conn.close()
 				return jsonify({"error": "Email or username already exists"}), 400
 			
-			# Check if this is a native app request
-			is_native = 'capacitor' in request.headers.get('User-Agent', '').lower() or \
-			            request.headers.get('X-Capacitor', '') == 'true'
-			
-			# For native app, auto-verify email. For web, require verification.
-			email_verified = 1 if is_native else 0
-			
-			# Create new user
+			# Create new user (not verified yet)
 			password_hash = generate_password_hash(password)
 			cursor = conn.execute(
-				"INSERT INTO users (email, username, password_hash, email_verified) VALUES (?, ?, ?, ?)",
-				(email, username, password_hash, email_verified)
+				"INSERT INTO users (email, username, password_hash, email_verified) VALUES (?, ?, ?, 0)",
+				(email, username, password_hash)
 			)
 			conn.commit()
 			user_id = cursor.lastrowid
 			
-			if is_native:
-				# Native app: auto-login after registration
-				conn.close()
-				user_obj = User(user_id, email, username)
-				login_user(user_obj, remember=True)
+			# Generate and save verification code
+			code = generate_verification_code()
+			from datetime import timedelta
+			expires_at = (datetime.now() + timedelta(minutes=10)).isoformat()
+			conn.execute(
+				"INSERT INTO verification_codes (email, code, expires_at) VALUES (?, ?, ?)",
+				(email, code, expires_at)
+			)
+			conn.commit()
+			conn.close()
+			
+			# Send verification email
+			email_sent = send_verification_email(email, code)
+			if email_sent:
 				return jsonify({
 					"success": True,
-					"message": "Account created successfully",
+					"message": "Account created. Please check your email for verification code.",
 					"email": email
 				})
 			else:
-				# Web: require email verification
-				# Generate and save verification code
-				code = generate_verification_code()
-				from datetime import timedelta
-				expires_at = (datetime.now() + timedelta(minutes=10)).isoformat()
-				conn.execute(
-					"INSERT INTO verification_codes (email, code, expires_at) VALUES (?, ?, ?)",
-					(email, code, expires_at)
-				)
-				conn.commit()
-				conn.close()
-				
-				# Send verification email
-				email_sent = send_verification_email(email, code)
-				if email_sent:
-					return jsonify({
-						"success": True,
-						"message": "Account created. Please check your email for verification code.",
-						"email": email
-					})
-				else:
-					# For development: return code in response if email fails
-					# TODO: Remove this in production!
-					print(f"[DEBUG] Email failed. Verification code for {email}: {code}")
-					return jsonify({
-						"success": True,
-						"message": f"Account created. Email could not be sent. Your verification code is: {code}",
-						"email": email,
-						"code": code  # Only for development!
-					})
+				# For development: return code in response if email fails
+				# TODO: Remove this in production!
+				print(f"[DEBUG] Email failed. Verification code for {email}: {code}")
+				return jsonify({
+					"success": True,
+					"message": f"Account created. Email could not be sent. Your verification code is: {code}",
+					"email": email,
+					"code": code  # Only for development!
+				})
 		except sqlite3.IntegrityError:
 			conn.close()
 			return jsonify({"error": "Email or username already exists"}), 400
@@ -746,7 +722,11 @@ def register():
 	# GET request - show register page
 	if current_user.is_authenticated:
 		return redirect(url_for("index"))
-	return render_template("register.html")
+	# Load Supabase config from environment variables (safe to expose - these are public anon keys)
+	# Ensure we always pass strings, never None
+	supabase_url = os.getenv("SUPABASE_URL") or ""
+	supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or ""
+	return render_template("register.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
 
 
 @app.route("/verify", methods=["GET", "POST"])
@@ -870,215 +850,57 @@ def check_auth():
 	return jsonify({"authenticated": False})
 
 
-@app.route("/native-login", methods=["POST"])
-def native_login():
-	"""Auto-login endpoint for native app - creates/uses a default native user."""
-	# Check if native user exists, create if not
-	conn = get_db_connection()
-	cursor = conn.cursor()
+@app.route("/user", methods=["GET"])
+def get_user():
+	"""Get current user from Supabase JWT token."""
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
 	
-	# Look for native user
-	cursor.execute("SELECT id, email, username FROM users WHERE email = ?", ("native@app.local",))
-	user = cursor.fetchone()
+	# Get Authorization header
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Missing or invalid Authorization header"}), 401
 	
-	if not user:
-		# Create native user
-		import secrets
-		password_hash = generate_password_hash(secrets.token_urlsafe(32))
-		cursor.execute(
-			"INSERT INTO users (email, username, password_hash) VALUES (?, ?, ?)",
-			("native@app.local", "Native App User", password_hash)
-		)
-		conn.commit()
-		user_id = cursor.lastrowid
-		username = "Native App User"
-	else:
-		user_id = user[0]
-		username = user[2]
+	# Extract access token
+	access_token = auth_header.replace("Bearer ", "").strip()
+	if not access_token:
+		return jsonify({"error": "Missing access token"}), 401
 	
-	conn.close()
+	# Initialize Supabase client - load from environment variables only
+	SUPABASE_URL = os.getenv("SUPABASE_URL")
+	SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 	
-	# Login the user
-	user_obj = User(user_id, "native@app.local", username)
-	login_user(user_obj, remember=True)
+	if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+		return jsonify({"error": "Supabase configuration missing. Set SUPABASE_URL and SUPABASE_ANON_KEY environment variables."}), 500
 	
-	return jsonify({
-		"success": True,
-		"authenticated": True,
-		"username": username,
-		"email": "native@app.local"
-	})
-
-
-# ========== WORKOUTS API ==========
-
-def get_current_user_id():
-	"""Get current user ID, supporting both web and native app."""
-	if current_user.is_authenticated:
-		return current_user.id
-	
-	# For native app, try to get user from session or auto-login
-	# Check if there's a native user session
-	from flask import session
-	if 'user_id' in session:
-		return session['user_id']
-	
-	# Try to auto-login for native app
 	try:
-		conn = get_db_connection()
-		user = conn.execute(
-			"SELECT id FROM users WHERE email = ?", ("native@app.local",)
-		).fetchone()
-		conn.close()
-		if user:
-			# Create a minimal user object
-			user_obj = User(user[0], "native@app.local", "Native App User")
-			login_user(user_obj, remember=True)
-			return user_obj.id
-	except:
-		pass
-	
-	return None
-
-@app.route("/api/workouts", methods=["GET"])
-def get_workouts():
-	"""Get all workouts for the current user."""
-	user_id = get_current_user_id()
-	if not user_id:
-		return jsonify({"error": "Not authenticated"}), 401
-	
-	conn = get_db_connection()
-	workouts = conn.execute(
-		"SELECT id, name, date, exercises, duration, volume, created_at, updated_at FROM workouts WHERE user_id = ? ORDER BY date DESC",
-		(user_id,)
-	).fetchall()
-	conn.close()
-	
-	result = []
-	for w in workouts:
-		result.append({
-			"id": w["id"],
-			"name": w["name"],
-			"date": w["date"],
-			"exercises": json.loads(w["exercises"]),
-			"duration": w["duration"],
-			"volume": w["volume"]
-		})
-	
-	return jsonify({"workouts": result})
-
-
-@app.route("/api/workouts", methods=["POST"])
-def create_workout():
-	"""Create a new workout for the current user."""
-	user_id = get_current_user_id()
-	if not user_id:
-		return jsonify({"error": "Not authenticated"}), 401
-	
-	data = request.get_json()
-	if not data:
-		return jsonify({"error": "No data provided"}), 400
-	
-	name = data.get("name", "").strip()
-	date = data.get("date")
-	exercises = data.get("exercises", [])
-	duration = data.get("duration")
-	volume = data.get("volume")
-	
-	if not name or not date or not exercises:
-		return jsonify({"error": "Name, date, and exercises are required"}), 400
-	
-	conn = get_db_connection()
-	cursor = conn.execute(
-		"INSERT INTO workouts (user_id, name, date, exercises, duration, volume) VALUES (?, ?, ?, ?, ?, ?)",
-		(user_id, name, date, json.dumps(exercises), duration, volume)
-	)
-	workout_id = cursor.lastrowid
-	conn.commit()
-	conn.close()
-	
-	return jsonify({"success": True, "id": workout_id}), 201
-
-
-@app.route("/api/workouts/<int:workout_id>", methods=["PUT"])
-def update_workout(workout_id):
-	"""Update an existing workout."""
-	user_id = get_current_user_id()
-	if not user_id:
-		return jsonify({"error": "Not authenticated"}), 401
-	
-	# Check if workout belongs to user
-	conn = get_db_connection()
-	workout = conn.execute(
-		"SELECT user_id FROM workouts WHERE id = ?", (workout_id,)
-	).fetchone()
-	
-	if not workout:
-		conn.close()
-		return jsonify({"error": "Workout not found"}), 404
-	
-	if workout["user_id"] != user_id:
-		conn.close()
-		return jsonify({"error": "Unauthorized"}), 403
-	
-	data = request.get_json()
-	if not data:
-		return jsonify({"error": "No data provided"}), 400
-	
-	name = data.get("name", "").strip()
-	date = data.get("date")
-	exercises = data.get("exercises", [])
-	duration = data.get("duration")
-	volume = data.get("volume")
-	
-	if not name or not date or not exercises:
-		conn.close()
-		return jsonify({"error": "Name, date, and exercises are required"}), 400
-	
-	conn.execute(
-		"UPDATE workouts SET name = ?, date = ?, exercises = ?, duration = ?, volume = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-		(name, date, json.dumps(exercises), duration, volume, workout_id)
-	)
-	conn.commit()
-	conn.close()
-	
-	return jsonify({"success": True})
-
-
-@app.route("/api/workouts/<int:workout_id>", methods=["DELETE"])
-def delete_workout(workout_id):
-	"""Delete a workout."""
-	user_id = get_current_user_id()
-	if not user_id:
-		return jsonify({"error": "Not authenticated"}), 401
-	
-	# Check if workout belongs to user
-	conn = get_db_connection()
-	workout = conn.execute(
-		"SELECT user_id FROM workouts WHERE id = ?", (workout_id,)
-	).fetchone()
-	
-	if not workout:
-		conn.close()
-		return jsonify({"error": "Workout not found"}), 404
-	
-	if workout["user_id"] != user_id:
-		conn.close()
-		return jsonify({"error": "Unauthorized"}), 403
-	
-	conn.execute("DELETE FROM workouts WHERE id = ?", (workout_id,))
-	conn.commit()
-	conn.close()
-	
-	return jsonify({"success": True})
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if user_response.user:
+			return jsonify({
+				"id": user_response.user.id,
+				"email": user_response.user.email,
+				"user_metadata": user_response.user.user_metadata or {},
+				"authenticated": True
+			})
+		else:
+			return jsonify({"error": "Invalid token"}), 401
+	except Exception as e:
+		print(f"Error verifying user: {e}")
+		return jsonify({"error": "Failed to verify user", "details": str(e)}), 401
 
 
 # ========== MAIN APP ROUTES ==========
 
 @app.route("/")
-@login_required
 def index():
-	return render_template("index.html")
+	"""Main app page - authentication handled by frontend."""
+	# Load Supabase config from environment variables (safe to expose - these are public anon keys)
+	# Ensure we always pass strings, never None
+	supabase_url = os.getenv("SUPABASE_URL") or ""
+	supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or ""
+	return render_template("index.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
 
 
 @app.route("/logo.png")
@@ -1202,8 +1024,8 @@ def _serialize_prediction_choice(pred: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @app.route("/predict", methods=["POST"])
-@login_required
 def predict():
+	# Public endpoint - authentication handled by frontend via Supabase
 	file = request.files.get("image")
 	if not file:
 		return jsonify({"error": "No image provided"}), 400
@@ -1215,135 +1037,73 @@ def predict():
 
 	model, model1, model2, model3, model4 = get_models()
 	
-	# Get predictions from all available models
+	# Get predictions from all models (best.pt, best1.pt, best2.pt, best3.pt, best4.pt)
 	predictions = []
 	
-	# Model 1
+	# Helper function to get top predictions from a model
+	def get_model_predictions(model_obj, model_name, max_predictions=3):
+		model_preds = []
+		try:
+			results = model_obj.predict(source=str(tmp_path), verbose=False)
+			best = results[0]
+			
+			if hasattr(best, "probs") and best.probs is not None:
+				# Classification model - get top predictions
+				probs = best.probs.data
+				top_indices = probs.topk(min(max_predictions, len(best.names))).indices.tolist()
+				top_confs = probs.topk(min(max_predictions, len(best.names))).values.tolist()
+				
+				for idx, conf in zip(top_indices, top_confs):
+					label = best.names[int(idx)]
+					norm = normalize_label(label)
+					key = ALIASES.get(norm, norm)
+					model_preds.append({"label": label, "conf": float(conf), "key": key, "source": model_name})
+			elif len(best.boxes) > 0:  # type: ignore[attr-defined]
+				# Detection model - get top predictions by confidence
+				confidences = best.boxes.conf.tolist()  # type: ignore[attr-defined]
+				classes = best.boxes.cls.tolist()  # type: ignore[attr-defined]
+				
+				# Combine and sort by confidence
+				box_predictions = []
+				for i, (conf, cls_idx) in enumerate(zip(confidences, classes)):
+					label = best.names[int(cls_idx)]
+					norm = normalize_label(label)
+					key = ALIASES.get(norm, norm)
+					box_predictions.append({"label": label, "conf": float(conf), "key": key, "source": model_name, "index": i})
+				
+				# Sort by confidence and get top unique keys
+				box_predictions.sort(key=lambda x: x["conf"], reverse=True)
+				seen_keys = set()
+				for pred in box_predictions:
+					if pred["key"] not in seen_keys:
+						model_preds.append(pred)
+						seen_keys.add(pred["key"])
+						if len(model_preds) >= max_predictions:
+							break
+		except Exception as e:
+			print(f"[ERROR] Model {model_name} prediction failed: {e}")
+			import traceback
+			traceback.print_exc()
+		return model_preds
+	
+	# Get predictions from all available models
 	if model:
-		try:
-			results = model.predict(source=str(tmp_path), verbose=False)
-			best = results[0]
-			label = None
-			conf = None
-			if hasattr(best, "probs") and best.probs is not None:
-				idx = int(best.probs.top1)
-				conf = float(best.probs.top1conf)
-				label = best.names[idx]
-			elif len(best.boxes) > 0:  # type: ignore[attr-defined]
-				confidences = best.boxes.conf.tolist()  # type: ignore[attr-defined]
-				idx = int(confidences.index(max(confidences)))
-				cls_idx = int(best.boxes.cls[idx])  # type: ignore[attr-defined]
-				label = best.names[cls_idx]
-				conf = float(confidences[idx])
-			if label and conf is not None:
-				norm = normalize_label(label)
-				key = ALIASES.get(norm, norm)
-				predictions.append({"label": label, "conf": conf, "key": key, "source": "best"})
-		except Exception:
-			pass
-	
-	# Model 1 (best1.pt)
+		predictions.extend(get_model_predictions(model, "best"))
 	if model1:
-		try:
-			results = model1.predict(source=str(tmp_path), verbose=False)
-			best = results[0]
-			label = None
-			conf = None
-			if hasattr(best, "probs") and best.probs is not None:
-				idx = int(best.probs.top1)
-				conf = float(best.probs.top1conf)
-				label = best.names[idx]
-			elif len(best.boxes) > 0:  # type: ignore[attr-defined]
-				confidences = best.boxes.conf.tolist()  # type: ignore[attr-defined]
-				idx = int(confidences.index(max(confidences)))
-				cls_idx = int(best.boxes.cls[idx])  # type: ignore[attr-defined]
-				label = best.names[cls_idx]
-				conf = float(confidences[idx])
-			if label and conf is not None:
-				norm = normalize_label(label)
-				key = ALIASES.get(norm, norm)
-				predictions.append({"label": label, "conf": conf, "key": key, "source": "best1"})
-		except Exception:
-			pass
-	
-	# Model 2
+		predictions.extend(get_model_predictions(model1, "best1"))
 	if model2:
-		try:
-			results = model2.predict(source=str(tmp_path), verbose=False)
-			best = results[0]
-			label = None
-			conf = None
-			if hasattr(best, "probs") and best.probs is not None:
-				idx = int(best.probs.top1)
-				conf = float(best.probs.top1conf)
-				label = best.names[idx]
-			elif len(best.boxes) > 0:  # type: ignore[attr-defined]
-				confidences = best.boxes.conf.tolist()  # type: ignore[attr-defined]
-				idx = int(confidences.index(max(confidences)))
-				cls_idx = int(best.boxes.cls[idx])  # type: ignore[attr-defined]
-				label = best.names[cls_idx]
-				conf = float(confidences[idx])
-			if label and conf is not None:
-				norm = normalize_label(label)
-				key = ALIASES.get(norm, norm)
-				predictions.append({"label": label, "conf": conf, "key": key, "source": "best2"})
-		except Exception:
-			pass
-	
-	# Model 3
+		predictions.extend(get_model_predictions(model2, "best2"))
 	if model3:
-		try:
-			results = model3.predict(source=str(tmp_path), verbose=False)
-			best = results[0]
-			label = None
-			conf = None
-			if hasattr(best, "probs") and best.probs is not None:
-				idx = int(best.probs.top1)
-				conf = float(best.probs.top1conf)
-				label = best.names[idx]
-			elif len(best.boxes) > 0:  # type: ignore[attr-defined]
-				confidences = best.boxes.conf.tolist()  # type: ignore[attr-defined]
-				idx = int(confidences.index(max(confidences)))
-				cls_idx = int(best.boxes.cls[idx])  # type: ignore[attr-defined]
-				label = best.names[cls_idx]
-				conf = float(confidences[idx])
-			if label and conf is not None:
-				norm = normalize_label(label)
-				key = ALIASES.get(norm, norm)
-				predictions.append({"label": label, "conf": conf, "key": key, "source": "best3"})
-		except Exception:
-			pass
-	
-	# Model 4
+		predictions.extend(get_model_predictions(model3, "best3"))
 	if model4:
-		try:
-			results = model4.predict(source=str(tmp_path), verbose=False)
-			best = results[0]
-			label = None
-			conf = None
-			if hasattr(best, "probs") and best.probs is not None:
-				idx = int(best.probs.top1)
-				conf = float(best.probs.top1conf)
-				label = best.names[idx]
-			elif len(best.boxes) > 0:  # type: ignore[attr-defined]
-				confidences = best.boxes.conf.tolist()  # type: ignore[attr-defined]
-				idx = int(confidences.index(max(confidences)))
-				cls_idx = int(best.boxes.cls[idx])  # type: ignore[attr-defined]
-				label = best.names[cls_idx]
-				conf = float(confidences[idx])
-			if label and conf is not None:
-				norm = normalize_label(label)
-				key = ALIASES.get(norm, norm)
-				predictions.append({"label": label, "conf": conf, "key": key, "source": "best4"})
-		except Exception:
-			pass
+		predictions.extend(get_model_predictions(model4, "best4"))
 	
 	if not predictions:
 		try:
 			os.remove(str(tmp_path))
 		except Exception:
 			pass
-		return jsonify({"error": "No predictions from any model"}), 422
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
 	
 	# Filter out unwanted predictions
 	excluded_keys = {normalize_label("Kettlebells"), normalize_label("Assisted Chin Up-Dip")}
@@ -1354,12 +1114,14 @@ def predict():
 			os.remove(str(tmp_path))
 		except Exception:
 			pass
-		return jsonify({"error": "No predictions from any model"}), 422
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
 	
+	# Group predictions by key and select best from each model group
 	grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 	for pred in predictions:
 		grouped[pred["key"]].append(pred)
-
+	
+	# For each unique key, select the best prediction based on model priority
 	label_candidates: List[Dict[str, Any]] = []
 	for key, preds_for_label in grouped.items():
 		sorted_preds = sorted(preds_for_label, key=lambda p: p["conf"], reverse=True)
@@ -1374,18 +1136,67 @@ def predict():
 		if chosen is None:
 			chosen = sorted_preds[0]
 		label_candidates.append(chosen)
-
-	sorted_candidates = sorted(label_candidates, key=lambda p: p["conf"], reverse=True)
-	if not sorted_candidates:
+	
+	# Get top 3 predictions sorted by confidence
+	sorted_predictions = sorted(label_candidates, key=lambda p: p["conf"], reverse=True)[:3]
+	
+	if not sorted_predictions:
 		try:
 			os.remove(str(tmp_path))
 		except Exception:
 			pass
-		return jsonify({"error": "No usable predictions"}), 422
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
 
-	selected = sorted_candidates[0]
-	top_payloads = [_serialize_prediction_choice(pred) for pred in sorted_candidates[:3]]
+	selected = sorted_predictions[0]
+	top_payloads = [_serialize_prediction_choice(pred) for pred in sorted_predictions]
 	primary_payload = top_payloads[0]
+	
+	# Check if primary prediction is a generic exercise that needs refinements
+	generic_refinements = {
+		"smith_machine": [
+			{"key": "smith_machine_bench_press", "display": "Smith Machine Bench Press"},
+			{"key": "smith_machine_incline_bench_press", "display": "Smith Machine Incline Bench Press"},
+			{"key": "smith_machine_decline_bench_press", "display": "Smith Machine Decline Bench Press"},
+			{"key": "smith_machine_squat", "display": "Smith Machine Squat"},
+			{"key": "smith_machine_shoulder_press", "display": "Smith Machine Shoulder Press"}
+		],
+		"leg_raise_tower": [
+			{"key": "hanging_leg_raise", "display": "Hanging Leg Raise"},
+			{"key": "knee_raise", "display": "Knee Raise"},
+			{"key": "dips", "display": "Dips"},
+			{"key": "pull_up", "display": "Pull-Up"},
+			{"key": "chin_up", "display": "Chin-Up"}
+		],
+		"chinning_dipping": [
+			{"key": "pull_up", "display": "Pull-Up"},
+			{"key": "chin_up", "display": "Chin-Up"},
+			{"key": "dips", "display": "Dips"},
+			{"key": "hanging_leg_raise", "display": "Hanging Leg Raise"},
+			{"key": "knee_raise", "display": "Knee Raise"}
+		],
+		"dumbbell": [
+			{"key": "dumbbell_bench_press", "display": "Dumbbell Bench Press"},
+			{"key": "incline_dumbbell_press", "display": "Incline Dumbbell Press"},
+			{"key": "decline_dumbbell_press", "display": "Decline Dumbbell Press"},
+			{"key": "dumbbell_fly", "display": "Dumbbell Fly"},
+			{"key": "arnold_press", "display": "Arnold Press"},
+			{"key": "lateral_raise", "display": "Lateral Raise"},
+			{"key": "front_raise", "display": "Front Raise"},
+			{"key": "one_arm_dumbbell_row", "display": "One Arm Dumbbell Row"},
+			{"key": "chest_supported_row", "display": "Chest Supported Row"},
+			{"key": "bulgarian_split_squat", "display": "Bulgarian Split Squat"},
+			{"key": "alternating_dumbbell_curl", "display": "Alternating Dumbbell Curl"},
+			{"key": "incline_dumbbell_curl", "display": "Incline Dumbbell Curl"},
+			{"key": "reverse_curl", "display": "Reverse Curl"},
+			{"key": "spider_curl", "display": "Spider Curl"},
+			{"key": "overhead_tricep_extension", "display": "Overhead Tricep Extension"},
+			{"key": "rear_delt_fly", "display": "Rear Delt Fly"}
+		]
+	}
+	
+	refinements = None
+	if primary_payload["key"] in generic_refinements:
+		refinements = [_serialize_prediction_choice({"key": ex["key"], "label": ex["display"], "conf": 0.0}) for ex in generic_refinements[primary_payload["key"]]]
 
 	label = selected["label"]
 	conf = selected["conf"]
@@ -1399,7 +1210,8 @@ def predict():
 		pass
 
 	# Resolve metadata using normalized label and aliases
-	return jsonify({
+	response = {
+		"success": True,
 		"label": primary_payload["label"],
 		"confidence": primary_payload["confidence"],
 		"display": primary_payload["display"],
@@ -1408,7 +1220,13 @@ def predict():
 		"key": primary_payload["key"],
 		"image": primary_payload.get("image"),
 		"top_predictions": top_payloads,
-	})
+	}
+	
+	# Add refinements if this is a generic exercise
+	if refinements:
+		response["refinements"] = refinements
+	
+	return jsonify(response)
 
 
 @app.route("/favicon.ico")
@@ -1417,9 +1235,9 @@ def favicon():
 
 
 @app.route("/exercise-info", methods=["POST"])
-@login_required
 def exercise_info():
 	"""Get metadata for a manually selected exercise."""
+	# Public endpoint - exercise metadata is not sensitive
 	data = request.json
 	exercise_key = data.get("exercise", "")
 	
@@ -1446,9 +1264,9 @@ def exercise_info():
 
 
 @app.route("/exercises", methods=["GET"])
-@login_required
 def exercises_list():
 	"""Get list of all available exercises."""
+	# Public endpoint - exercises are not sensitive data
 	exercises = []
 	for key, meta in MACHINE_METADATA.items():
 		exercises.append({
@@ -1461,9 +1279,9 @@ def exercises_list():
 
 
 @app.route("/model-classes", methods=["GET"])
-@login_required
 def model_classes():
 	"""Get all classes that the models can predict."""
+	# Public endpoint - model classes are not sensitive
 	all_classes = set()
 	try:
 		model, model1, model2, model3, model4 = get_models()
@@ -1489,14 +1307,175 @@ def model_classes():
 	})
 
 
-@app.route("/chat", methods=["POST"])
-def chat():
-	"""AI chatbot endpoint for fitness-related questions."""
+@app.route("/api/vision-workout", methods=["POST"])
+def vision_workout():
+	"""AI workout generation endpoint for Vision chat - uses Groq API."""
 	if not GROQ_AVAILABLE:
 		return jsonify({"error": "Groq API not available. Please install groq package."}), 500
 	
-	api_key = os.environ.get("GROQ_API_KEY")
-	if not api_key:
+	# Load API key from environment variable only
+	GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+	if not GROQ_API_KEY:
+		return jsonify({"error": "Groq API key not configured. Set GROQ_API_KEY environment variable."}), 500
+	
+	data = request.get_json()
+	message = data.get("message", "").strip()
+	workout_context = data.get("workoutContext")
+	
+	if not message:
+		return jsonify({"error": "Message is required"}), 400
+	
+	# Build exercise list with keys for workout generation
+	exercise_list = []
+	exercise_map = {}
+	for key, meta in MACHINE_METADATA.items():
+		display_name = meta.get("display", key.replace("_", " ").title())
+		muscles = meta.get("muscles", [])
+		muscle_str = ", ".join([m for m in muscles if m and m != "-"])
+		exercise_list.append(f"{display_name} (key: {key})" + (f" - targets: {muscle_str}" if muscle_str else ""))
+		exercise_map[display_name.lower()] = key
+		exercise_map[key] = key
+	
+	exercises_context = "\n".join(exercise_list[:150])
+	
+	context_info = ""
+	if workout_context:
+		current_exercises = ", ".join([ex.get("display", ex.get("key", "")) for ex in workout_context.get("exercises", [])])
+		context_info = f"\n\nCurrent workout: {workout_context.get('name', 'Workout')}\nCurrent exercises: {current_exercises}\nThe user wants to MODIFY this workout."
+	
+	prompt = f"""Based on this user request: "{message}"
+{context_info}
+
+Generate a workout plan. Return ONLY a JSON object with this exact structure:
+{{
+  "name": "workout name",
+  "exercises": [
+    {{"key": "exercise_key", "display": "Exercise Name"}},
+    ...
+  ]
+}}
+
+Use exercise keys from this list (use the key exactly as shown):
+{exercises_context}
+
+CRITICAL RULES:
+- Return ONLY valid JSON, no other text, no markdown, no code blocks
+- Use exact exercise keys from the list (the part after "key: ")
+- Give ONLY what the user asks for - if they ask for "just pushups", give ONLY pushups
+- If user specifies exact exercises, use ONLY those exercises
+- If user asks for a workout type (push/pull/legs) without specifics, then suggest 4-6 exercises
+- If user says "no X" or "replace X with Y", adjust accordingly
+- Do NOT add extra exercises if user asks for specific ones
+- Match the muscle groups mentioned (push = chest/shoulders/triceps, pull = back/biceps, legs = quads/hamstrings/glutes)
+
+Examples:
+- User: "just pushups" → {{"name": "Pushup Workout", "exercises": [{{"key": "push_up", "display": "Push-Up"}}]}}
+- User: "push workout" → {{"name": "Push Workout", "exercises": [{{"key": "bench_press", "display": "Bench Press"}}, {{"key": "incline_bench_press", "display": "Incline Bench Press"}}, {{"key": "shoulder_press_machine", "display": "Shoulder Press Machine"}}, {{"key": "tricep_pushdown", "display": "Tricep Pushdown"}}]}}
+- User: "bench press and tricep pushdown" → {{"name": "Workout", "exercises": [{{"key": "bench_press", "display": "Bench Press"}}, {{"key": "tricep_pushdown", "display": "Tricep Pushdown"}}]}}
+"""
+	
+	try:
+		# Groq SDK handles Authorization header internally
+		# API key is loaded from environment variable only
+		client = Groq(api_key=GROQ_API_KEY)
+		response = client.chat.completions.create(
+			model="llama-3.3-70b-versatile",
+			messages=[
+				{"role": "system", "content": "You are a fitness expert. Return ONLY valid JSON, no explanations. Start your response with { and end with }."},
+				{"role": "user", "content": prompt}
+			],
+			temperature=0.3,
+			max_tokens=800
+		)
+		
+		content = response.choices[0].message.content.strip()
+		# Try to extract JSON from response (might have markdown code blocks)
+		if "```" in content:
+			# Extract JSON from code block
+			start = content.find("```")
+			if start != -1:
+				start = content.find("\n", start) + 1
+				end = content.find("```", start)
+				if end != -1:
+					content = content[start:end].strip()
+		
+		# Remove markdown code block markers if present
+		if content.startswith("```json"):
+			content = content[7:].strip()
+		if content.startswith("```"):
+			content = content[3:].strip()
+		if content.endswith("```"):
+			content = content[:-3].strip()
+		
+		# Parse JSON
+		workout_json = json.loads(content)
+		
+		# Validate and clean up the workout
+		if not workout_json.get("exercises"):
+			return jsonify({"error": "No exercises generated in workout"}), 500
+		
+		exercise_list = workout_json.get("exercises", [])
+		print(f"[DEBUG] Found {len(exercise_list)} exercises in workout JSON")
+		
+		# Validate exercises exist in metadata
+		valid_exercises = []
+		for ex in exercise_list:
+			key = ex.get("key", "").lower()
+			display = ex.get("display", "")
+			
+			# Try to find exercise by key
+			meta_key = None
+			for meta_key_candidate, meta in MACHINE_METADATA.items():
+				if meta_key_candidate.lower() == key:
+					meta_key = meta_key_candidate
+					break
+			
+			# If not found by key, try by display name
+			if not meta_key:
+				for meta_key_candidate, meta in MACHINE_METADATA.items():
+					if meta.get("display", "").lower() == display.lower():
+						meta_key = meta_key_candidate
+						break
+			
+			if meta_key:
+				meta = MACHINE_METADATA[meta_key]
+				valid_exercises.append({
+					"key": meta_key,
+					"display": meta.get("display", display)
+				})
+			else:
+				print(f"[WARNING] Could not find exercise: key='{key}', display='{display}'")
+		
+		if not valid_exercises:
+			return jsonify({"error": "No valid exercises found in workout"}), 500
+		
+		return jsonify({
+			"workout": {
+				"name": workout_json.get("name", "AI Workout"),
+				"exercises": valid_exercises
+			}
+		})
+	except json.JSONDecodeError as e:
+		print(f"[ERROR] Failed to parse workout JSON: {e}")
+		print(f"[DEBUG] Content was: {content[:500]}")
+		return jsonify({"error": "Failed to parse workout response from AI"}), 500
+	except Exception as e:
+		print(f"[ERROR] Workout generation failed: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to generate workout: {str(e)}"}), 500
+
+
+@app.route("/chat", methods=["POST"])
+def chat():
+	"""AI chatbot endpoint for fitness-related questions."""
+	# Public endpoint - authentication handled by frontend via Supabase
+	if not GROQ_AVAILABLE:
+		return jsonify({"error": "Groq API not available. Please install groq package."}), 500
+	
+	# Load API key from environment variable only
+	GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+	if not GROQ_API_KEY:
 		return jsonify({"error": "Groq API key not configured. Set GROQ_API_KEY environment variable."}), 500
 	
 	data = request.get_json()
@@ -1539,7 +1518,9 @@ IMPORTANT RULES:
 Remember: You are a fitness expert assistant. Stay focused on fitness topics only."""
 
 	try:
-		client = Groq(api_key=api_key)
+		# Groq SDK handles Authorization header internally
+		# API key is loaded from environment variable only
+		client = Groq(api_key=GROQ_API_KEY)
 		response = client.chat.completions.create(
 			model="llama-3.3-70b-versatile",  # Updated to current Groq model
 			messages=[
@@ -1588,8 +1569,9 @@ def generate_workout_from_chat(message: str, ai_reply: str, workout_context: Opt
 	if not GROQ_AVAILABLE:
 		return None
 	
-	api_key = os.environ.get("GROQ_API_KEY")
-	if not api_key:
+	# Load API key from environment variable only
+	GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+	if not GROQ_API_KEY:
 		return None
 	
 	# Build exercise list with keys
@@ -1644,7 +1626,9 @@ Examples:
 """
 	
 	try:
-		client = Groq(api_key=api_key)
+		# Groq SDK handles Authorization header internally
+		# API key is loaded from environment variable only
+		client = Groq(api_key=GROQ_API_KEY)
 		response = client.chat.completions.create(
 			model="llama-3.3-70b-versatile",
 			messages=[
@@ -1733,6 +1717,4 @@ Examples:
 if __name__ == "__main__":
 	# Initialize database on startup
 	init_db()
-	# Get port from environment variable (for cloud services like Railway, Render)
-	port = int(os.environ.get("PORT", 5000))
-	app.run(host="0.0.0.0", port=port, debug=False)
+	app.run(host="0.0.0.0", port=5000, debug=True)
