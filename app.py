@@ -889,20 +889,27 @@ def reset_password_redirect():
 				console.log('Deep link:', deepLink.substring(0, 100) + '...');
 				
 				// Update status
-				document.getElementById('status').textContent = 'Opening GymVision AI app...';
+				document.getElementById('status').textContent = 'Click the button below to open GymVision AI app:';
 				
-				// Try to open the app immediately
-				window.location.href = deepLink;
+				// Show button immediately (browsers require user interaction for deep links)
+				document.getElementById('openAppBtn').style.display = 'inline-block';
+				document.getElementById('openAppBtn').onclick = function() {
+					console.log('Button clicked, opening:', deepLink.substring(0, 100) + '...');
+					// Try to open the app
+					window.location.href = deepLink;
+					
+					// Update status
+					document.getElementById('status').textContent = 'Opening app... If it doesn\'t open, make sure the app is installed.';
+				};
 				
-				// Show button as fallback after 2 seconds
-				setTimeout(function() {
-					document.getElementById('status').textContent = 'If the app didn\'t open automatically, click the button below:';
-					document.getElementById('openAppBtn').style.display = 'inline-block';
-					document.getElementById('openAppBtn').onclick = function() {
-						console.log('Button clicked, opening:', deepLink.substring(0, 100) + '...');
+				// Also try automatic redirect (may not work due to browser security)
+				// But only if we're not in a browser (check for Capacitor)
+				if (window.Capacitor) {
+					// In Capacitor, we can try automatic redirect
+					setTimeout(function() {
 						window.location.href = deepLink;
-					};
-				}, 2000);
+					}, 500);
+				}
 			} else {
 				// No valid token found
 				console.error('No valid token found in URL');
