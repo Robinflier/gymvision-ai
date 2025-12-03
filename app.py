@@ -787,78 +787,16 @@ def verify_email():
 
 @app.route("/reset-password", methods=["GET"])
 def reset_password_redirect():
-	"""Redirect password reset token to mobile app deep link."""
-	token = request.args.get("token")
-	type_param = request.args.get("type")
-	
-	# If this is a recovery token from Supabase
-	if token and type_param == "recovery":
-		# Redirect to mobile app deep link
-		# The app will handle the token and show reset password screen
-		deep_link = f"gymvisionai://reset-password?token={token}&type={type_param}"
-		
-		# Return HTML that redirects to the deep link
-		# This works when opened in a browser - it will try to open the app
-		return f"""
-		<!DOCTYPE html>
-		<html>
-		<head>
-			<meta charset="utf-8">
-			<meta name="viewport" content="width=device-width, initial-scale=1">
-			<title>Reset Password - GymVision AI</title>
-			<style>
-				body {{
-					font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-					display: flex;
-					align-items: center;
-					justify-content: center;
-					min-height: 100vh;
-					margin: 0;
-					background: #0f0f10;
-					color: #fff;
-				}}
-				.container {{
-					text-align: center;
-					padding: 20px;
-				}}
-				.button {{
-					display: inline-block;
-					padding: 14px 28px;
-					background: #7c5cff;
-					color: #fff;
-					text-decoration: none;
-					border-radius: 12px;
-					font-weight: 600;
-					margin-top: 20px;
-				}}
-			</style>
-		</head>
-		<body>
-			<div class="container">
-				<h1>Reset Your Password</h1>
-				<p>Opening GymVision AI app...</p>
-				<a href="{deep_link}" class="button">Open App</a>
-				<script>
-					// Try to open the app immediately
-					window.location.href = "{deep_link}";
-					
-					// Fallback: if app doesn't open, show button
-					setTimeout(function() {{
-						document.querySelector('.button').style.display = 'inline-block';
-					}}, 1000);
-				</script>
-			</div>
-		</body>
-		</html>
-		"""
-	
-	# If no token, show error
+	"""Password reset page - handles both query params and hash (for Supabase redirects)."""
+	# Supabase sends tokens in hash (#access_token=...) which doesn't reach the server
+	# So we need to serve a page that reads the hash and redirects to the app
 	return """
 	<!DOCTYPE html>
 	<html>
 	<head>
 		<meta charset="utf-8">
-		<title>Invalid Reset Link</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Reset Password - GymVision AI</title>
 		<style>
 			body {
 				font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -870,16 +808,92 @@ def reset_password_redirect():
 				background: #0f0f10;
 				color: #fff;
 			}
+			.container {
+				text-align: center;
+				padding: 20px;
+				max-width: 400px;
+			}
+			.button {
+				display: inline-block;
+				padding: 14px 28px;
+				background: #7c5cff;
+				color: #fff;
+				text-decoration: none;
+				border-radius: 12px;
+				font-weight: 600;
+				margin-top: 20px;
+				cursor: pointer;
+				border: none;
+			}
+			.button:hover {
+				background: #6a4de8;
+			}
 		</style>
 	</head>
 	<body>
-		<div>
-			<h1>Invalid Reset Link</h1>
-			<p>The password reset link is invalid or has expired.</p>
+		<div class="container">
+			<h1>Reset Your Password</h1>
+			<p id="status">Processing reset link...</p>
+			<button id="openAppBtn" class="button" style="display: none;">Open GymVision AI App</button>
 		</div>
+		<script>
+			// Read hash from URL (Supabase sends tokens in hash)
+			const hash = window.location.hash.substring(1);
+			const search = window.location.search.substring(1);
+			
+			// Parse parameters from hash or query string
+			let accessToken = null;
+			let refreshToken = null;
+			let type = null;
+			let token = null; // For verify token format
+			
+			if (hash) {
+				const hashParams = new URLSearchParams(hash);
+				accessToken = hashParams.get('access_token');
+				refreshToken = hashParams.get('refresh_token');
+				type = hashParams.get('type');
+			}
+			
+			if (search && !accessToken) {
+				const searchParams = new URLSearchParams(search);
+				accessToken = searchParams.get('access_token');
+				refreshToken = searchParams.get('refresh_token');
+				type = searchParams.get('type');
+				token = searchParams.get('token'); // Verify token format
+			}
+			
+			// Build deep link for mobile app
+			let deepLink = null;
+			
+			if (type === 'recovery' && accessToken) {
+				// Standard Supabase format with access_token
+				deepLink = `gymvisionai://reset-password#access_token=${encodeURIComponent(accessToken)}&type=recovery${refreshToken ? '&refresh_token=' + encodeURIComponent(refreshToken) : ''}`;
+			} else if (token && type === 'recovery') {
+				// Verify token format
+				deepLink = `gymvisionai://reset-password?token=${encodeURIComponent(token)}&type=recovery`;
+			}
+			
+			if (deepLink) {
+				// Try to open the app immediately
+				window.location.href = deepLink;
+				
+				// Show button as fallback
+				setTimeout(function() {
+					document.getElementById('status').textContent = 'If the app didn\'t open automatically, click the button below:';
+					document.getElementById('openAppBtn').style.display = 'inline-block';
+					document.getElementById('openAppBtn').onclick = function() {
+						window.location.href = deepLink;
+					};
+				}, 1000);
+			} else {
+				// No valid token found
+				document.getElementById('status').textContent = 'Invalid or expired reset link. Please request a new one.';
+				document.getElementById('openAppBtn').style.display = 'none';
+			}
+		</script>
 	</body>
 	</html>
-	""", 400
+	"""
 
 
 @app.route("/resend-code", methods=["POST"])
