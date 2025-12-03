@@ -147,7 +147,11 @@ app = Flask(
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production-2024")  # Change in production!
 
 # Enable CORS for all routes (needed for Capacitor/iOS app)
-CORS(app, resources={r"/api/*": {"origins": "*"}, r"/*": {"origins": "*"}})
+# Allow all origins for Capacitor apps (capacitor://localhost, file://, etc.)
+CORS(app, resources={
+	r"/api/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]},
+	r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}
+})
 
 # Flask-Mail setup
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
