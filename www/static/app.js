@@ -690,21 +690,25 @@ function initForgotPasswordForm() {
 			// Store email immediately for reset password form (before API call)
 			sessionStorage.setItem('password_reset_email', email);
 			
-			// Show loading message
+			// Show loading message briefly
 			if (successEl) {
 				successEl.textContent = 'Sending reset code...';
 				successEl.classList.add('show');
 			}
 			if (errorEl) errorEl.classList.remove('show');
 			
-			// Try to send email in background (don't block navigation)
+			// Send email in background (don't block navigation, but don't abort it)
 			if (backendUrl) {
 				console.log('Sending forgot password request to:', `${backendUrl}/api/forgot-password`);
 				
-				// Use AbortController for timeout (30 seconds - shorter timeout since we navigate immediately)
+				// Use AbortController for timeout (60 seconds for Render cold start)
 				const controller = new AbortController();
-				const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 seconds
+				const timeoutId = setTimeout(() => {
+					console.warn('Password reset email request timed out after 60 seconds');
+					controller.abort();
+				}, 60000); // 60 seconds
 				
+				// Start fetch but don't wait for it - let it complete in background
 				fetch(`${backendUrl}/api/forgot-password`, {
 					method: 'POST',
 					headers: {
@@ -713,7 +717,8 @@ function initForgotPasswordForm() {
 					body: JSON.stringify({ email }),
 					mode: 'cors',
 					credentials: 'omit',
-					signal: controller.signal
+					signal: controller.signal,
+					keepalive: true // Keep request alive even if page navigates
 				}).then(response => {
 					clearTimeout(timeoutId);
 					if (response.ok) {
@@ -723,22 +728,23 @@ function initForgotPasswordForm() {
 							console.warn('Password reset email may not have been sent:', data.error || 'Unknown error');
 						});
 					}
+				}).then(data => {
+					if (data && data.success) {
+						console.log('Password reset code sent successfully');
+					}
 				}).catch(err => {
 					clearTimeout(timeoutId);
-					console.warn('Password reset email may not have been sent:', err.message || 'Network error');
+					if (err.name !== 'AbortError') {
+						console.warn('Password reset email may not have been sent:', err.message || 'Network error');
+					}
 					// Don't show error to user - we're navigating anyway
 				});
-			}
-			
-			// Immediately navigate to reset password screen (don't wait for API response)
-			if (successEl) {
-				successEl.textContent = 'Redirecting to reset password...';
 			}
 			
 			// Clear form
 			if (form) form.reset();
 			
-			// Redirect to reset password screen immediately
+			// Immediately navigate to reset password screen (don't wait for API response)
 			setTimeout(() => {
 				showScreen('reset-password');
 				// Update subtitle to show email
@@ -746,7 +752,7 @@ function initForgotPasswordForm() {
 				if (subtitle) {
 					subtitle.textContent = `Enter the code sent to ${email} and your new password`;
 				}
-			}, 500); // Short delay for smooth transition
+			}, 300); // Short delay for smooth transition
 			
 		} catch (err) {
 			console.error('Forgot password error:', err);
