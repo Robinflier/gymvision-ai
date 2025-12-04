@@ -561,16 +561,21 @@ function initRegisterForm() {
 		}
 		if (errorEl) errorEl.classList.remove('show');
 		
-		const email = document.getElementById('register-email')?.value;
-		const password = document.getElementById('register-password')?.value;
-		const username = document.getElementById('register-username')?.value; // Optional
+		// Get form values - check both possible ID formats
+		const emailInput = document.getElementById('register-email') || document.querySelector('#register-content input[type="email"]') || document.querySelector('input[type="email"]');
+		const usernameInput = document.getElementById('register-username') || document.querySelector('#register-content input[type="text"]') || document.querySelector('input[type="text"]');
+		const passwordInput = document.getElementById('register-password') || document.querySelector('#register-content input[type="password"]') || document.querySelector('input[type="password"]');
 		
-		if (!email || !password) {
+		const email = emailInput?.value?.trim();
+		const username = usernameInput?.value?.trim();
+		const password = passwordInput?.value;
+		
+		if (!email || !password || !username) {
 			if (errorEl) {
-				errorEl.textContent = 'Please fill in all required fields';
+				errorEl.textContent = 'Please fill in all fields (email, username, and password)';
 				errorEl.classList.add('show');
 			} else {
-				alert('Please fill in all required fields');
+				alert('Please fill in all fields');
 			}
 			if (submitBtn) {
 				submitBtn.disabled = false;
@@ -579,41 +584,53 @@ function initRegisterForm() {
 			return;
 		}
 		
-		if (!supabaseClient) {
-			await initSupabase();
-		}
-		if (!supabaseClient) {
-			if (errorEl) {
-				errorEl.textContent = 'Supabase not initialized. Please refresh the page.';
-				errorEl.classList.add('show');
-			} else {
-				alert('Supabase not initialized. Please refresh the page.');
-			}
-			if (submitBtn) {
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Sign Up';
-			}
-			return;
-		}
+		// Use Flask backend instead of Supabase Auth
+		const backendUrl = window.BACKEND_URL || window.location.origin;
 		
-		const { error } = await supabaseClient.auth.signUp({
-			email,
-			password,
-			options: {
-				data: {
-					username: username || email.split('@')[0]
+		try {
+			const response = await fetch(`${backendUrl}/register`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ email, username, password }),
+				mode: 'cors',
+				credentials: 'omit'
+			});
+			
+			const data = await response.json();
+			
+			if (!response.ok) {
+				let errorMessage = data.error || 'Failed to create account';
+				if (errorMessage.includes('already exists')) {
+					errorMessage = 'This email or username is already registered. Please sign in instead.';
 				}
-			}
-		});
-		
-		if (error) {
-			let errorMessage = error.message;
-			if (error.message.includes('already registered') || error.message.includes('already exists')) {
-				errorMessage = 'This email is already registered. Please sign in instead.';
-			} else if (error.message.includes('Password')) {
-				errorMessage = 'Password must be at least 6 characters';
+				
+				if (errorEl) {
+					errorEl.textContent = errorMessage;
+					errorEl.classList.add('show');
+				} else {
+					alert(errorMessage);
+				}
+				if (submitBtn) {
+					submitBtn.disabled = false;
+					submitBtn.textContent = 'Sign Up';
+				}
+				return;
 			}
 			
+			// Registration successful
+			if (data.code) {
+				// Email failed - show code
+				alert(`Account created! Email could not be sent. Your verification code is: ${data.code}`);
+			} else {
+				alert('Account created! Please check your email for verification code.');
+			}
+			showScreen('login');
+			
+		} catch (err) {
+			console.error('Registration error:', err);
+			const errorMessage = 'Network error. Please check your connection and try again.';
 			if (errorEl) {
 				errorEl.textContent = errorMessage;
 				errorEl.classList.add('show');
@@ -624,12 +641,7 @@ function initRegisterForm() {
 				submitBtn.disabled = false;
 				submitBtn.textContent = 'Sign Up';
 			}
-			return;
 		}
-		
-		// Registration successful
-		alert('Account created! Please log in.');
-		showScreen('login');
 	});
 }
 
@@ -723,7 +735,7 @@ function initForgotPasswordForm() {
 					clearTimeout(timeoutId);
 					if (response.ok) {
 						return response.json();
-					} else {
+			} else {
 						return response.json().then(data => {
 							console.warn('Password reset email may not have been sent:', data.error || 'Unknown error');
 						});
