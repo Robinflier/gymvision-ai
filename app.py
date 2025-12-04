@@ -851,13 +851,12 @@ def forgot_password():
 				}
 			)
 			
-			print(f"[SUCCESS] Password reset email sent via Supabase to {email}: {reset_code}")
-			
-			# Always return code in response (so user can use it even if email is delayed)
+			print(f"[SUCCESS] Password reset email sent via Supabase to {email}")
+			# DO NOT return code in response if email was sent successfully (security!)
 			return jsonify({
 				"success": True,
-				"message": "Reset code sent to your email",
-				"code": reset_code  # Always include code as fallback
+				"message": "Reset code sent to your email"
+				# NO CODE HERE - only in email for security
 			})
 			
 		except Exception as supabase_error:
@@ -866,13 +865,16 @@ def forgot_password():
 			email_sent = send_password_reset_email(email, reset_code)
 			
 			if email_sent:
+				# Email sent via fallback - don't return code (security)
 				return jsonify({
 					"success": True,
-					"message": "Reset code sent to your email",
-					"code": reset_code
+					"message": "Reset code sent to your email"
+					# NO CODE HERE - only in email for security
 				})
 			else:
-				# Both failed - return code in response
+				# Both email methods failed - ONLY NOW return code as last resort
+				# This is a fallback for when email is completely broken
+				print(f"[WARNING] All email methods failed. Returning code as fallback for {email}: {reset_code}")
 				return jsonify({
 					"success": True,
 					"message": "Email could not be sent. Your reset code is shown below.",
