@@ -830,17 +830,21 @@ def forgot_password():
 		email_sent = send_password_reset_email(email, reset_code)
 		
 		if email_sent:
+			print(f"[SUCCESS] Password reset code sent to {email}: {reset_code}")
 			return jsonify({
 				"success": True,
 				"message": "Reset code sent to your email"
 			})
 		else:
-			# For development: return code in response if email fails
-			print(f"[DEBUG] Email failed. Reset code for {email}: {reset_code}")
+			# Email failed - return code in response so user can still reset
+			print(f"[WARNING] Email failed. Reset code for {email}: {reset_code}")
+			print(f"[WARNING] Check MAIL_USERNAME and MAIL_PASSWORD in Render environment variables")
+			# Return code in response so user can still reset password
 			return jsonify({
 				"success": True,
-				"message": f"Email could not be sent. Your reset code is: {reset_code}",
-				"code": reset_code  # Only for development!
+				"message": "Email could not be sent. Please check your email configuration.",
+				"code": reset_code,  # Include code in response as fallback
+				"email_failed": True
 			})
 			
 	except Exception as e:

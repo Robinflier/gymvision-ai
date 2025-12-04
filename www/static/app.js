@@ -730,7 +730,26 @@ function initForgotPasswordForm() {
 					}
 				}).then(data => {
 					if (data && data.success) {
-						console.log('Password reset code sent successfully');
+						if (data.email_failed && data.code) {
+							// Email failed but we have the code - show it to user
+							console.warn('Email failed, but code is available:', data.code);
+							// Store code in sessionStorage so user can see it
+							sessionStorage.setItem('password_reset_code_fallback', data.code);
+							// Show alert or update UI to show the code
+							setTimeout(() => {
+								const resetScreen = document.getElementById('reset-password-content');
+								if (resetScreen && !resetScreen.classList.contains('hidden')) {
+									const errorEl = document.getElementById('reset-password-error-message');
+									if (errorEl) {
+										errorEl.textContent = `Email not sent. Your reset code is: ${data.code}`;
+										errorEl.style.color = '#ffa500'; // Orange warning color
+										errorEl.classList.add('show');
+									}
+								}
+							}, 1000);
+						} else {
+							console.log('Password reset code sent successfully');
+						}
 					}
 				}).catch(err => {
 					clearTimeout(timeoutId);
