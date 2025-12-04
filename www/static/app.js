@@ -232,10 +232,12 @@ async function getCurrentUser() {
 			.single();
 		
 		if (userError && userError.code === 'PGRST116') {
-			// User doesn't exist in public.users, create it
+			// User doesn't exist in public.users
+			// The trigger should have created it automatically, but if not, try to create it
 			// Get username from user metadata
 			const username = user.user_metadata?.username || user.email?.split('@')[0] || 'user';
 			
+			console.log("User not found in public.users, attempting to create...");
 			const { error: insertError } = await supabaseClient
 				.from('users')
 				.insert({
@@ -246,11 +248,16 @@ async function getCurrentUser() {
 			
 			if (insertError) {
 				console.error("Error creating user record in public.users:", insertError);
-				// The trigger should have created it, but if it failed, log the error
-				// Don't throw - let the user continue (trigger might have worked)
+				console.error("Full error details:", JSON.stringify(insertError, null, 2));
+				// Don't throw - the trigger might have created it, or it might be a permissions issue
+				// The user can still continue - they just might not be able to save data until this is fixed
+			} else {
+				console.log("Successfully created user record in public.users");
 			}
 		} else if (userError) {
 			console.error("Error checking user record:", userError);
+		} else {
+			console.log("User found in public.users:", userRecord);
 		}
 	} catch (e) {
 		console.error("Error verifying user record:", e);
@@ -607,38 +614,38 @@ function initRegisterForm() {
 		
 		try {
 			const { data, error } = await supabaseClient.auth.signUp({
-				email,
-				password,
-				options: {
-					data: {
-						username: username || email.split('@')[0]
+			email,
+			password,
+			options: {
+				data: {
+					username: username || email.split('@')[0]
 					},
 					emailRedirectTo: undefined // Disable email verification redirect
-				}
-			});
-			
-			if (error) {
-				let errorMessage = error.message;
-				if (error.message.includes('already registered') || error.message.includes('already exists')) {
-					errorMessage = 'This email is already registered. Please sign in instead.';
-				} else if (error.message.includes('Password')) {
-					errorMessage = 'Password must be at least 6 characters';
-				}
-				
-				if (errorEl) {
-					errorEl.textContent = errorMessage;
-					errorEl.classList.add('show');
-				} else {
-					alert(errorMessage);
-				}
-				if (submitBtn) {
-					submitBtn.disabled = false;
-					submitBtn.textContent = 'Sign Up';
-				}
-				return;
+			}
+		});
+		
+		if (error) {
+			let errorMessage = error.message;
+			if (error.message.includes('already registered') || error.message.includes('already exists')) {
+				errorMessage = 'This email is already registered. Please sign in instead.';
+			} else if (error.message.includes('Password')) {
+				errorMessage = 'Password must be at least 6 characters';
 			}
 			
-			// Registration successful
+			if (errorEl) {
+				errorEl.textContent = errorMessage;
+				errorEl.classList.add('show');
+			} else {
+				alert(errorMessage);
+			}
+			if (submitBtn) {
+				submitBtn.disabled = false;
+				submitBtn.textContent = 'Sign Up';
+			}
+			return;
+		}
+		
+		// Registration successful
 			// The trigger should automatically create the user in public.users
 			// Wait a moment for the trigger to complete, then verify
 			if (data.user) {
