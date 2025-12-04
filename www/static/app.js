@@ -233,16 +233,21 @@ async function getCurrentUser() {
 		
 		if (userError && userError.code === 'PGRST116') {
 			// User doesn't exist in public.users, create it
+			// Get username from user metadata
+			const username = user.user_metadata?.username || user.email?.split('@')[0] || 'user';
+			
 			const { error: insertError } = await supabaseClient
 				.from('users')
 				.insert({
 					id: user.id,
-					email: user.email
+					email: user.email,
+					username: username
 				});
 			
 			if (insertError) {
-				console.error("Error creating user record:", insertError);
-				// Continue anyway - the trigger should handle it
+				console.error("Error creating user record in public.users:", insertError);
+				// The trigger should have created it, but if it failed, log the error
+				// Don't throw - let the user continue (trigger might have worked)
 			}
 		} else if (userError) {
 			console.error("Error checking user record:", userError);
