@@ -519,30 +519,20 @@ def generate_verification_code() -> str:
 
 
 def send_verification_email(email: str, code: str) -> bool:
-	"""Send verification code via email."""
-	# Check if email is configured
-	if not app.config.get('MAIL_USERNAME') or not app.config.get('MAIL_PASSWORD'):
-		print(f"[WARNING] Email not configured. MAIL_USERNAME or MAIL_PASSWORD is empty.")
-		print(f"[WARNING] Set environment variables: MAIL_USERNAME and MAIL_PASSWORD")
+	"""Send verification code via email using Resend."""
+	if not RESEND_AVAILABLE or not RESEND_API_KEY:
+		print(f"[WARNING] Resend not available. RESEND_API_KEY is not set.")
+		print(f"[WARNING] Set RESEND_API_KEY environment variable")
 		return False
 	
 	try:
-		msg = Message(
-			subject='GymVision AI - Email Verification',
-			recipients=[email],
-			body=f'''Welcome to GymVision AI!
-
-Please verify your email address by entering this code:
-
-{code}
-
-This code will expire in 10 minutes.
-
-If you didn't create an account, please ignore this email.
-
-Best regards,
-GymVision AI Team''',
-			html=f'''<html>
+		resend = Resend(RESEND_API_KEY)
+		
+		resend.emails.send({
+			"from": RESEND_FROM_EMAIL,
+			"to": [email],
+			"subject": "GymVision AI - Email Verification",
+			"html": f'''<html>
 <body style="font-family: Arial, sans-serif; background-color: #0f0f10; color: #f5f6f7; padding: 20px;">
 	<div style="max-width: 600px; margin: 0 auto; background-color: #1a1a1c; padding: 30px; border-radius: 12px;">
 		<h1 style="color: #8b5cf6;">Welcome to GymVision AI!</h1>
@@ -555,13 +545,25 @@ GymVision AI Team''',
 		<p style="margin-top: 30px; color: #888;">Best regards,<br>GymVision AI Team</p>
 	</div>
 </body>
-</html>'''
-		)
-		mail.send(msg)
-		print(f"[INFO] Verification email sent to {email}")
+</html>''',
+			"text": f'''Welcome to GymVision AI!
+
+Please verify your email address by entering this code:
+
+{code}
+
+This code will expire in 10 minutes.
+
+If you didn't create an account, please ignore this email.
+
+Best regards,
+GymVision AI Team'''
+		})
+		
+		print(f"[SUCCESS] Verification email sent via Resend to {email}")
 		return True
 	except Exception as e:
-		print(f"[ERROR] Failed to send verification email: {e}")
+		print(f"[ERROR] Failed to send verification email via Resend: {e}")
 		import traceback
 		traceback.print_exc()
 		return False
