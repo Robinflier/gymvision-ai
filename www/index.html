@@ -4,20 +4,184 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 	<title>GymVision AI</title>
-	<link rel="manifest" href="./manifest.webmanifest">
+	<link rel="manifest" href="static/manifest.webmanifest">
 	<meta name="theme-color" content="#0f0f10">
 	<meta name="apple-mobile-web-app-capable" content="yes">
-	<link rel="stylesheet" href="./styles.css">
+	<link rel="stylesheet" href="static/styles.css">
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+	<style>
+		.auth-content {
+			flex: 1;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			padding: 20px;
+			overflow-y: auto;
+			-webkit-overflow-scrolling: touch;
+		}
+		.auth-card {
+			background: transparent;
+			border-radius: 20px;
+			padding: 40px 30px;
+			width: 100%;
+			max-width: 400px;
+		}
+		@media (max-width: 480px) {
+			.auth-content {
+				padding: 20px 16px;
+			}
+			.auth-card {
+				padding: 30px 20px;
+				border-radius: 16px;
+			}
+		}
+		.auth-logo {
+			text-align: center;
+			margin-bottom: 30px;
+		}
+		.auth-logo img {
+			width: 200px;
+			height: auto;
+			filter: brightness(0) invert(1);
+		}
+		.auth-title {
+			color: #fff;
+			font-size: 28px;
+			font-weight: 700;
+			text-align: center;
+			margin-bottom: 10px;
+		}
+		.auth-subtitle {
+			color: #888;
+			text-align: center;
+			margin-bottom: 30px;
+			font-size: 14px;
+		}
+		.auth-form-group {
+			margin-bottom: 20px;
+		}
+		.auth-label {
+			color: #fff;
+			font-size: 14px;
+			font-weight: 500;
+			margin-bottom: 8px;
+			display: block;
+		}
+		.auth-input {
+			width: 100%;
+			padding: 14px 16px;
+			background: #252528;
+			border: 1px solid #333;
+			border-radius: 12px;
+			color: #fff;
+			font-size: 16px;
+			font-family: 'Inter', sans-serif;
+			box-sizing: border-box;
+		}
+		.auth-input:focus {
+			outline: none;
+			border-color: #8b5cf6;
+		}
+		.auth-button {
+			width: 100%;
+			padding: 14px;
+			background: #8b5cf6;
+			color: #fff;
+			border: none;
+			border-radius: 12px;
+			font-size: 16px;
+			font-weight: 600;
+			cursor: pointer;
+			margin-top: 10px;
+			font-family: 'Inter', sans-serif;
+			transition: background 0.2s;
+		}
+		.auth-button:hover {
+			background: #7c3aed;
+		}
+		.auth-button:disabled {
+			background: #555;
+			cursor: not-allowed;
+		}
+		.auth-link {
+			text-align: center;
+			margin-top: 20px;
+			color: #888;
+			font-size: 14px;
+		}
+		.auth-link a {
+			color: #8b5cf6;
+			text-decoration: none;
+			font-weight: 500;
+			cursor: pointer;
+		}
+		.auth-link a:hover {
+			text-decoration: underline;
+		}
+		.auth-error {
+			background: #ef4444;
+			color: #fff;
+			padding: 12px;
+			border-radius: 8px;
+			margin-bottom: 20px;
+			font-size: 14px;
+			display: none;
+		}
+		.auth-error.show {
+			display: block;
+		}
+		.auth-success {
+			background: #10b981;
+			color: #fff;
+			padding: 12px;
+			border-radius: 8px;
+			margin-bottom: 20px;
+			font-size: 14px;
+			display: none;
+		}
+		.auth-success.show {
+			display: block;
+		}
+		.auth-forgot-password {
+			text-align: right;
+			margin-top: -10px;
+			margin-bottom: 10px;
+		}
+		.auth-forgot-password a {
+			color: #8b5cf6;
+			text-decoration: none;
+			font-size: 14px;
+			font-weight: 500;
+			cursor: pointer;
+		}
+		.auth-forgot-password a:hover {
+			text-decoration: underline;
+		}
+	</style>
+	<!-- Supabase library - MUST load before app.js -->
+	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+	<script>
+		// Export createClient for Supabase v2
+		const { createClient } = supabase;
+		window.createClient = createClient;
+		// Supabase config - hardcoded for Capacitor/iOS compatibility
+		// Note: ANON key is safe to expose in frontend (designed to be public)
+		window.SUPABASE_URL = "https://jugdkqzhcbqbjbvktqlz.supabase.co";
+		window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp1Z2RrcXpoY2JxYmpidmt0cWx6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODI2NzIsImV4cCI6MjA4MDI1ODY3Mn0.rqCqBK14sOZvsxNUhIHIxaOnVMvdnNOjx_0YIXy1VIY";
+		// Backend API URL - REQUIRED for Capacitor/iOS
+		// Set this to your deployed Flask backend URL
+		// Leave empty for local web development (will use relative paths)
+		window.BACKEND_URL = "https://gymvision-ai.onrender.com";
+	</script>
 </head>
 <body>
 	<div class="phone-shell">
 		<div class="content hidden" id="home-content">
 		<header class="topbar">
-			<div class="brand brand-logo"><img src="/logo.png" alt="GymVision" /></div>
+			<div class="brand brand-logo"><img src="static/logo.png" alt="GymVision" /></div>
 			<div class="icons streak">
-				<img src="/flame.png" alt="streak" class="streak-img" />
+				<img src="static/flame.png" alt="streak" class="streak-img" />
 				<div id="streak-count" class="streak-count">0</div>
 			</div>
 		</header>
@@ -96,9 +260,9 @@
 
 		<div class="content" id="workouts-content">
 			<header class="topbar">
-				<div class="brand brand-logo"><img src="/logo.png" alt="GymVision" /></div>
+				<div class="brand brand-logo"><img src="static/logo.png" alt="GymVision" /></div>
 				<div class="icons streak">
-					<img src="/flame.png" alt="streak" class="streak-img" />
+					<img src="static/flame.png" alt="streak" class="streak-img" />
 					<div id="streak-count-workouts" class="streak-count">0</div>
 				</div>
 			</header>
@@ -113,9 +277,9 @@
 
 		<div class="content hidden" id="workout-builder-content">
 			<header class="topbar">
-				<div class="brand brand-logo"><img src="/logo.png" alt="GymVision" /></div>
+				<div class="brand brand-logo"><img src="static/logo.png" alt="GymVision" /></div>
 				<div class="icons streak">
-					<img src="/flame.png" alt="streak" class="streak-img" />
+					<img src="static/flame.png" alt="streak" class="streak-img" />
 					<div id="streak-count-workout-builder" class="streak-count">0</div>
 				</div>
 			</header>
@@ -140,9 +304,9 @@
 
 		<div class="content hidden" id="progress-content">
 			<header class="topbar">
-				<div class="brand brand-logo"><img src="/logo.png" alt="GymVision" /></div>
+				<div class="brand brand-logo"><img src="static/logo.png" alt="GymVision" /></div>
 				<div class="icons streak">
-					<img src="/flame.png" alt="streak" class="streak-img" />
+					<img src="static/flame.png" alt="streak" class="streak-img" />
 					<div id="streak-count-progress" class="streak-count">0</div>
 				</div>
 			</header>
@@ -226,22 +390,46 @@
 
 		<div class="content hidden" id="settings-content">
 			<header class="topbar">
-				<div class="brand brand-logo"><img src="/logo.png" alt="GymVision" /></div>
+				<div class="brand brand-logo"><img src="static/logo.png" alt="GymVision" /></div>
 				<div class="icons streak">
-					<img src="/flame.png" alt="streak" class="streak-img" />
+					<img src="static/flame.png" alt="streak" class="streak-img" />
 					<div id="streak-count-settings" class="streak-count">0</div>
 				</div>
 			</header>
 			<div style="padding: 22px;">
-				<h2 style="margin:0 0 30px;font-size:24px;font-weight:800;color:#fff">Settings</h2>
-				<div class="card" style="padding: 20px; margin-bottom: 20px;">
-					<div style="margin-bottom: 15px;">
-						<div style="color: #888; font-size: 14px; margin-bottom: 5px;">Logged in as</div>
-						<div style="color: #fff; font-size: 18px; font-weight: 600;" id="settings-username">—</div>
+				<!-- Profile Card with Statistics -->
+				<div class="settings-profile-card">
+					<div class="settings-profile-header">
+						<div class="settings-avatar">
+							<svg width="60" height="60" viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+								<circle cx="30" cy="30" r="30" fill="rgba(255,255,255,0.2)"/>
+								<circle cx="30" cy="24" r="6" stroke="#fff" stroke-width="2" fill="none"/>
+								<path d="M20 42C20 36 25 32 30 32C35 32 40 36 40 42" stroke="#fff" stroke-width="2" stroke-linecap="round" fill="none"/>
+							</svg>
+						</div>
+						<div class="settings-profile-info">
+							<div class="settings-username" id="settings-username">—</div>
+							<div class="settings-email" id="settings-email">—</div>
+						</div>
 					</div>
-					<div style="color: #888; font-size: 14px;" id="settings-email">—</div>
+					<div class="settings-stats-grid">
+						<div class="settings-stat-box">
+							<div class="settings-stat-value" id="settings-stat-streak">0</div>
+							<div class="settings-stat-label">Streak</div>
+						</div>
+						<div class="settings-stat-box">
+							<div class="settings-stat-value" id="settings-stat-workouts">0</div>
+							<div class="settings-stat-label">Workouts</div>
+						</div>
+						<div class="settings-stat-box">
+							<div class="settings-stat-value" id="settings-stat-hours">0</div>
+							<div class="settings-stat-label">Hours</div>
+						</div>
+					</div>
 				</div>
-				<button id="logout-btn" class="auth-button" style="width: 100%; padding: 14px; background: #ef4444; color: #fff; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif;">
+				
+				<!-- Logout Button -->
+				<button id="logout-btn" class="settings-logout-btn">
 					Log Out
 				</button>
 			</div>
@@ -249,9 +437,9 @@
 
 		<div class="content hidden" id="vision-content">
 			<header class="topbar">
-				<div class="brand brand-logo"><img src="/logo.png" alt="GymVision" /></div>
+				<div class="brand brand-logo"><img src="static/logo.png" alt="GymVision" /></div>
 				<div class="icons streak">
-					<img src="/flame.png" alt="streak" class="streak-img" />
+					<img src="static/flame.png" alt="streak" class="streak-img" />
 					<div id="streak-count-vision" class="streak-count">0</div>
 				</div>
 			</header>
@@ -307,6 +495,16 @@
 		</div>
 	</div>
 
+	<!-- AI Detect Error Modal -->
+	<div id="ai-detect-error-modal" class="ai-detect-error-modal hidden">
+		<div class="ai-detect-error-backdrop"></div>
+		<div class="ai-detect-error-content">
+			<h3 class="ai-detect-error-title">We couldn't detect an exercise from this photo.</h3>
+			<p class="ai-detect-error-message">Try taking a clearer picture of the machine or movement.</p>
+			<button id="ai-detect-error-try-again" class="ai-detect-error-button" type="button">Try again</button>
+		</div>
+	</div>
+
 	<div id="exercise-video-modal" class="video-modal hidden">
 		<div class="video-modal-backdrop"></div>
 		<div class="video-modal-content">
@@ -317,26 +515,157 @@
 		</div>
 	</div>
 
-	<footer class="navbar">
+		<div class="content hidden" id="login-content">
+			<div class="auth-content">
+				<div class="auth-card">
+					<div class="auth-logo">
+						<img src="static/logo.png" alt="GymVision AI" />
+					</div>
+					<h1 class="auth-title">Welcome Back</h1>
+					<p class="auth-subtitle">Sign in to continue</p>
+					
+					<div class="auth-error" id="login-error-message"></div>
+					
+					<form id="login-form">
+						<div class="auth-form-group">
+							<label class="auth-label" for="login-email">Email</label>
+							<input type="email" id="login-email" class="auth-input" placeholder="your@email.com" required autocomplete="email">
+						</div>
+						<div class="auth-form-group">
+							<label class="auth-label" for="login-password">Password</label>
+							<input type="password" id="login-password" class="auth-input" placeholder="••••••••" required autocomplete="current-password">
+						</div>
+						<div class="auth-forgot-password">
+							<a href="#" id="show-forgot-password-link">Forgot password?</a>
+						</div>
+						<button type="submit" class="auth-button" id="login-submit-btn">Sign In</button>
+					</form>
+					
+					<div class="auth-link">
+						Don't have an account? <a href="#" id="show-register-link">Sign up</a>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="content hidden" id="forgot-password-content">
+			<div class="auth-content">
+				<div class="auth-card">
+					<div class="auth-logo">
+						<img src="static/logo.png" alt="GymVision AI" />
+					</div>
+					<h1 class="auth-title">Reset Password</h1>
+					<p class="auth-subtitle">Enter your email and we'll send you a reset code</p>
+					
+					<div class="auth-error" id="forgot-password-error-message"></div>
+					<div class="auth-success" id="forgot-password-success-message"></div>
+					
+					<form id="forgot-password-form">
+						<div class="auth-form-group">
+							<label class="auth-label" for="forgot-password-email">Email</label>
+							<input type="email" id="forgot-password-email" class="auth-input" placeholder="your@email.com" required autocomplete="email">
+						</div>
+						<button type="submit" class="auth-button" id="forgot-password-submit-btn">Send Reset Code</button>
+					</form>
+					
+					<div class="auth-link">
+						Remember your password? <a href="#" id="back-to-login-link">Sign in</a>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="content hidden" id="reset-password-content">
+			<div class="auth-content">
+				<div class="auth-card">
+					<div class="auth-logo">
+						<img src="static/logo.png" alt="GymVision AI" />
+					</div>
+					<h1 class="auth-title">Reset Password</h1>
+					<p class="auth-subtitle">Enter the code from your email and your new password</p>
+					
+					<div class="auth-error" id="reset-password-error-message"></div>
+					<div class="auth-success" id="reset-password-success-message"></div>
+					
+					<form id="reset-password-form">
+						<div class="auth-form-group">
+							<label class="auth-label" for="reset-password-token">Reset Code</label>
+							<input type="text" id="reset-password-token" class="auth-input" placeholder="123456" required autocomplete="off" maxlength="6" pattern="[0-9]{6}" inputmode="numeric">
+							<small style="color: #888; font-size: 12px; margin-top: 4px; display: block;">Enter the 6-digit code from your email</small>
+						</div>
+						<div class="auth-form-group">
+							<label class="auth-label" for="reset-password-new">New Password</label>
+							<input type="password" id="reset-password-new" class="auth-input" placeholder="••••••••" required autocomplete="new-password" minlength="6">
+						</div>
+						<div class="auth-form-group">
+							<label class="auth-label" for="reset-password-confirm">Confirm Password</label>
+							<input type="password" id="reset-password-confirm" class="auth-input" placeholder="••••••••" required autocomplete="new-password" minlength="6">
+						</div>
+						<button type="submit" class="auth-button" id="reset-password-submit-btn">Reset Password</button>
+					</form>
+					
+					<div class="auth-link">
+						<a href="#" id="back-to-login-from-reset-link">Back to Sign In</a>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="content hidden" id="register-content">
+			<div class="auth-content">
+				<div class="auth-card">
+					<div class="auth-logo">
+						<img src="static/logo.png" alt="GymVision AI" />
+					</div>
+					<h1 class="auth-title">Create Account</h1>
+					<p class="auth-subtitle">Start your fitness journey</p>
+					
+					<div class="auth-error" id="register-error-message"></div>
+					
+					<form id="register-form">
+						<div class="auth-form-group">
+							<label class="auth-label" for="register-email">Email</label>
+							<input type="email" id="register-email" class="auth-input" placeholder="your@email.com" required autocomplete="email">
+						</div>
+						<div class="auth-form-group">
+							<label class="auth-label" for="register-username">Username</label>
+							<input type="text" id="register-username" class="auth-input" placeholder="username" required autocomplete="username" minlength="3">
+						</div>
+						<div class="auth-form-group">
+							<label class="auth-label" for="register-password">Password</label>
+							<input type="password" id="register-password" class="auth-input" placeholder="••••••••" required autocomplete="new-password" minlength="6">
+						</div>
+						<button type="submit" class="auth-button" id="register-submit-btn">Sign Up</button>
+					</form>
+					
+					<div class="auth-link">
+						Already have an account? <a href="#" id="show-login-link">Sign in</a>
+					</div>
+				</div>
+			</div>
+		</div>
+
+	<footer class="navbar hidden" id="main-navbar">
 			<button class="nav-btn active" data-tab="workouts">
-				<img src="/nav/dumbell.png" alt="Workouts" class="nav-icon" />
+				<img src="static/nav/dumbell.png" alt="Workouts" class="nav-icon" />
 				<span>Workouts</span>
 			</button>
 			<button class="nav-btn" data-tab="progress">
-				<img src="/nav/progress.png" alt="Progress" class="nav-icon" />
+				<img src="static/nav/progress.png" alt="Progress" class="nav-icon" />
 				<span>Progress</span>
 			</button>
 			<button class="nav-btn" data-tab="settings">
-				<img src="/nav/settings.png" alt="Settings" class="nav-icon" />
+				<img src="static/nav/settings.png" alt="Settings" class="nav-icon" />
 				<span>Settings</span>
 			</button>
 		</footer>
 	</div>
 
-	<script src="./app.js"></script>
+	<!-- Main app.js -->
+	<script src="static/app.js"></script>
 	<script>
 		if ('serviceWorker' in navigator) {
-			navigator.serviceWorker.register('./sw.js').catch(()=>{});
+			navigator.serviceWorker.register('static/sw.js').catch(()=>{});
 		}
 	</script>
 </body>

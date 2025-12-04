@@ -785,6 +785,197 @@ def verify_email():
 	return render_template("verify.html", email=email)
 
 
+@app.route("/api/forgot-password", methods=["POST"])
+def forgot_password():
+	"""Generate and send password reset code via email."""
+	data = request.get_json() or {}
+	email = data.get("email", "").strip().lower()
+	
+	if not email:
+		return jsonify({"error": "Email is required"}), 400
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Password reset not available"}), 500
+	
+	try:
+		supabase_url = os.getenv("SUPABASE_URL")
+		supabase_key = os.getenv("SUPABASE_ANON_KEY")
+		
+		if not supabase_url or not supabase_key:
+			return jsonify({"error": "Supabase not configured"}), 500
+		
+		# Note: We can't easily check if user exists with anon key without exposing info
+		# So we'll just generate the code and send it. If user doesn't exist, reset will fail anyway.
+		
+		# Generate 6-digit reset code
+		reset_code = generate_verification_code()
+		
+		# Store reset code in database (expires in 15 minutes)
+		conn = get_db_connection()
+		from datetime import timedelta
+		expires_at = (datetime.now() + timedelta(minutes=15)).isoformat()
+		
+		# Delete old reset codes for this email
+		conn.execute("DELETE FROM verification_codes WHERE email = ? AND code LIKE 'RESET_%'", (email,))
+		
+		# Insert new reset code (prefix with RESET_ to distinguish from email verification codes)
+		conn.execute(
+			"INSERT INTO verification_codes (email, code, expires_at) VALUES (?, ?, ?)",
+			(email, f"RESET_{reset_code}", expires_at)
+		)
+		conn.commit()
+		conn.close()
+		
+		# Send reset code via email
+		email_sent = send_password_reset_email(email, reset_code)
+		
+		if email_sent:
+			return jsonify({
+				"success": True,
+				"message": "Reset code sent to your email"
+			})
+		else:
+			# For development: return code in response if email fails
+			print(f"[DEBUG] Email failed. Reset code for {email}: {reset_code}")
+			return jsonify({
+				"success": True,
+				"message": f"Email could not be sent. Your reset code is: {reset_code}",
+				"code": reset_code  # Only for development!
+			})
+			
+	except Exception as e:
+		print(f"[ERROR] Forgot password error: {e}")
+		return jsonify({"error": "Failed to send reset code"}), 500
+
+
+@app.route("/api/reset-password", methods=["POST"])
+def reset_password():
+	"""Reset password using reset code."""
+	data = request.get_json() or {}
+	email = data.get("email", "").strip().lower()
+	code = data.get("code", "").strip()
+	new_password = data.get("password", "")
+	
+	if not email or not code or not new_password:
+		return jsonify({"error": "Email, code, and password are required"}), 400
+	
+	if len(new_password) < 6:
+		return jsonify({"error": "Password must be at least 6 characters"}), 400
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Password reset not available"}), 500
+	
+	try:
+		supabase_url = os.getenv("SUPABASE_URL")
+		supabase_key = os.getenv("SUPABASE_ANON_KEY")
+		supabase_service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")  # Need service role key for admin operations
+		
+		if not supabase_url or not supabase_key:
+			return jsonify({"error": "Supabase not configured"}), 500
+		
+		# Verify reset code
+		conn = get_db_connection()
+		reset_record = conn.execute(
+			"SELECT * FROM verification_codes WHERE email = ? AND code = ? AND expires_at > datetime('now') ORDER BY created_at DESC LIMIT 1",
+			(email, f"RESET_{code}")
+		).fetchone()
+		
+		if not reset_record:
+			conn.close()
+			return jsonify({"error": "Invalid or expired reset code"}), 400
+		
+		# Update password in Supabase using admin API
+		# Note: This requires SUPABASE_SERVICE_ROLE_KEY (admin key, not anon key)
+		if not supabase_service_key:
+			conn.close()
+			return jsonify({"error": "Password reset requires service role key. Please configure SUPABASE_SERVICE_ROLE_KEY in environment variables."}), 500
+		
+		# Use service role key to update password
+		admin_supabase: Client = create_client(supabase_url, supabase_service_key)
+		
+		# First, find the user by email using admin API
+		users_response = admin_supabase.auth.admin.list_users()
+		user_id = None
+		
+		for user in users_response.users:
+			if user.email == email:
+				user_id = user.id
+				break
+		
+		if not user_id:
+			conn.close()
+			return jsonify({"error": "User not found"}), 404
+		
+		# Update password
+		update_response = admin_supabase.auth.admin.update_user_by_id(
+			user_id,
+			{"password": new_password}
+		)
+		
+		if update_response.user:
+			# Delete used reset code
+			conn.execute(
+				"DELETE FROM verification_codes WHERE email = ? AND code = ?",
+				(email, f"RESET_{code}")
+			)
+			conn.commit()
+			conn.close()
+			
+			return jsonify({
+				"success": True,
+				"message": "Password reset successfully"
+			})
+		else:
+			conn.close()
+			return jsonify({"error": "Failed to update password"}), 500
+			
+	except Exception as e:
+		print(f"[ERROR] Reset password error: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": "Failed to reset password"}), 500
+
+
+def send_password_reset_email(email: str, code: str) -> bool:
+	"""Send password reset code via email."""
+	# Check if email is configured
+	if not app.config.get('MAIL_USERNAME') or not app.config.get('MAIL_PASSWORD'):
+		print(f"[WARNING] Email not configured. MAIL_USERNAME or MAIL_PASSWORD is empty.")
+		print(f"[WARNING] Set environment variables: MAIL_USERNAME and MAIL_PASSWORD")
+		return False
+	
+	try:
+		msg = Message(
+			subject='GymVision AI - Password Reset Code',
+			recipients=[email],
+			body=f'''You requested a password reset for your GymVision AI account.
+
+Your reset code is: {code}
+
+Enter this code in the app to reset your password.
+
+This code will expire in 15 minutes.
+
+If you didn't request this, please ignore this email.
+''',
+			html=f'''<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+	<h2 style="color: #7c5cff;">GymVision AI - Password Reset</h2>
+	<p>You requested a password reset for your GymVision AI account.</p>
+	<p style="font-size: 24px; font-weight: bold; color: #7c5cff; letter-spacing: 4px; text-align: center; padding: 20px; background: #f5f5f5; border-radius: 8px;">{code}</p>
+	<p>Enter this code in the app to reset your password.</p>
+	<p style="color: #888; font-size: 12px;">This code will expire in 15 minutes.</p>
+	<p style="color: #888; font-size: 12px;">If you didn't request this, please ignore this email.</p>
+</body>
+</html>'''
+		)
+		mail.send(msg)
+		return True
+	except Exception as e:
+		print(f"[ERROR] Failed to send password reset email: {e}")
+		return False
+
+
 @app.route("/reset-password", methods=["GET"])
 def reset_password_redirect():
 	"""Password reset page - handles both query params and hash (for Supabase redirects)."""
