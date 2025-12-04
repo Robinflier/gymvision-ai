@@ -565,21 +565,16 @@ function initRegisterForm() {
 		}
 		if (errorEl) errorEl.classList.remove('show');
 		
-		// Get form values - check both possible ID formats
-		const emailInput = document.getElementById('register-email') || document.querySelector('#register-content input[type="email"]') || document.querySelector('input[type="email"]');
-		const usernameInput = document.getElementById('register-username') || document.querySelector('#register-content input[type="text"]') || document.querySelector('input[type="text"]');
-		const passwordInput = document.getElementById('register-password') || document.querySelector('#register-content input[type="password"]') || document.querySelector('input[type="password"]');
+		const email = document.getElementById('register-email')?.value?.trim();
+		const username = document.getElementById('register-username')?.value?.trim();
+		const password = document.getElementById('register-password')?.value;
 		
-		const email = emailInput?.value?.trim();
-		const username = usernameInput?.value?.trim();
-		const password = passwordInput?.value;
-		
-		if (!email || !password || !username) {
+		if (!email || !password) {
 			if (errorEl) {
-				errorEl.textContent = 'Please fill in all fields (email, username, and password)';
+				errorEl.textContent = 'Please fill in all required fields';
 				errorEl.classList.add('show');
 			} else {
-				alert('Please fill in all fields');
+				alert('Please fill in all required fields');
 			}
 			if (submitBtn) {
 				submitBtn.disabled = false;
@@ -588,26 +583,41 @@ function initRegisterForm() {
 			return;
 		}
 		
-		// Use Flask backend instead of Supabase Auth
-		const backendUrl = window.BACKEND_URL || window.location.origin;
+		if (!supabaseClient) {
+			await initSupabase();
+		}
+		if (!supabaseClient) {
+			if (errorEl) {
+				errorEl.textContent = 'Supabase not initialized. Please refresh the page.';
+				errorEl.classList.add('show');
+			} else {
+				alert('Supabase not initialized. Please refresh the page.');
+			}
+			if (submitBtn) {
+				submitBtn.disabled = false;
+				submitBtn.textContent = 'Sign Up';
+			}
+			return;
+		}
 		
 		try {
-			const response = await fetch(`${backendUrl}/register`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({ email, username, password }),
-				mode: 'cors',
-				credentials: 'omit'
+			const { data, error } = await supabaseClient.auth.signUp({
+				email,
+				password,
+				options: {
+					data: {
+						username: username || email.split('@')[0]
+					},
+					emailRedirectTo: undefined // Disable email verification redirect
+				}
 			});
 			
-			const data = await response.json();
-			
-			if (!response.ok) {
-				let errorMessage = data.error || 'Failed to create account';
-				if (errorMessage.includes('already exists')) {
-					errorMessage = 'This email or username is already registered. Please sign in instead.';
+			if (error) {
+				let errorMessage = error.message;
+				if (error.message.includes('already registered') || error.message.includes('already exists')) {
+					errorMessage = 'This email is already registered. Please sign in instead.';
+				} else if (error.message.includes('Password')) {
+					errorMessage = 'Password must be at least 6 characters';
 				}
 				
 				if (errorEl) {
@@ -624,17 +634,12 @@ function initRegisterForm() {
 			}
 			
 			// Registration successful
-			if (data.code) {
-				// Email failed - show code
-				alert(`Account created! Email could not be sent. Your verification code is: ${data.code}`);
-			} else {
-				alert('Account created! Please check your email for verification code.');
-			}
+			alert('Account created! Please check your email for verification (if enabled).');
 			showScreen('login');
 			
 		} catch (err) {
 			console.error('Registration error:', err);
-			const errorMessage = 'Network error. Please check your connection and try again.';
+			const errorMessage = err.message || 'An unexpected error occurred. Please try again.';
 			if (errorEl) {
 				errorEl.textContent = errorMessage;
 				errorEl.classList.add('show');
