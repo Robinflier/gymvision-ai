@@ -644,7 +644,13 @@ function initRegisterForm() {
 			
 		} catch (err) {
 			console.error('Registration error:', err);
-			const errorMessage = err.message || 'An unexpected error occurred. Please try again.';
+			let errorMessage = err.message || 'An unexpected error occurred. Please try again.';
+			
+			// Check if it's a database/user creation error
+			if (err.message && (err.message.includes('Database') || err.message.includes('user') || err.message.includes('PGRST'))) {
+				errorMessage = 'Account created in Supabase Auth, but failed to create user record. The trigger should handle this automatically. Please try logging in.';
+			}
+			
 			if (errorEl) {
 				errorEl.textContent = errorMessage;
 				errorEl.classList.add('show');
