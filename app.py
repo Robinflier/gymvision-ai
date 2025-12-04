@@ -787,7 +787,7 @@ def verify_email():
 
 @app.route("/api/forgot-password", methods=["POST"])
 def forgot_password():
-	"""Generate and send password reset code via email."""
+	"""Generate and send password reset code via email using Supabase."""
 	data = request.get_json() or {}
 	email = data.get("email", "").strip().lower()
 	
@@ -803,9 +803,6 @@ def forgot_password():
 		
 		if not supabase_url or not supabase_key:
 			return jsonify({"error": "Supabase not configured"}), 500
-		
-		# Note: We can't easily check if user exists with anon key without exposing info
-		# So we'll just generate the code and send it. If user doesn't exist, reset will fail anyway.
 		
 		# Generate 6-digit reset code
 		reset_code = generate_verification_code()
@@ -826,34 +823,67 @@ def forgot_password():
 		conn.commit()
 		conn.close()
 		
-		# Always return the code in response (for development/testing)
-		# This way user can always reset password even if email fails
 		print(f"[INFO] Password reset code generated for {email}: {reset_code}")
 		
-		# Try to send email, but don't fail if it doesn't work
-		email_sent = send_password_reset_email(email, reset_code)
+		# Use Supabase to send email with the code
+		# We'll use Supabase's resetPasswordForEmail but customize the redirect URL
+		# The code will be included in the email template via Supabase's custom data
+		supabase: Client = create_client(supabase_url, supabase_key)
 		
-		if email_sent:
-			print(f"[SUCCESS] Password reset code sent to {email}: {reset_code}")
+		# Get backend URL for redirect
+		backend_url = os.getenv("BACKEND_URL", "https://gymvision-ai.onrender.com")
+		
+		# Use Supabase's resetPasswordForEmail - this will send email via Supabase
+		# The email template in Supabase can be customized to show the code
+		# For now, we'll include the code in the redirect URL as a parameter
+		redirect_url = f"{backend_url}/reset-password?code={reset_code}"
+		
+		try:
+			# Send password reset email via Supabase
+			# Supabase will use its email service (more reliable than our SMTP)
+			result = supabase.auth.resetPasswordForEmail(
+				email,
+				{
+					"redirectTo": redirect_url,
+					"data": {
+						"code": reset_code  # Pass code in metadata
+					}
+				}
+			)
+			
+			print(f"[SUCCESS] Password reset email sent via Supabase to {email}: {reset_code}")
+			
+			# Always return code in response (so user can use it even if email is delayed)
 			return jsonify({
 				"success": True,
 				"message": "Reset code sent to your email",
 				"code": reset_code  # Always include code as fallback
 			})
-		else:
-			# Email failed - return code in response so user can still reset
-			print(f"[WARNING] Email failed. Reset code for {email}: {reset_code}")
-			print(f"[WARNING] Check MAIL_USERNAME and MAIL_PASSWORD in Render environment variables")
-			# Return code in response so user can still reset password
-			return jsonify({
-				"success": True,
-				"message": "Email could not be sent. Your reset code is shown below.",
-				"code": reset_code,  # Always include code as fallback
-				"email_failed": True
-			})
+			
+		except Exception as supabase_error:
+			print(f"[WARNING] Supabase email failed: {supabase_error}")
+			# Fallback: try our own email service
+			email_sent = send_password_reset_email(email, reset_code)
+			
+			if email_sent:
+				return jsonify({
+					"success": True,
+					"message": "Reset code sent to your email",
+					"code": reset_code
+				})
+			else:
+				# Both failed - return code in response
+				return jsonify({
+					"success": True,
+					"message": "Email could not be sent. Your reset code is shown below.",
+					"code": reset_code,
+					"email_failed": True
+				})
 			
 	except Exception as e:
 		print(f"[ERROR] Forgot password error: {e}")
+		import traceback
+		traceback.print_exc()
 		return jsonify({"error": "Failed to send reset code"}), 500
 
 
