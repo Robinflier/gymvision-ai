@@ -687,29 +687,25 @@ function initForgotPasswordForm() {
 			// Send password reset code via backend API
 			const backendUrl = window.BACKEND_URL || window.location.origin;
 			
-			if (!backendUrl) {
-				throw new Error('Backend URL not configured. Please set BACKEND_URL in index.html');
-			}
-			
-			console.log('Sending forgot password request to:', `${backendUrl}/api/forgot-password`);
+			// Store email immediately for reset password form (before API call)
+			sessionStorage.setItem('password_reset_email', email);
 			
 			// Show loading message
 			if (successEl) {
-				successEl.textContent = 'Sending reset code... (this may take up to 2 minutes if the server is starting)';
+				successEl.textContent = 'Sending reset code...';
 				successEl.classList.add('show');
 			}
 			if (errorEl) errorEl.classList.remove('show');
 			
-			// Use AbortController for timeout (120 seconds for Render cold start)
-			const controller = new AbortController();
-			const timeoutId = setTimeout(() => {
-				controller.abort();
-				console.log('Request timeout after 120 seconds');
-			}, 120000); // 120 seconds
-			
-			let response;
-			try {
-				response = await fetch(`${backendUrl}/api/forgot-password`, {
+			// Try to send email in background (don't block navigation)
+			if (backendUrl) {
+				console.log('Sending forgot password request to:', `${backendUrl}/api/forgot-password`);
+				
+				// Use AbortController for timeout (30 seconds - shorter timeout since we navigate immediately)
+				const controller = new AbortController();
+				const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 seconds
+				
+				fetch(`${backendUrl}/api/forgot-password`, {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json'
@@ -718,48 +714,31 @@ function initForgotPasswordForm() {
 					mode: 'cors',
 					credentials: 'omit',
 					signal: controller.signal
+				}).then(response => {
+					clearTimeout(timeoutId);
+					if (response.ok) {
+						return response.json();
+					} else {
+						return response.json().then(data => {
+							console.warn('Password reset email may not have been sent:', data.error || 'Unknown error');
+						});
+					}
+				}).catch(err => {
+					clearTimeout(timeoutId);
+					console.warn('Password reset email may not have been sent:', err.message || 'Network error');
+					// Don't show error to user - we're navigating anyway
 				});
-			} catch (fetchError) {
-				clearTimeout(timeoutId);
-				// Check if it's an abort (timeout) or network error
-				if (fetchError.name === 'AbortError') {
-					throw new Error('Request timed out. The server may be starting up. Please wait a moment and try again.');
-				} else if (fetchError.message && fetchError.message.includes('Load failed')) {
-					throw new Error('Cannot connect to server. The server may be starting up (this can take up to 2 minutes). Please try again in a moment.');
-				} else {
-					throw fetchError;
-				}
 			}
 			
-			clearTimeout(timeoutId);
-			
-			if (!response.ok) {
-				// Try to parse error response
-				let errorData;
-				try {
-					errorData = await response.json();
-				} catch (e) {
-					errorData = { error: `Server error: ${response.status} ${response.statusText}` };
-				}
-				throw new Error(errorData.error || `Failed to send reset code (${response.status})`);
-			}
-			
-			const data = await response.json();
-			
-			// Success - redirect to reset password screen
+			// Immediately navigate to reset password screen (don't wait for API response)
 			if (successEl) {
-				successEl.textContent = 'Reset code sent! Check your email.';
-				successEl.classList.add('show');
+				successEl.textContent = 'Redirecting to reset password...';
 			}
-			if (errorEl) errorEl.classList.remove('show');
 			
-			// Store email for reset password form
-			sessionStorage.setItem('password_reset_email', email);
-			
-			// Clear form and redirect to reset password screen
+			// Clear form
 			if (form) form.reset();
 			
-			// Redirect to reset password screen after short delay
+			// Redirect to reset password screen immediately
 			setTimeout(() => {
 				showScreen('reset-password');
 				// Update subtitle to show email
@@ -767,7 +746,7 @@ function initForgotPasswordForm() {
 				if (subtitle) {
 					subtitle.textContent = `Enter the code sent to ${email} and your new password`;
 				}
-			}, 1500);
+			}, 500); // Short delay for smooth transition
 			
 		} catch (err) {
 			console.error('Forgot password error:', err);
