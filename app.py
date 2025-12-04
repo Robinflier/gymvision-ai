@@ -826,14 +826,19 @@ def forgot_password():
 		conn.commit()
 		conn.close()
 		
-		# Send reset code via email
+		# Always return the code in response (for development/testing)
+		# This way user can always reset password even if email fails
+		print(f"[INFO] Password reset code generated for {email}: {reset_code}")
+		
+		# Try to send email, but don't fail if it doesn't work
 		email_sent = send_password_reset_email(email, reset_code)
 		
 		if email_sent:
 			print(f"[SUCCESS] Password reset code sent to {email}: {reset_code}")
 			return jsonify({
 				"success": True,
-				"message": "Reset code sent to your email"
+				"message": "Reset code sent to your email",
+				"code": reset_code  # Always include code as fallback
 			})
 		else:
 			# Email failed - return code in response so user can still reset
@@ -842,8 +847,8 @@ def forgot_password():
 			# Return code in response so user can still reset password
 			return jsonify({
 				"success": True,
-				"message": "Email could not be sent. Please check your email configuration.",
-				"code": reset_code,  # Include code in response as fallback
+				"message": "Email could not be sent. Your reset code is shown below.",
+				"code": reset_code,  # Always include code as fallback
 				"email_failed": True
 			})
 			

@@ -730,25 +730,40 @@ function initForgotPasswordForm() {
 					}
 				}).then(data => {
 					if (data && data.success) {
-						if (data.email_failed && data.code) {
-							// Email failed but we have the code - show it to user
-							console.warn('Email failed, but code is available:', data.code);
-							// Store code in sessionStorage so user can see it
+						// Always store code if available (for fallback)
+						if (data.code) {
+							console.log('Password reset code received:', data.code);
 							sessionStorage.setItem('password_reset_code_fallback', data.code);
-							// Show alert or update UI to show the code
-							setTimeout(() => {
-								const resetScreen = document.getElementById('reset-password-content');
-								if (resetScreen && !resetScreen.classList.contains('hidden')) {
-									const errorEl = document.getElementById('reset-password-error-message');
-									if (errorEl) {
-										errorEl.textContent = `Email not sent. Your reset code is: ${data.code}`;
-										errorEl.style.color = '#ffa500'; // Orange warning color
-										errorEl.classList.add('show');
+							
+							// Show code in UI if email failed or always show for now
+							if (data.email_failed || true) { // Always show code for now
+								setTimeout(() => {
+									const resetScreen = document.getElementById('reset-password-content');
+									if (resetScreen && !resetScreen.classList.contains('hidden')) {
+										const errorEl = document.getElementById('reset-password-error-message');
+										if (errorEl) {
+											errorEl.innerHTML = `⚠️ ${data.email_failed ? 'Email not sent.' : 'Email sent!'} Your reset code is: <strong style="color: #7c5cff; font-size: 20px; letter-spacing: 3px; display: inline-block; padding: 8px 16px; background: rgba(124, 92, 255, 0.1); border-radius: 8px; margin: 8px 0;">${data.code}</strong>`;
+											errorEl.style.color = data.email_failed ? '#ffa500' : '#4caf50';
+											errorEl.style.backgroundColor = data.email_failed ? 'rgba(255, 165, 0, 0.1)' : 'rgba(76, 175, 80, 0.1)';
+											errorEl.style.padding = '16px';
+											errorEl.style.borderRadius = '8px';
+											errorEl.style.border = `1px solid ${data.email_failed ? '#ffa500' : '#4caf50'}`;
+											errorEl.style.marginBottom = '16px';
+											errorEl.style.textAlign = 'center';
+											errorEl.classList.add('show');
+										}
+										// Auto-fill the code input
+										const tokenInput = document.getElementById('reset-password-token');
+										if (tokenInput) {
+											tokenInput.value = data.code;
+										}
 									}
-								}
-							}, 1000);
-						} else {
-							console.log('Password reset code sent successfully');
+								}, 500);
+							}
+						}
+						
+						if (!data.email_failed) {
+							console.log('Password reset code sent successfully via email');
 						}
 					}
 				}).catch(err => {
