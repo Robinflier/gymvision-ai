@@ -825,62 +825,40 @@ def forgot_password():
 		
 		print(f"[INFO] Password reset code generated for {email}: {reset_code}")
 		
-		# Use Supabase to send email with the code
-		# We'll use Supabase's resetPasswordForEmail but customize the redirect URL
-		# The code will be included in the email template via Supabase's custom data
-		supabase: Client = create_client(supabase_url, supabase_key)
+		# Check if user exists in our database (not Supabase auth - we use our own auth)
+		conn = get_db_connection()
+		user = conn.execute("SELECT id, email FROM users WHERE email = ?", (email,)).fetchone()
+		conn.close()
 		
-		# Get backend URL for redirect
-		backend_url = os.getenv("BACKEND_URL", "https://gymvision-ai.onrender.com")
+		if not user:
+			# Don't reveal if user exists (security)
+			# But still return success to prevent email enumeration
+			print(f"[WARNING] Password reset requested for non-existent email: {email}")
+			return jsonify({
+				"success": True,
+				"message": "If this email exists, a reset code has been sent."
+			})
 		
-		# Use Supabase's resetPasswordForEmail - this will send email via Supabase
-		# The email template in Supabase can be customized to show the code
-		# For now, we'll include the code in the redirect URL as a parameter
-		redirect_url = f"{backend_url}/reset-password?code={reset_code}"
+		# Send password reset email via our SMTP (we don't use Supabase auth)
+		email_sent = send_password_reset_email(email, reset_code)
 		
-		try:
-			# Send password reset email via Supabase
-			# Supabase will use its email service (more reliable than our SMTP)
-			result = supabase.auth.resetPasswordForEmail(
-				email,
-				{
-					"redirectTo": redirect_url,
-					"data": {
-						"code": reset_code  # Pass code in metadata
-					}
-				}
-			)
-			
-			print(f"[SUCCESS] Password reset email sent via Supabase to {email}")
-			# DO NOT return code in response if email was sent successfully (security!)
+		if email_sent:
+			# Email sent successfully - don't return code (security)
+			print(f"[SUCCESS] Password reset email sent via SMTP to {email}")
 			return jsonify({
 				"success": True,
 				"message": "Reset code sent to your email"
 				# NO CODE HERE - only in email for security
 			})
-			
-		except Exception as supabase_error:
-			print(f"[WARNING] Supabase email failed: {supabase_error}")
-			# Fallback: try our own email service
-			email_sent = send_password_reset_email(email, reset_code)
-			
-			if email_sent:
-				# Email sent via fallback - don't return code (security)
-				return jsonify({
-					"success": True,
-					"message": "Reset code sent to your email"
-					# NO CODE HERE - only in email for security
-				})
-			else:
-				# Both email methods failed - ONLY NOW return code as last resort
-				# This is a fallback for when email is completely broken
-				print(f"[WARNING] All email methods failed. Returning code as fallback for {email}: {reset_code}")
-				return jsonify({
-					"success": True,
-					"message": "Email could not be sent. Your reset code is shown below.",
-					"code": reset_code,
-					"email_failed": True
-				})
+		else:
+			# Email failed - return code as fallback (last resort)
+			print(f"[WARNING] Email failed. Returning code as fallback for {email}: {reset_code}")
+			return jsonify({
+				"success": True,
+				"message": "Email could not be sent. Your reset code is shown below.",
+				"code": reset_code,
+				"email_failed": True
+			})
 			
 	except Exception as e:
 		print(f"[ERROR] Forgot password error: {e}")
@@ -903,72 +881,51 @@ def reset_password():
 	if len(new_password) < 6:
 		return jsonify({"error": "Password must be at least 6 characters"}), 400
 	
-	if not SUPABASE_AVAILABLE:
-		return jsonify({"error": "Password reset not available"}), 500
-	
-	try:
-		supabase_url = os.getenv("SUPABASE_URL")
-		supabase_key = os.getenv("SUPABASE_ANON_KEY")
-		supabase_service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")  # Need service role key for admin operations
-		
-		if not supabase_url or not supabase_key:
-			return jsonify({"error": "Supabase not configured"}), 500
-		
-		# Verify reset code
-		conn = get_db_connection()
-		reset_record = conn.execute(
-			"SELECT * FROM verification_codes WHERE email = ? AND code = ? AND expires_at > datetime('now') ORDER BY created_at DESC LIMIT 1",
-			(email, f"RESET_{code}")
-		).fetchone()
-		
-		if not reset_record:
-			conn.close()
-			return jsonify({"error": "Invalid or expired reset code"}), 400
-		
-		# Update password in Supabase using admin API
-		# Note: This requires SUPABASE_SERVICE_ROLE_KEY (admin key, not anon key)
-		if not supabase_service_key:
-			conn.close()
-			return jsonify({"error": "Password reset requires service role key. Please configure SUPABASE_SERVICE_ROLE_KEY in environment variables."}), 500
-		
-		# Use service role key to update password
-		admin_supabase: Client = create_client(supabase_url, supabase_service_key)
-		
-		# First, find the user by email using admin API
-		users_response = admin_supabase.auth.admin.list_users()
-		user_id = None
-		
-		for user in users_response.users:
-			if user.email == email:
-				user_id = user.id
-				break
-		
-		if not user_id:
-			conn.close()
-			return jsonify({"error": "User not found"}), 404
-		
-		# Update password
-		update_response = admin_supabase.auth.admin.update_user_by_id(
-			user_id,
-			{"password": new_password}
-		)
-		
-		if update_response.user:
+		try:
+			# Verify reset code
+			conn = get_db_connection()
+			reset_record = conn.execute(
+				"SELECT * FROM verification_codes WHERE email = ? AND code = ? AND expires_at > datetime('now') ORDER BY created_at DESC LIMIT 1",
+				(email, f"RESET_{code}")
+			).fetchone()
+			
+			if not reset_record:
+				conn.close()
+				return jsonify({"error": "Invalid or expired reset code"}), 400
+			
+			# Find user in our database (we use our own auth, not Supabase auth)
+			user = conn.execute(
+				"SELECT id, email FROM users WHERE email = ?",
+				(email,)
+			).fetchone()
+			
+			if not user:
+				conn.close()
+				return jsonify({"error": "User not found"}), 404
+			
+			# Update password in our database (hash it first)
+			from werkzeug.security import generate_password_hash
+			password_hash = generate_password_hash(new_password)
+			
+			conn.execute(
+				"UPDATE users SET password_hash = ? WHERE email = ?",
+				(password_hash, email)
+			)
+			
 			# Delete used reset code
 			conn.execute(
 				"DELETE FROM verification_codes WHERE email = ? AND code = ?",
 				(email, f"RESET_{code}")
 			)
+			
 			conn.commit()
 			conn.close()
 			
+			print(f"[SUCCESS] Password reset successfully for {email}")
 			return jsonify({
 				"success": True,
 				"message": "Password reset successfully"
 			})
-		else:
-			conn.close()
-			return jsonify({"error": "Failed to update password"}), 500
 			
 	except Exception as e:
 		print(f"[ERROR] Reset password error: {e}")
