@@ -63,6 +63,13 @@ CREATE POLICY "Users can update own data"
     FOR UPDATE
     USING (auth.uid() = id);
 
+-- Policy: Users can insert their own data (needed for fallback creation)
+DROP POLICY IF EXISTS "Users can insert own data" ON public.users;
+CREATE POLICY "Users can insert own data"
+    ON public.users
+    FOR INSERT
+    WITH CHECK (auth.uid() = id);
+
 -- Step 6: Migrate existing auth.users to public.users (if any exist)
 -- First ensure username column exists
 DO $$
