@@ -831,6 +831,27 @@ function initResetPasswordForm() {
 		subtitle.textContent = `Enter the code sent to ${email} and your new password`;
 	}
 	
+	// Check if we have a fallback code (if email failed)
+	const fallbackCode = sessionStorage.getItem('password_reset_code_fallback');
+	if (fallbackCode) {
+		const errorEl = document.getElementById('reset-password-error-message');
+		if (errorEl) {
+			errorEl.innerHTML = `⚠️ Email not sent. Your reset code is: <strong style="color: #7c5cff; font-size: 18px; letter-spacing: 2px;">${fallbackCode}</strong>`;
+			errorEl.style.color = '#ffa500';
+			errorEl.style.backgroundColor = 'rgba(255, 165, 0, 0.1)';
+			errorEl.style.padding = '12px';
+			errorEl.style.borderRadius = '8px';
+			errorEl.style.border = '1px solid #ffa500';
+			errorEl.style.marginBottom = '16px';
+			errorEl.classList.add('show');
+		}
+		// Pre-fill the code input
+		const tokenInput = document.getElementById('reset-password-token');
+		if (tokenInput) {
+			tokenInput.value = fallbackCode;
+		}
+	}
+	
 	// Auto-format token input (only numbers, max 6 digits)
 	if (tokenInput) {
 		tokenInput.addEventListener('input', (e) => {
