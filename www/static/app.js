@@ -639,6 +639,54 @@ function initRegisterForm() {
 			}
 			
 			// Registration successful
+			// The trigger should automatically create the user in public.users
+			// Wait a moment for the trigger to complete, then verify
+			if (data.user) {
+				// Wait for trigger to complete (give it 1 second)
+				await new Promise(resolve => setTimeout(resolve, 1000));
+				
+				// Verify user was created in public.users (trigger should have done this)
+				try {
+					const { data: userRecord, error: verifyError } = await supabaseClient
+						.from('users')
+						.select('id')
+						.eq('id', data.user.id)
+						.single();
+					
+					if (verifyError && verifyError.code === 'PGRST116') {
+						// User not in public.users yet - trigger might have failed
+						// Try to create it manually as fallback
+						const username = data.user.user_metadata?.username || data.user.email?.split('@')[0] || 'user';
+						const { error: insertError } = await supabaseClient
+							.from('users')
+							.insert({
+								id: data.user.id,
+								email: data.user.email,
+								username: username
+							});
+						
+						if (insertError) {
+							console.error("Failed to create user in public.users:", insertError);
+							// Show helpful error message
+							if (errorEl) {
+								errorEl.textContent = 'Account created in Supabase Auth, but failed to create user record. Please check if the trigger is set up correctly. Error: ' + (insertError.message || 'Unknown error');
+								errorEl.classList.add('show');
+							}
+							if (submitBtn) {
+								submitBtn.disabled = false;
+								submitBtn.textContent = 'Sign Up';
+							}
+							return;
+						}
+					} else if (verifyError) {
+						console.error("Error verifying user creation:", verifyError);
+					}
+				} catch (verifyErr) {
+					console.error("Error verifying user creation:", verifyErr);
+					// Continue anyway - user might still be created by trigger
+				}
+			}
+			
 			alert('Account created! Please check your email for verification (if enabled).');
 			showScreen('login');
 			
