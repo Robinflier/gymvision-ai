@@ -20,7 +20,6 @@ except ImportError:
 
 from flask import Flask, jsonify, render_template, request, send_from_directory, redirect, url_for, flash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from flask_mail import Mail, Message
 from flask_cors import CORS
 import secrets
 
@@ -41,6 +40,13 @@ try:
 	GROQ_AVAILABLE = True
 except Exception:
 	GROQ_AVAILABLE = False
+
+try:
+	from resend import Resend  # type: ignore
+	RESEND_AVAILABLE = True
+except Exception:
+	RESEND_AVAILABLE = False
+	Resend = None
 
 APP_ROOT = Path(__file__).resolve().parent
 MODEL_PATH = APP_ROOT / "best.pt"
@@ -153,15 +159,9 @@ CORS(app, resources={
 	r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}
 })
 
-# Flask-Mail setup
-app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
-app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'true').lower() in ['true', 'on', '1']
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', '')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', '')
-app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@gymvision.ai')
-
-mail = Mail(app)
+# Resend email setup (replaces Flask-Mail)
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+RESEND_FROM_EMAIL = os.environ.get('RESEND_FROM_EMAIL', 'noreply@gymvision.ai')
 
 # Flask-Login setup
 login_manager = LoginManager()
@@ -935,28 +935,20 @@ def reset_password():
 
 
 def send_password_reset_email(email: str, code: str) -> bool:
-	"""Send password reset code via email."""
-	# Check if email is configured
-	if not app.config.get('MAIL_USERNAME') or not app.config.get('MAIL_PASSWORD'):
-		print(f"[WARNING] Email not configured. MAIL_USERNAME or MAIL_PASSWORD is empty.")
-		print(f"[WARNING] Set environment variables: MAIL_USERNAME and MAIL_PASSWORD")
+	"""Send password reset code via email using Resend."""
+	if not RESEND_AVAILABLE or not RESEND_API_KEY:
+		print(f"[WARNING] Resend not available. RESEND_API_KEY is not set.")
+		print(f"[WARNING] Set RESEND_API_KEY environment variable")
 		return False
 	
 	try:
-		msg = Message(
-			subject='GymVision AI - Password Reset Code',
-			recipients=[email],
-			body=f'''You requested a password reset for your GymVision AI account.
-
-Your reset code is: {code}
-
-Enter this code in the app to reset your password.
-
-This code will expire in 15 minutes.
-
-If you didn't request this, please ignore this email.
-''',
-			html=f'''<html>
+		resend = Resend(RESEND_API_KEY)
+		
+		resend.emails.send({
+			"from": RESEND_FROM_EMAIL,
+			"to": [email],
+			"subject": "GymVision AI - Password Reset Code",
+			"html": f'''<html>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
 	<h2 style="color: #7c5cff;">GymVision AI - Password Reset</h2>
 	<p>You requested a password reset for your GymVision AI account.</p>
@@ -965,12 +957,25 @@ If you didn't request this, please ignore this email.
 	<p style="color: #888; font-size: 12px;">This code will expire in 15 minutes.</p>
 	<p style="color: #888; font-size: 12px;">If you didn't request this, please ignore this email.</p>
 </body>
-</html>'''
-		)
-		mail.send(msg)
+</html>''',
+			"text": f'''You requested a password reset for your GymVision AI account.
+
+Your reset code is: {code}
+
+Enter this code in the app to reset your password.
+
+This code will expire in 15 minutes.
+
+If you didn't request this, please ignore this email.
+'''
+		})
+		
+		print(f"[SUCCESS] Password reset email sent via Resend to {email}")
 		return True
 	except Exception as e:
-		print(f"[ERROR] Failed to send password reset email: {e}")
+		print(f"[ERROR] Failed to send password reset email via Resend: {e}")
+		import traceback
+		traceback.print_exc()
 		return False
 
 
