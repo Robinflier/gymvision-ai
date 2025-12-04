@@ -549,8 +549,12 @@ function initRegisterForm() {
 	const form = document.getElementById('register-form');
 	if (!form) return;
 	
-	const errorEl = document.getElementById('register-error-message');
-	const submitBtn = document.getElementById('register-submit-btn');
+	// Try multiple possible error element IDs
+	const errorEl = document.getElementById('register-error-message') || 
+	                document.querySelector('#register-content .auth-error') ||
+	                document.querySelector('#register-content [id*="error"]');
+	const submitBtn = document.getElementById('register-submit-btn') ||
+	                  document.querySelector('#register-content button[type="submit"]');
 	
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault();
