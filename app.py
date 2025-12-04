@@ -1017,9 +1017,76 @@ If you didn't request this, please ignore this email.
 
 @app.route("/reset-password", methods=["GET"])
 def reset_password_redirect():
-	"""Password reset page - handles both query params and hash (for Supabase redirects)."""
-	# Supabase sends tokens in hash (#access_token=...) which doesn't reach the server
-	# So we need to serve a page that reads the hash and redirects to the app
+	"""Password reset page - handles code from URL or Supabase tokens."""
+	# Check if we have a code in the URL (from our custom reset flow)
+	reset_code = request.args.get("code", "")
+	
+	if reset_code:
+		# We have a code in the URL - show it to the user and redirect to app
+		return f"""
+	<!DOCTYPE html>
+	<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Reset Password - GymVision AI</title>
+		<style>
+			body {{
+				font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				min-height: 100vh;
+				margin: 0;
+				background: #0f0f10;
+				color: #fff;
+			}}
+			.container {{
+				text-align: center;
+				padding: 20px;
+				max-width: 400px;
+			}}
+			.code {{
+				font-size: 32px;
+				font-weight: bold;
+				color: #7c5cff;
+				letter-spacing: 6px;
+				padding: 20px;
+				background: rgba(124, 92, 255, 0.1);
+				border-radius: 12px;
+				margin: 20px 0;
+				border: 2px solid #7c5cff;
+			}}
+			.button {{
+				display: inline-block;
+				padding: 14px 28px;
+				background: #7c5cff;
+				color: #fff;
+				text-decoration: none;
+				border-radius: 12px;
+				font-weight: 600;
+				margin-top: 20px;
+				cursor: pointer;
+				border: none;
+			}}
+			.button:hover {{
+				background: #6a4de8;
+			}}
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<h1>Reset Your Password</h1>
+			<p>Your reset code is:</p>
+			<div class="code">{reset_code}</div>
+			<p>Enter this code in the GymVision AI app to reset your password.</p>
+			<button class="button" onclick="window.location.href='gymvisionai://reset-password?code={reset_code}'">Open App</button>
+		</div>
+	</body>
+	</html>
+	"""
+	
+	# Otherwise, handle Supabase token redirects (old flow)
 	return """
 	<!DOCTYPE html>
 	<html>
