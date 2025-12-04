@@ -614,69 +614,74 @@ function initRegisterForm() {
 		
 		try {
 			const { data, error } = await supabaseClient.auth.signUp({
-			email,
-			password,
-			options: {
-				data: {
-					username: username || email.split('@')[0]
-					},
-					emailRedirectTo: undefined // Disable email verification redirect
-			}
-		});
-		
-		if (error) {
-			let errorMessage = error.message;
-			if (error.message.includes('already registered') || error.message.includes('already exists')) {
-				errorMessage = 'This email is already registered. Please sign in instead.';
-			} else if (error.message.includes('Password')) {
-				errorMessage = 'Password must be at least 6 characters';
+				email,
+				password,
+				options: {
+					data: {
+						username: username || email.split('@')[0]
+					}
+				}
+			});
+			
+			if (error) {
+				let errorMessage = error.message;
+				if (error.message.includes('already registered') || error.message.includes('already exists')) {
+					errorMessage = 'This email is already registered. Please sign in instead.';
+				} else if (error.message.includes('Password')) {
+					errorMessage = 'Password must be at least 6 characters';
+				}
+				
+				if (errorEl) {
+					errorEl.textContent = errorMessage;
+					errorEl.classList.add('show');
+				} else {
+					alert(errorMessage);
+				}
+				if (submitBtn) {
+					submitBtn.disabled = false;
+					submitBtn.textContent = 'Sign Up';
+				}
+				return;
 			}
 			
-			if (errorEl) {
-				errorEl.textContent = errorMessage;
-				errorEl.classList.add('show');
-			} else {
-				alert(errorMessage);
-			}
-			if (submitBtn) {
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Sign Up';
-			}
-			return;
-		}
-		
-		// Registration successful
+			// Registration successful in Supabase Auth
 			// The trigger should automatically create the user in public.users
-			// Wait a moment for the trigger to complete, then verify
+			// Wait a moment for the trigger to complete
 			if (data.user) {
-				// Wait for trigger to complete (give it 1 second)
-				await new Promise(resolve => setTimeout(resolve, 1000));
+				console.log('User created in Supabase Auth:', data.user.id);
+				
+				// Wait for trigger to complete (give it 2 seconds)
+				await new Promise(resolve => setTimeout(resolve, 2000));
 				
 				// Verify user was created in public.users (trigger should have done this)
 				try {
 					const { data: userRecord, error: verifyError } = await supabaseClient
 						.from('users')
-						.select('id')
+						.select('id, email, username')
 						.eq('id', data.user.id)
 						.single();
 					
 					if (verifyError && verifyError.code === 'PGRST116') {
 						// User not in public.users yet - trigger might have failed
 						// Try to create it manually as fallback
-						const username = data.user.user_metadata?.username || data.user.email?.split('@')[0] || 'user';
+						console.log('Trigger did not create user, creating manually...');
+						const userUsername = data.user.user_metadata?.username || username || data.user.email?.split('@')[0] || 'user';
+						
 						const { error: insertError } = await supabaseClient
 							.from('users')
 							.insert({
 								id: data.user.id,
 								email: data.user.email,
-								username: username
+								username: userUsername
 							});
 						
 						if (insertError) {
 							console.error("Failed to create user in public.users:", insertError);
+							console.error("Full error:", JSON.stringify(insertError, null, 2));
+							
 							// Show helpful error message
 							if (errorEl) {
-								errorEl.textContent = 'Account created in Supabase Auth, but failed to create user record. Please check if the trigger is set up correctly. Error: ' + (insertError.message || 'Unknown error');
+								errorEl.textContent = 'Account created, but database error. Please try logging in - your account may work. Error: ' + (insertError.message || insertError.code || 'Unknown');
 								errorEl.classList.add('show');
 							}
 							if (submitBtn) {
@@ -684,9 +689,14 @@ function initRegisterForm() {
 								submitBtn.textContent = 'Sign Up';
 							}
 							return;
+						} else {
+							console.log('Successfully created user in public.users (fallback)');
 						}
 					} else if (verifyError) {
 						console.error("Error verifying user creation:", verifyError);
+						// Continue anyway - user might still be created
+					} else {
+						console.log('User found in public.users (trigger worked!):', userRecord);
 					}
 				} catch (verifyErr) {
 					console.error("Error verifying user creation:", verifyErr);
@@ -694,7 +704,8 @@ function initRegisterForm() {
 				}
 			}
 			
-			alert('Account created! Please check your email for verification (if enabled).');
+			// Success!
+			alert('Account created successfully! You can now sign in.');
 			showScreen('login');
 			
 		} catch (err) {
