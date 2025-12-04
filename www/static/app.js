@@ -730,40 +730,53 @@ function initForgotPasswordForm() {
 					}
 				}).then(data => {
 					if (data && data.success) {
-						// Always store code if available (for fallback)
-						if (data.code) {
-							console.log('Password reset code received:', data.code);
+						// SECURITY: Only show code if email failed (prevent password reset hijacking)
+						if (data.email_failed && data.code) {
+							// Email failed - show code as fallback (last resort)
+							console.warn('Email failed, showing code as fallback');
 							sessionStorage.setItem('password_reset_code_fallback', data.code);
 							
-							// Show code in UI if email failed or always show for now
-							if (data.email_failed || true) { // Always show code for now
-								setTimeout(() => {
-									const resetScreen = document.getElementById('reset-password-content');
-									if (resetScreen && !resetScreen.classList.contains('hidden')) {
-										const errorEl = document.getElementById('reset-password-error-message');
-										if (errorEl) {
-											errorEl.innerHTML = `⚠️ ${data.email_failed ? 'Email not sent.' : 'Email sent!'} Your reset code is: <strong style="color: #7c5cff; font-size: 20px; letter-spacing: 3px; display: inline-block; padding: 8px 16px; background: rgba(124, 92, 255, 0.1); border-radius: 8px; margin: 8px 0;">${data.code}</strong>`;
-											errorEl.style.color = data.email_failed ? '#ffa500' : '#4caf50';
-											errorEl.style.backgroundColor = data.email_failed ? 'rgba(255, 165, 0, 0.1)' : 'rgba(76, 175, 80, 0.1)';
-											errorEl.style.padding = '16px';
-											errorEl.style.borderRadius = '8px';
-											errorEl.style.border = `1px solid ${data.email_failed ? '#ffa500' : '#4caf50'}`;
-											errorEl.style.marginBottom = '16px';
-											errorEl.style.textAlign = 'center';
-											errorEl.classList.add('show');
-										}
-										// Auto-fill the code input
-										const tokenInput = document.getElementById('reset-password-token');
-										if (tokenInput) {
-											tokenInput.value = data.code;
-										}
+							setTimeout(() => {
+								const resetScreen = document.getElementById('reset-password-content');
+								if (resetScreen && !resetScreen.classList.contains('hidden')) {
+									const errorEl = document.getElementById('reset-password-error-message');
+									if (errorEl) {
+										errorEl.innerHTML = `⚠️ Email could not be sent. Your reset code is: <strong style="color: #7c5cff; font-size: 20px; letter-spacing: 3px; display: inline-block; padding: 8px 16px; background: rgba(124, 92, 255, 0.1); border-radius: 8px; margin: 8px 0;">${data.code}</strong>`;
+										errorEl.style.color = '#ffa500';
+										errorEl.style.backgroundColor = 'rgba(255, 165, 0, 0.1)';
+										errorEl.style.padding = '16px';
+										errorEl.style.borderRadius = '8px';
+										errorEl.style.marginBottom = '16px';
+										errorEl.style.textAlign = 'center';
+										errorEl.classList.add('show');
 									}
-								}, 500);
-							}
-						}
-						
-						if (!data.email_failed) {
+									// Auto-fill the code input
+									const tokenInput = document.getElementById('reset-password-token');
+									if (tokenInput) {
+										tokenInput.value = data.code;
+									}
+								}
+							}, 500);
+						} else {
+							// Email was sent successfully - don't show code (security!)
 							console.log('Password reset code sent successfully via email');
+							// Show success message without code
+							setTimeout(() => {
+								const resetScreen = document.getElementById('reset-password-content');
+								if (resetScreen && !resetScreen.classList.contains('hidden')) {
+									const errorEl = document.getElementById('reset-password-error-message');
+									if (errorEl) {
+										errorEl.innerHTML = `✅ Reset code sent to your email. Please check your inbox.`;
+										errorEl.style.color = '#4caf50';
+										errorEl.style.backgroundColor = 'rgba(76, 175, 80, 0.1)';
+										errorEl.style.padding = '16px';
+										errorEl.style.borderRadius = '8px';
+										errorEl.style.marginBottom = '16px';
+										errorEl.style.textAlign = 'center';
+										errorEl.classList.add('show');
+									}
+								}
+							}, 500);
 						}
 					}
 				}).catch(err => {
