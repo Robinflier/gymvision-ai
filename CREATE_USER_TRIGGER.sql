@@ -7,9 +7,21 @@
 CREATE TABLE IF NOT EXISTS public.users (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     email TEXT,
-    username TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Step 1b: Add username column if it doesn't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = 'users' 
+        AND column_name = 'username'
+    ) THEN
+        ALTER TABLE public.users ADD COLUMN username TEXT;
+    END IF;
+END $$;
 
 -- Step 2: Create function to handle new user creation
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -20,7 +32,8 @@ BEGIN
         NEW.id,
         NEW.email,
         COALESCE(NEW.raw_user_meta_data->>'username', split_part(NEW.email, '@', 1))
-    );
+    )
+    ON CONFLICT (id) DO NOTHING;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -51,6 +64,20 @@ CREATE POLICY "Users can update own data"
     USING (auth.uid() = id);
 
 -- Step 6: Migrate existing auth.users to public.users (if any exist)
+-- First ensure username column exists
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = 'users' 
+        AND column_name = 'username'
+    ) THEN
+        ALTER TABLE public.users ADD COLUMN username TEXT;
+    END IF;
+END $$;
+
+-- Now insert existing users
 INSERT INTO public.users (id, email, username)
 SELECT 
     id,
