@@ -20,6 +20,7 @@ except ImportError:
 
 from flask import Flask, jsonify, render_template, request, send_from_directory, redirect, url_for, flash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask_mail import Mail, Message
 from flask_cors import CORS
 import secrets
 
@@ -40,13 +41,6 @@ try:
 	GROQ_AVAILABLE = True
 except Exception:
 	GROQ_AVAILABLE = False
-
-try:
-	from resend import Resend  # type: ignore
-	RESEND_AVAILABLE = True
-except Exception:
-	RESEND_AVAILABLE = False
-	Resend = None
 
 APP_ROOT = Path(__file__).resolve().parent
 MODEL_PATH = APP_ROOT / "best.pt"
@@ -159,9 +153,15 @@ CORS(app, resources={
 	r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}
 })
 
-# Resend email setup (replaces Flask-Mail)
-RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
-RESEND_FROM_EMAIL = os.environ.get('RESEND_FROM_EMAIL', 'noreply@gymvision.ai')
+# Flask-Mail setup
+app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
+app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'true').lower() in ['true', 'on', '1']
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', '')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', '')
+app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@gymvision.ai')
+
+mail = Mail(app)
 
 # Flask-Login setup
 login_manager = LoginManager()
@@ -519,20 +519,30 @@ def generate_verification_code() -> str:
 
 
 def send_verification_email(email: str, code: str) -> bool:
-	"""Send verification code via email using Resend."""
-	if not RESEND_AVAILABLE or not RESEND_API_KEY:
-		print(f"[WARNING] Resend not available. RESEND_API_KEY is not set.")
-		print(f"[WARNING] Set RESEND_API_KEY environment variable")
+	"""Send verification code via email."""
+	# Check if email is configured
+	if not app.config.get('MAIL_USERNAME') or not app.config.get('MAIL_PASSWORD'):
+		print(f"[WARNING] Email not configured. MAIL_USERNAME or MAIL_PASSWORD is empty.")
+		print(f"[WARNING] Set environment variables: MAIL_USERNAME and MAIL_PASSWORD")
 		return False
 	
 	try:
-		resend = Resend(RESEND_API_KEY)
-		
-		resend.emails.send({
-			"from": RESEND_FROM_EMAIL,
-			"to": [email],
-			"subject": "GymVision AI - Email Verification",
-			"html": f'''<html>
+		msg = Message(
+			subject='GymVision AI - Email Verification',
+			recipients=[email],
+			body=f'''Welcome to GymVision AI!
+
+Please verify your email address by entering this code:
+
+{code}
+
+This code will expire in 10 minutes.
+
+If you didn't create an account, please ignore this email.
+
+Best regards,
+GymVision AI Team''',
+			html=f'''<html>
 <body style="font-family: Arial, sans-serif; background-color: #0f0f10; color: #f5f6f7; padding: 20px;">
 	<div style="max-width: 600px; margin: 0 auto; background-color: #1a1a1c; padding: 30px; border-radius: 12px;">
 		<h1 style="color: #8b5cf6;">Welcome to GymVision AI!</h1>
@@ -545,25 +555,13 @@ def send_verification_email(email: str, code: str) -> bool:
 		<p style="margin-top: 30px; color: #888;">Best regards,<br>GymVision AI Team</p>
 	</div>
 </body>
-</html>''',
-			"text": f'''Welcome to GymVision AI!
-
-Please verify your email address by entering this code:
-
-{code}
-
-This code will expire in 10 minutes.
-
-If you didn't create an account, please ignore this email.
-
-Best regards,
-GymVision AI Team'''
-		})
-		
-		print(f"[SUCCESS] Verification email sent via Resend to {email}")
+</html>'''
+		)
+		mail.send(msg)
+		print(f"[INFO] Verification email sent to {email}")
 		return True
 	except Exception as e:
-		print(f"[ERROR] Failed to send verification email via Resend: {e}")
+		print(f"[ERROR] Failed to send verification email: {e}")
 		import traceback
 		traceback.print_exc()
 		return False
@@ -668,7 +666,7 @@ def register():
 			return jsonify({"error": "Email, username, and password are required"}), 400
 		
 		if len(password) < 6:
-			return jsonify({"error": "Password must be at least 6 characters"}), 400({"error": "Password must be at least 6 characters"}), 400
+			return jsonify({"error": "Password must be at least 6 characters"}), 400
 		
 		if len(username) < 3:
 			return jsonify({"error": "Username must be at least 3 characters"}), 400
@@ -785,406 +783,6 @@ def verify_email():
 	# GET request - show verification page
 	email = request.args.get("email", "")
 	return render_template("verify.html", email=email)
-
-
-@app.route("/api/forgot-password", methods=["POST"])
-def forgot_password():
-	"""Generate and send password reset code via email using Supabase."""
-	data = request.get_json() or {}
-	email = data.get("email", "").strip().lower()
-	
-	if not email:
-		return jsonify({"error": "Email is required"}), 400
-	
-	if not SUPABASE_AVAILABLE:
-		return jsonify({"error": "Password reset not available"}), 500
-	
-	try:
-		supabase_url = os.getenv("SUPABASE_URL")
-		supabase_key = os.getenv("SUPABASE_ANON_KEY")
-		
-		if not supabase_url or not supabase_key:
-			return jsonify({"error": "Supabase not configured"}), 500
-		
-		# Generate 6-digit reset code
-		reset_code = generate_verification_code()
-		
-		# Store reset code in database (expires in 15 minutes)
-		conn = get_db_connection()
-		from datetime import timedelta
-		expires_at = (datetime.now() + timedelta(minutes=15)).isoformat()
-		
-		# Delete old reset codes for this email
-		conn.execute("DELETE FROM verification_codes WHERE email = ? AND code LIKE 'RESET_%'", (email,))
-		
-		# Insert new reset code (prefix with RESET_ to distinguish from email verification codes)
-		conn.execute(
-			"INSERT INTO verification_codes (email, code, expires_at) VALUES (?, ?, ?)",
-			(email, f"RESET_{reset_code}", expires_at)
-		)
-		conn.commit()
-		conn.close()
-		
-		print(f"[INFO] Password reset code generated for {email}: {reset_code}")
-		
-		# Check if user exists in our database (not Supabase auth - we use our own auth)
-		conn = get_db_connection()
-		user = conn.execute("SELECT id, email FROM users WHERE email = ?", (email,)).fetchone()
-		conn.close()
-		
-		if not user:
-			# Don't reveal if user exists (security)
-			# But still return success to prevent email enumeration
-			print(f"[WARNING] Password reset requested for non-existent email: {email}")
-			return jsonify({
-				"success": True,
-				"message": "If this email exists, a reset code has been sent."
-			})
-		
-		# Send password reset email via our SMTP (we don't use Supabase auth)
-		email_sent = send_password_reset_email(email, reset_code)
-		
-		if email_sent:
-			# Email sent successfully - don't return code (security)
-			print(f"[SUCCESS] Password reset email sent via SMTP to {email}")
-			return jsonify({
-				"success": True,
-				"message": "Reset code sent to your email"
-				# NO CODE HERE - only in email for security
-			})
-		else:
-			# Email failed - return code as fallback (last resort)
-			print(f"[WARNING] Email failed. Returning code as fallback for {email}: {reset_code}")
-			return jsonify({
-				"success": True,
-				"message": "Email could not be sent. Your reset code is shown below.",
-				"code": reset_code,
-				"email_failed": True
-			})
-			
-	except Exception as e:
-		print(f"[ERROR] Forgot password error: {e}")
-		import traceback
-		traceback.print_exc()
-		return jsonify({"error": "Failed to send reset code"}), 500
-
-
-@app.route("/api/reset-password", methods=["POST"])
-def reset_password():
-	"""Reset password using reset code."""
-	data = request.get_json() or {}
-	email = data.get("email", "").strip().lower()
-	code = data.get("code", "").strip()
-	new_password = data.get("password", "")
-	
-	if not email or not code or not new_password:
-		return jsonify({"error": "Email, code, and password are required"}), 400
-	
-	if len(new_password) < 6:
-		return jsonify({"error": "Password must be at least 6 characters"}), 400
-	
-		try:
-			# Verify reset code
-			conn = get_db_connection()
-			reset_record = conn.execute(
-				"SELECT * FROM verification_codes WHERE email = ? AND code = ? AND expires_at > datetime('now') ORDER BY created_at DESC LIMIT 1",
-				(email, f"RESET_{code}")
-			).fetchone()
-			
-			if not reset_record:
-				conn.close()
-				return jsonify({"error": "Invalid or expired reset code"}), 400
-			
-			# Find user in our database (we use our own auth, not Supabase auth)
-			user = conn.execute(
-				"SELECT id, email FROM users WHERE email = ?",
-				(email,)
-			).fetchone()
-			
-			if not user:
-				conn.close()
-				return jsonify({"error": "User not found"}), 404
-			
-			# Update password in our database (hash it first)
-			from werkzeug.security import generate_password_hash
-			password_hash = generate_password_hash(new_password)
-			
-			conn.execute(
-				"UPDATE users SET password_hash = ? WHERE email = ?",
-				(password_hash, email)
-			)
-			
-			# Delete used reset code
-			conn.execute(
-				"DELETE FROM verification_codes WHERE email = ? AND code = ?",
-				(email, f"RESET_{code}")
-			)
-			
-			conn.commit()
-			conn.close()
-			
-			print(f"[SUCCESS] Password reset successfully for {email}")
-			return jsonify({
-				"success": True,
-				"message": "Password reset successfully"
-			})
-			
-	except Exception as e:
-		print(f"[ERROR] Reset password error: {e}")
-		import traceback
-		traceback.print_exc()
-		return jsonify({"error": "Failed to reset password"}), 500
-
-
-def send_password_reset_email(email: str, code: str) -> bool:
-	"""Send password reset code via email using Resend."""
-	if not RESEND_AVAILABLE or not RESEND_API_KEY:
-		print(f"[WARNING] Resend not available. RESEND_API_KEY is not set.")
-		print(f"[WARNING] Set RESEND_API_KEY environment variable")
-		return False
-	
-	try:
-		resend = Resend(RESEND_API_KEY)
-		
-		resend.emails.send({
-			"from": RESEND_FROM_EMAIL,
-			"to": [email],
-			"subject": "GymVision AI - Password Reset Code",
-			"html": f'''<html>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-	<h2 style="color: #7c5cff;">GymVision AI - Password Reset</h2>
-	<p>You requested a password reset for your GymVision AI account.</p>
-	<p style="font-size: 24px; font-weight: bold; color: #7c5cff; letter-spacing: 4px; text-align: center; padding: 20px; background: #f5f5f5; border-radius: 8px;">{code}</p>
-	<p>Enter this code in the app to reset your password.</p>
-	<p style="color: #888; font-size: 12px;">This code will expire in 15 minutes.</p>
-	<p style="color: #888; font-size: 12px;">If you didn't request this, please ignore this email.</p>
-</body>
-</html>''',
-			"text": f'''You requested a password reset for your GymVision AI account.
-
-Your reset code is: {code}
-
-Enter this code in the app to reset your password.
-
-This code will expire in 15 minutes.
-
-If you didn't request this, please ignore this email.
-'''
-		})
-		
-		print(f"[SUCCESS] Password reset email sent via Resend to {email}")
-		return True
-	except Exception as e:
-		print(f"[ERROR] Failed to send password reset email via Resend: {e}")
-		import traceback
-		traceback.print_exc()
-		return False
-
-
-@app.route("/reset-password", methods=["GET"])
-def reset_password_redirect():
-	"""Password reset page - handles code from URL or Supabase tokens."""
-	# Check if we have a code in the URL (from our custom reset flow)
-	reset_code = request.args.get("code", "")
-	
-	if reset_code:
-		# We have a code in the URL - show it to the user and redirect to app
-		return f"""
-	<!DOCTYPE html>
-	<html>
-	<head>
-		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, initial-scale=1">
-		<title>Reset Password - GymVision AI</title>
-		<style>
-			body {{
-				font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				min-height: 100vh;
-				margin: 0;
-				background: #0f0f10;
-				color: #fff;
-			}}
-			.container {{
-				text-align: center;
-				padding: 20px;
-				max-width: 400px;
-			}}
-			.code {{
-				font-size: 32px;
-				font-weight: bold;
-				color: #7c5cff;
-				letter-spacing: 6px;
-				padding: 20px;
-				background: rgba(124, 92, 255, 0.1);
-				border-radius: 12px;
-				margin: 20px 0;
-				border: 2px solid #7c5cff;
-			}}
-			.button {{
-				display: inline-block;
-				padding: 14px 28px;
-				background: #7c5cff;
-				color: #fff;
-				text-decoration: none;
-				border-radius: 12px;
-				font-weight: 600;
-				margin-top: 20px;
-				cursor: pointer;
-				border: none;
-			}}
-			.button:hover {{
-				background: #6a4de8;
-			}}
-		</style>
-	</head>
-	<body>
-		<div class="container">
-			<h1>Reset Your Password</h1>
-			<p>Your reset code is:</p>
-			<div class="code">{reset_code}</div>
-			<p>Enter this code in the GymVision AI app to reset your password.</p>
-			<button class="button" onclick="window.location.href='gymvisionai://reset-password?code={reset_code}'">Open App</button>
-		</div>
-	</body>
-	</html>
-	"""
-	
-	# Otherwise, handle Supabase token redirects (old flow)
-	return """
-	<!DOCTYPE html>
-	<html>
-	<head>
-		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, initial-scale=1">
-		<title>Reset Password - GymVision AI</title>
-		<style>
-			body {
-				font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				min-height: 100vh;
-				margin: 0;
-				background: #0f0f10;
-				color: #fff;
-			}
-			.container {
-				text-align: center;
-				padding: 20px;
-				max-width: 400px;
-			}
-			.button {
-				display: inline-block;
-				padding: 14px 28px;
-				background: #7c5cff;
-				color: #fff;
-				text-decoration: none;
-				border-radius: 12px;
-				font-weight: 600;
-				margin-top: 20px;
-				cursor: pointer;
-				border: none;
-			}
-			.button:hover {
-				background: #6a4de8;
-			}
-		</style>
-	</head>
-	<body>
-		<div class="container">
-			<h1>Reset Your Password</h1>
-			<p id="status">Processing reset link...</p>
-			<button id="openAppBtn" class="button" style="display: none;">Open GymVision AI App</button>
-		</div>
-		<script>
-			console.log('Reset password page loaded');
-			console.log('Full URL:', window.location.href);
-			console.log('Hash:', window.location.hash);
-			console.log('Search:', window.location.search);
-			
-			// Read hash from URL (Supabase sends tokens in hash)
-			const hash = window.location.hash.substring(1);
-			const search = window.location.search.substring(1);
-			
-			// Parse parameters from hash or query string
-			let accessToken = null;
-			let refreshToken = null;
-			let type = null;
-			let token = null; // For verify token format
-			
-			if (hash) {
-				console.log('Parsing hash:', hash);
-				const hashParams = new URLSearchParams(hash);
-				accessToken = hashParams.get('access_token');
-				refreshToken = hashParams.get('refresh_token');
-				type = hashParams.get('type');
-				console.log('From hash - accessToken:', accessToken ? 'found' : 'not found', 'type:', type);
-			}
-			
-			if (search && !accessToken) {
-				console.log('Parsing search:', search);
-				const searchParams = new URLSearchParams(search);
-				accessToken = searchParams.get('access_token');
-				refreshToken = searchParams.get('refresh_token');
-				type = searchParams.get('type');
-				token = searchParams.get('token'); // Verify token format
-				console.log('From search - accessToken:', accessToken ? 'found' : 'not found', 'type:', type);
-			}
-			
-			// Build deep link for mobile app
-			let deepLink = null;
-			
-			if (type === 'recovery' && accessToken) {
-				// Standard Supabase format with access_token
-				// Use hash format for deep link (Supabase style)
-				deepLink = `gymvisionai://reset-password#access_token=${encodeURIComponent(accessToken)}&type=recovery${refreshToken ? '&refresh_token=' + encodeURIComponent(refreshToken) : ''}`;
-				console.log('Built deep link with access_token');
-			} else if (token && type === 'recovery') {
-				// Verify token format
-				deepLink = `gymvisionai://reset-password?token=${encodeURIComponent(token)}&type=recovery`;
-				console.log('Built deep link with verify token');
-			}
-			
-			if (deepLink) {
-				console.log('Deep link:', deepLink.substring(0, 100) + '...');
-				
-				// Update status
-				document.getElementById('status').textContent = 'Click the button below to open GymVision AI app:';
-				
-				// Show button immediately (browsers require user interaction for deep links)
-				document.getElementById('openAppBtn').style.display = 'inline-block';
-				document.getElementById('openAppBtn').onclick = function() {
-					console.log('Button clicked, opening:', deepLink.substring(0, 100) + '...');
-					// Try to open the app
-					window.location.href = deepLink;
-					
-					// Update status
-					document.getElementById('status').textContent = 'Opening app... If it doesn\'t open, make sure the app is installed.';
-				};
-				
-				// Also try automatic redirect (may not work due to browser security)
-				// But only if we're not in a browser (check for Capacitor)
-				if (window.Capacitor) {
-					// In Capacitor, we can try automatic redirect
-					setTimeout(function() {
-						window.location.href = deepLink;
-					}, 500);
-				}
-			} else {
-				// No valid token found
-				console.error('No valid token found in URL');
-				console.error('Hash:', hash);
-				console.error('Search:', search);
-				document.getElementById('status').textContent = 'Invalid or expired reset link. Please request a new one.';
-				document.getElementById('openAppBtn').style.display = 'none';
-			}
-		</script>
-	</body>
-	</html>
-	"""
 
 
 @app.route("/resend-code", methods=["POST"])
