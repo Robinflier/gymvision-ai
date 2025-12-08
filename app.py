@@ -907,6 +907,18 @@ def index():
 	return render_template("index.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
 
 
+@app.route("/privacy")
+def privacy():
+	"""Privacy Policy page."""
+	return render_template("privacy.html")
+
+
+@app.route("/support")
+def support():
+	"""Support page."""
+	return render_template("support.html")
+
+
 @app.route("/logo.png")
 def logo():
 	# Prefer the new logo filename; fall back to the old one
