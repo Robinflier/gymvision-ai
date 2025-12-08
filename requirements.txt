@@ -1,5 +1,6 @@
 Flask>=3.0.0
 flask-login>=0.6.3
+flask-mail>=0.10.0
 flask-cors>=4.0.0
 werkzeug>=3.0.1
 groq>=0.4.0
@@ -7,4 +8,3 @@ ultralytics>=8.0.0
 supabase>=2.0.0
 python-dotenv>=1.0.0
 gunicorn>=21.2.0
-resend>=2.0.0
