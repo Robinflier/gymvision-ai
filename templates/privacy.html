@@ -4,57 +4,91 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 	<title>Privacy Policy - GymVision AI</title>
-	<link rel="stylesheet" href="/static/styles.css">
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 	<style>
+		/* Reset all styles to ensure full scrollability */
+		* {
+			box-sizing: border-box;
+		}
+		html {
+			overflow-y: scroll !important;
+			overflow-x: hidden !important;
+			height: auto !important;
+			position: relative !important;
+			width: 100% !important;
+			margin: 0 !important;
+			padding: 0 !important;
+		}
+		body {
+			background: #0f0f10 !important;
+			overflow-y: scroll !important;
+			overflow-x: hidden !important;
+			position: relative !important;
+			height: auto !important;
+			width: 100% !important;
+			min-height: 100vh !important;
+			padding: 0 !important;
+			margin: 0 !important;
+			top: 0 !important;
+			left: 0 !important;
+			right: 0 !important;
+			bottom: auto !important;
+			display: block !important;
+		}
+		/* Prevent any fixed positioning issues */
+		body > * {
+			position: relative !important;
+		}
 		.privacy-container {
 			max-width: 800px;
 			margin: 0 auto;
-			padding: 40px 22px;
-			color: var(--text);
+			padding: 40px 22px 80px 22px;
+			color: #f5f6f7;
 			line-height: 1.6;
+			min-height: 100vh;
 		}
 		.privacy-container h1 {
 			font-size: 32px;
 			font-weight: 800;
+			margin-top: 0 !important;
 			margin-bottom: 8px;
-			color: var(--text);
+			color: #f5f6f7;
 		}
 		.privacy-container h2 {
 			font-size: 24px;
 			font-weight: 700;
 			margin-top: 32px;
 			margin-bottom: 16px;
-			color: var(--text);
+			color: #f5f6f7;
 		}
 		.privacy-container h3 {
 			font-size: 18px;
 			font-weight: 600;
 			margin-top: 24px;
 			margin-bottom: 12px;
-			color: var(--text);
+			color: #f5f6f7;
 		}
 		.privacy-container p {
 			margin-bottom: 16px;
-			color: var(--sub);
+			color: #a6a7ab;
 		}
 		.privacy-container ul, .privacy-container ol {
 			margin-bottom: 16px;
 			padding-left: 24px;
-			color: var(--sub);
+			color: #a6a7ab;
 		}
 		.privacy-container li {
 			margin-bottom: 8px;
 		}
 		.privacy-container a {
-			color: var(--accent);
+			color: #7c5cff;
 			text-decoration: none;
 		}
 		.privacy-container a:hover {
 			text-decoration: underline;
 		}
 		.last-updated {
-			color: var(--sub);
+			color: #a6a7ab;
 			font-size: 14px;
 			margin-bottom: 32px;
 		}
@@ -224,12 +258,23 @@
 		</ul>
 		<p>To exercise these rights, please contact us at <a href="mailto:privacy@gymvision.ai">privacy@gymvision.ai</a>.</p>
 
-		<hr style="margin: 40px 0; border: none; border-top: 1px solid var(--ring);">
+		<hr style="margin: 40px 0; border: none; border-top: 1px solid #2a2a2f;">
 
-		<p style="text-align: center; color: var(--sub); font-size: 14px;">
+		<p style="text-align: center; color: #a6a7ab; font-size: 14px;">
 			© 2025 GymVision AI. All rights reserved.
 		</p>
 	</div>
+	<script>
+		// Ensure page scrolls to top on load and is fully scrollable
+		window.addEventListener('load', function() {
+			window.scrollTo(0, 0);
+			document.documentElement.scrollTop = 0;
+			document.body.scrollTop = 0;
+		});
+		// Ensure scrolling works
+		document.documentElement.style.overflowY = 'scroll';
+		document.body.style.overflowY = 'scroll';
+	</script>
 </body>
 </html>
 
