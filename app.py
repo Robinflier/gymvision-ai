@@ -1064,11 +1064,33 @@ def predict():
 	file = request.files.get("image")
 	if not file:
 		return jsonify({"error": "No image provided"}), 400
+	
+	# Check if file has content
+	if file.content_length == 0:
+		return jsonify({"error": "Image file is empty"}), 400
+	
+	# Check filename
+	if not file.filename:
+		return jsonify({"error": "No filename provided"}), 400
 
 	tmp_dir = APP_ROOT / "tmp"
 	tmp_dir.mkdir(exist_ok=True)
 	tmp_path = tmp_dir / "upload.jpg"
-	file.save(str(tmp_path))
+	
+	try:
+		file.save(str(tmp_path))
+	except Exception as e:
+		return jsonify({"error": f"Failed to save image: {str(e)}"}), 500
+	
+	# Verify file was saved and is not empty
+	if not tmp_path.exists():
+		return jsonify({"error": "Failed to save image file"}), 500
+	
+	file_size = tmp_path.stat().st_size
+	if file_size == 0:
+		return jsonify({"error": "Saved image file is empty (0 bytes)"}), 400
+	
+	print(f"[DEBUG] Received image: {file.filename}, size: {file_size} bytes")
 
 	model, model1, model2, model3, model4 = get_models()
 	
@@ -1079,7 +1101,21 @@ def predict():
 	def get_model_predictions(model_obj, model_name, max_predictions=3):
 		model_preds = []
 		try:
+			# Verify file still exists and is readable
+			if not tmp_path.exists():
+				print(f"[ERROR] Model {model_name}: Image file does not exist at {tmp_path}")
+				return model_preds
+			
+			file_size = tmp_path.stat().st_size
+			if file_size == 0:
+				print(f"[ERROR] Model {model_name}: Image file is empty (0 bytes)")
+				return model_preds
+			
 			results = model_obj.predict(source=str(tmp_path), verbose=False)
+			if not results or len(results) == 0:
+				print(f"[ERROR] Model {model_name}: No results returned from prediction")
+				return model_preds
+			
 			best = results[0]
 			
 			if hasattr(best, "probs") and best.probs is not None:
@@ -1116,9 +1152,17 @@ def predict():
 						if len(model_preds) >= max_predictions:
 							break
 		except Exception as e:
-			print(f"[ERROR] Model {model_name} prediction failed: {e}")
-			import traceback
-			traceback.print_exc()
+			error_msg = str(e)
+			print(f"[ERROR] Model {model_name} prediction failed: {error_msg}")
+			
+			# Check for specific OpenCV errors
+			if "buf.empty()" in error_msg or "imdecode" in error_msg:
+				print(f"[ERROR] Model {model_name}: Image file is corrupted or empty. File size: {tmp_path.stat().st_size if tmp_path.exists() else 0} bytes")
+			elif "No such file" in error_msg:
+				print(f"[ERROR] Model {model_name}: Image file not found at {tmp_path}")
+			else:
+				import traceback
+				traceback.print_exc()
 		return model_preds
 	
 	# Get predictions from all available models

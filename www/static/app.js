@@ -924,23 +924,32 @@ function initFileUpload() {
 							source: 'CAMERA'
 						});
 						
-						if (image && image.base64String) {
-							// Convert to File
-							const byteCharacters = atob(image.base64String);
-							const byteNumbers = new Array(byteCharacters.length);
-							for (let i = 0; i < byteCharacters.length; i++) {
-								byteNumbers[i] = byteCharacters.charCodeAt(i);
-							}
-							const byteArray = new Uint8Array(byteNumbers);
-							const blob = new Blob([byteArray], { type: 'image/jpeg' });
-							const file = new File([blob], 'photo.jpg', { type: 'image/jpeg' });
-							
-							// Store file
-							window.lastUploadFile = file;
-							
-							// Process and show preview
-							await processPhotoFile(file);
+					if (image && image.base64String) {
+						console.log('📸 Got camera image, base64 length:', image.base64String.length);
+						
+						// Convert to File
+						const byteCharacters = atob(image.base64String);
+						const byteNumbers = new Array(byteCharacters.length);
+						for (let i = 0; i < byteCharacters.length; i++) {
+							byteNumbers[i] = byteCharacters.charCodeAt(i);
 						}
+						const byteArray = new Uint8Array(byteNumbers);
+						const blob = new Blob([byteArray], { type: 'image/jpeg' });
+						const file = new File([blob], 'photo.jpg', { type: 'image/jpeg' });
+						
+						console.log('📸 Created file:', file.name, 'size:', file.size, 'bytes', 'type:', file.type);
+						
+						if (file.size === 0) {
+							alert('Error: Photo file is empty. Please try again.');
+							return;
+						}
+						
+						// Store file
+						window.lastUploadFile = file;
+						
+						// Process and show preview
+						await processPhotoFile(file);
+					}
 					} catch (error) {
 						// If camera fails, fallback to file input
 						if (!error.message || (!error.message.includes('cancel') && !error.message.includes('User cancelled'))) {
@@ -974,6 +983,14 @@ function initFileUpload() {
 				return;
 			}
 			
+			// Verify file is not empty
+			if (file.size === 0) {
+				alert('Error: Photo file is empty. Please take a new photo.');
+				return;
+			}
+			
+			console.log('📤 Sending image to backend:', file.name, 'size:', file.size, 'bytes', 'type:', file.type);
+			
 			classifyBtn.disabled = true;
 			classifyBtn.textContent = 'Detecting...';
 			
@@ -985,20 +1002,26 @@ function initFileUpload() {
 					const healthRes = await fetch(healthUrl);
 					if (healthRes.ok) {
 						const health = await healthRes.json();
+						console.log('✅ Health check:', health);
 						if (health.models_loaded > 0) {
 							healthOk = true;
 						} else {
 							alert('Backend has no AI models loaded. Please check server.');
 							return;
 						}
+					} else {
+						console.warn('⚠️ Health check failed:', healthRes.status);
 					}
 				} catch (e) {
+					console.warn('⚠️ Health check error (continuing anyway):', e);
 					// Health check failed, continue anyway
 				}
 				
 				// Send to backend
 				const formData = new FormData();
 				formData.append('image', file);
+				
+				console.log('📤 FormData created, sending POST to:', getApiUrl('/predict'));
 				
 				const apiUrl = getApiUrl('/predict');
 				const res = await fetch(apiUrl, {
