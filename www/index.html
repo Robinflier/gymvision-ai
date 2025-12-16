@@ -10,6 +10,52 @@
 	<link rel="stylesheet" href="static/styles.css">
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+	<!-- Supabase library - MUST load before app.js -->
+	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+	<script>
+		// Export createClient for Supabase v2
+		const { createClient } = supabase;
+		window.createClient = createClient;
+		// Supabase config - hardcoded for Capacitor/iOS compatibility
+		// Note: ANON key is safe to expose in frontend (designed to be public)
+		window.SUPABASE_URL = "https://jugdkqzhcbqbjbvktqlz.supabase.co";
+		window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp1Z2RrcXpoY2JxYmpidmt0cWx6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODI2NzIsImV4cCI6MjA4MDI1ODY3Mn0.rqCqBK14sOZvsxNUhIHIxaOnVMvdnNOjx_0YIXy1VIY";
+		// Backend API URL - REQUIRED for Capacitor/iOS
+		// Set this to your deployed Flask backend URL
+		// Leave empty for local web development (will use relative paths)
+		window.BACKEND_URL = "https://gymvision-ai.onrender.com";
+	</script>
+	<script>
+		// Comprehensive error handling - prevent app crashes
+		// Also show alerts for critical errors so we can debug
+		window.addEventListener('error', function(e) {
+			console.error('JavaScript Error:', e.message, 'at', e.filename + ':' + e.lineno);
+			// Show alert for critical errors (only in development/debug mode)
+			if (window.location.href.includes('localhost') || window.location.href.includes('capacitor://')) {
+				alert('JS Error: ' + e.message + '\nFile: ' + e.filename + ':' + e.lineno);
+			}
+			// Prevent default error handling that might crash the app
+			e.preventDefault();
+			return true;
+		}, true);
+		
+		window.addEventListener('unhandledrejection', function(e) {
+			console.error('Unhandled Promise Rejection:', e.reason);
+			// Show alert for promise rejections
+			if (window.location.href.includes('localhost') || window.location.href.includes('capacitor://')) {
+				alert('Promise Rejection: ' + (e.reason?.message || e.reason || 'Unknown'));
+			}
+			// Prevent default rejection handling
+			e.preventDefault();
+		});
+		
+		// Catch any synchronous errors during initialization
+		try {
+			// This will be executed after DOM loads
+		} catch (error) {
+			console.error('Initialization error:', error);
+		}
+	</script>
 	<style>
 		.auth-content {
 			flex: 1;
@@ -131,49 +177,7 @@
 		.auth-error.show {
 			display: block;
 		}
-		.auth-success {
-			background: #10b981;
-			color: #fff;
-			padding: 12px;
-			border-radius: 8px;
-			margin-bottom: 20px;
-			font-size: 14px;
-			display: none;
-		}
-		.auth-success.show {
-			display: block;
-		}
-		.auth-forgot-password {
-			text-align: right;
-			margin-top: -10px;
-			margin-bottom: 10px;
-		}
-		.auth-forgot-password a {
-			color: #8b5cf6;
-			text-decoration: none;
-			font-size: 14px;
-			font-weight: 500;
-			cursor: pointer;
-		}
-		.auth-forgot-password a:hover {
-			text-decoration: underline;
-		}
 	</style>
-	<!-- Supabase library - MUST load before app.js -->
-	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-	<script>
-		// Export createClient for Supabase v2
-		const { createClient } = supabase;
-		window.createClient = createClient;
-		// Supabase config - hardcoded for Capacitor/iOS compatibility
-		// Note: ANON key is safe to expose in frontend (designed to be public)
-		window.SUPABASE_URL = "https://jugdkqzhcbqbjbvktqlz.supabase.co";
-		window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp1Z2RrcXpoY2JxYmpidmt0cWx6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODI2NzIsImV4cCI6MjA4MDI1ODY3Mn0.rqCqBK14sOZvsxNUhIHIxaOnVMvdnNOjx_0YIXy1VIY";
-		// Backend API URL - REQUIRED for Capacitor/iOS
-		// Set this to your deployed Flask backend URL
-		// Leave empty for local web development (will use relative paths)
-		window.BACKEND_URL = "https://gymvision-ai.onrender.com";
-	</script>
 </head>
 <body>
 	<div class="phone-shell">
@@ -229,14 +233,15 @@
 						</div>
 					</div>
 
-					<div class="or-divider">or</div>
+					<!-- AI Detect temporarily disabled -->
+					<!-- <div class="or-divider">or</div>
 					<div class="btn-row">
 						<label class="btn">
 							<input type="file" id="fileInput" accept="image/*" capture="environment" hidden>
 							Take photo
 						</label>
 						<button id="classify" class="btn primary" disabled>AI Detect</button>
-					</div>
+					</div> -->
 				</div>
 			</section>
 
@@ -468,6 +473,9 @@
 					<input type="text" id="vision-input" placeholder="What do you want to train today?" style="flex: 1; background: #1a1a1d; border: 1px solid #2b2b34; border-radius: 12px; padding: 12px 16px; color: #fff; font-size: 14px; font-family: 'Inter', sans-serif;" />
 					<button id="vision-send-btn" style="background: var(--accent); border: none; border-radius: 12px; padding: 12px 24px; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif;">Send</button>
 				</div>
+				<div style="margin-top: 8px; margin-bottom: -22px; padding: 0 4px;">
+					<p style="margin: 0; font-size: 12px; color: #888; font-family: 'Inter', sans-serif;">Add "workout" to you prompt for optimal results</p>
+				</div>
 			</div>
 		</div>
 
@@ -483,13 +491,14 @@
 			<div class="exercise-selector-muscles-row">
 				<div class="exercise-selector-muscles" id="exercise-selector-muscles"></div>
 			</div>
-			<div class="exercise-selector-or">or</div>
+			<!-- AI Detect temporarily disabled -->
+			<!-- <div class="exercise-selector-or">or</div>
 			<div class="exercise-selector-ai-detect">
 				<button type="button" id="exercise-selector-ai-detect" class="btn primary">
 					AI detect
 				</button>
 				<input type="file" id="exercise-selector-file" accept="image/*" capture="environment" hidden>
-			</div>
+			</div> -->
 			<div id="exercise-selector-predictions" class="exercise-selector-predictions"></div>
 			<div class="exercise-selector-results" id="exercise-selector-results"></div>
 		</div>
@@ -535,77 +544,11 @@
 							<label class="auth-label" for="login-password">Password</label>
 							<input type="password" id="login-password" class="auth-input" placeholder="••••••••" required autocomplete="current-password">
 						</div>
-						<div class="auth-forgot-password">
-							<a href="#" id="show-forgot-password-link">Forgot password?</a>
-						</div>
 						<button type="submit" class="auth-button" id="login-submit-btn">Sign In</button>
 					</form>
 					
 					<div class="auth-link">
 						Don't have an account? <a href="#" id="show-register-link">Sign up</a>
-					</div>
-				</div>
-			</div>
-		</div>
-
-		<div class="content hidden" id="forgot-password-content">
-			<div class="auth-content">
-				<div class="auth-card">
-					<div class="auth-logo">
-						<img src="static/logo.png" alt="GymVision AI" />
-					</div>
-					<h1 class="auth-title">Reset Password</h1>
-					<p class="auth-subtitle">Enter your email and we'll send you a reset code</p>
-					
-					<div class="auth-error" id="forgot-password-error-message"></div>
-					<div class="auth-success" id="forgot-password-success-message"></div>
-					
-					<form id="forgot-password-form">
-						<div class="auth-form-group">
-							<label class="auth-label" for="forgot-password-email">Email</label>
-							<input type="email" id="forgot-password-email" class="auth-input" placeholder="your@email.com" required autocomplete="email">
-						</div>
-						<button type="submit" class="auth-button" id="forgot-password-submit-btn">Send Reset Code</button>
-					</form>
-					
-					<div class="auth-link">
-						Remember your password? <a href="#" id="back-to-login-link">Sign in</a>
-					</div>
-				</div>
-			</div>
-		</div>
-
-		<div class="content hidden" id="reset-password-content">
-			<div class="auth-content">
-				<div class="auth-card">
-					<div class="auth-logo">
-						<img src="static/logo.png" alt="GymVision AI" />
-					</div>
-					<h1 class="auth-title">Reset Password</h1>
-					<p class="auth-subtitle">Enter the code from your email and your new password</p>
-					
-					<div class="auth-error" id="reset-password-error-message"></div>
-					<div class="auth-success" id="reset-password-success-message"></div>
-					
-					<form id="reset-password-form">
-						<div class="auth-form-group">
-							<label class="auth-label" for="reset-password-token">Reset Code</label>
-							<input type="text" id="reset-password-token" class="auth-input" placeholder="123456" required autocomplete="off" maxlength="6" pattern="[0-9]{6}" inputmode="numeric">
-							<small style="color: #888; font-size: 12px; margin-top: 4px; display: block;">Enter the 6-digit code from your email</small>
-						</div>
-						<div class="auth-form-group">
-							<label class="auth-label" for="reset-password-new">New Password</label>
-							<input type="password" id="reset-password-new" class="auth-input" placeholder="••••••••" required autocomplete="new-password" minlength="6">
-						</div>
-						<div class="auth-form-group">
-							<label class="auth-label" for="reset-password-confirm">Confirm Password</label>
-							<input type="password" id="reset-password-confirm" class="auth-input" placeholder="••••••••" required autocomplete="new-password" minlength="6">
-						</div>
-						<button type="submit" class="auth-button" id="reset-password-submit-btn">Reset Password</button>
-					</form>
-					
-					<div class="auth-link">
-						<a href="#" id="back-to-login-from-reset-link">Back to Sign In</a>
 					</div>
 				</div>
 			</div>
@@ -645,7 +588,7 @@
 			</div>
 		</div>
 
-	<footer class="navbar hidden" id="main-navbar">
+	<footer class="navbar" id="main-navbar">
 			<button class="nav-btn active" data-tab="workouts">
 				<img src="static/nav/dumbell.png" alt="Workouts" class="nav-icon" />
 				<span>Workouts</span>
@@ -664,6 +607,7 @@
 	<!-- Main app.js -->
 	<script src="static/app.js"></script>
 	<script>
+		// Service worker for PWA (safe to leave)
 		if ('serviceWorker' in navigator) {
 			navigator.serviceWorker.register('static/sw.js').catch(()=>{});
 		}
