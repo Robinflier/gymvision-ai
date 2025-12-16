@@ -1056,9 +1056,8 @@ function initFileUpload() {
 					
 					if (res.status === 422) {
 						// NO_PREDICTION - show modal
-						console.error('❌ No prediction from AI models');
-						alert('AI Detection Error: ' + errorMessage);
-						showAIDetectErrorModal();
+						console.error('❌ No prediction from AI models:', errorMessage);
+						showAIDetectErrorModal('We couldn\'t detect an exercise from this photo. Please try a clearer photo with a visible exercise machine. Error: ' + errorMessage);
 					} else if (res.status === 400) {
 						alert('Bad Request: ' + errorMessage + '\n\nThis usually means the image file is corrupted or empty.');
 						showAIDetectErrorModal();
@@ -1077,7 +1076,8 @@ function initFileUpload() {
 				
 				if (data.success === false || data.error === 'NO_PREDICTION') {
 					// No prediction - show modal
-					showAIDetectErrorModal();
+					console.error('❌ No prediction from backend:', data);
+					showAIDetectErrorModal('We couldn\'t detect an exercise from this photo. Please try a clearer photo with a visible exercise machine.');
 				} else if (data.error) {
 					alert('Error: ' + data.error);
 					showAIDetectErrorModal();
@@ -5164,9 +5164,17 @@ function loadRecentScans() {
 }
 
 // AI Detect Error Modal
-function showAIDetectErrorModal() {
+function showAIDetectErrorModal(errorDetails) {
+	console.error('❌ Showing AI Detect Error Modal', errorDetails);
+	
 	const modal = document.getElementById('ai-detect-error-modal');
 	if (modal) {
+		// Update error message if provided
+		const errorMsg = modal.querySelector('.ai-detect-error-message');
+		if (errorMsg && errorDetails) {
+			errorMsg.textContent = errorDetails;
+		}
+		
 		modal.classList.remove('hidden');
 		
 		// Close on backdrop click
@@ -5184,6 +5192,10 @@ function showAIDetectErrorModal() {
 				modal.classList.add('hidden');
 			};
 		}
+	} else {
+		console.error('❌ AI Detect Error Modal not found in DOM!');
+		// Fallback: show alert
+		alert('AI Detection Error: ' + (errorDetails || 'Could not detect an exercise from this photo.'));
 	}
 }
 
