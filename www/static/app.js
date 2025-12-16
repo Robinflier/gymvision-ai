@@ -1024,30 +1024,56 @@ function initFileUpload() {
 				console.log('📤 FormData created, sending POST to:', getApiUrl('/predict'));
 				
 				const apiUrl = getApiUrl('/predict');
+				console.log('📤 Sending POST request to:', apiUrl);
+				console.log('📤 File details:', {
+					name: file.name,
+					size: file.size,
+					type: file.type,
+					lastModified: file.lastModified
+				});
+				
 				const res = await fetch(apiUrl, {
 					method: 'POST',
 					body: formData
 				});
 				
+				console.log('📥 Response status:', res.status, res.statusText);
+				console.log('📥 Response headers:', Object.fromEntries(res.headers.entries()));
+				
 				if (!res.ok) {
 					const errorText = await res.text().catch(() => 'Unknown error');
-					console.error('Backend error:', res.status, errorText);
+					console.error('❌ Backend error:', res.status, errorText);
+					
+					// Try to parse as JSON for better error message
+					let errorData = null;
+					try {
+						errorData = JSON.parse(errorText);
+					} catch (e) {
+						// Not JSON, use text as is
+					}
+					
+					const errorMessage = errorData?.error || errorText || 'Unknown error';
 					
 					if (res.status === 422) {
 						// NO_PREDICTION - show modal
+						console.error('❌ No prediction from AI models');
+						alert('AI Detection Error: ' + errorMessage);
+						showAIDetectErrorModal();
+					} else if (res.status === 400) {
+						alert('Bad Request: ' + errorMessage + '\n\nThis usually means the image file is corrupted or empty.');
 						showAIDetectErrorModal();
 					} else if (res.status === 500) {
-						alert('Server error (500). The AI models may not be working. Check Render logs.');
+						alert('Server error (500): ' + errorMessage + '\n\nThe AI models may not be working. Check Render logs.');
 						showAIDetectErrorModal();
 					} else {
-						alert('Server error: ' + res.status + '\n' + errorText.substring(0, 100));
+						alert('Server error (' + res.status + '): ' + errorMessage);
 						showAIDetectErrorModal();
 					}
 					return;
 				}
 				
 				const data = await res.json();
-				console.log('Backend response:', data);
+				console.log('✅ Backend response:', data);
 				
 				if (data.success === false || data.error === 'NO_PREDICTION') {
 					// No prediction - show modal
