@@ -1124,15 +1124,20 @@ def predict():
 				top_indices = probs.topk(min(max_predictions, len(best.names))).indices.tolist()
 				top_confs = probs.topk(min(max_predictions, len(best.names))).values.tolist()
 				
+				print(f"[DEBUG] Model {model_name} (classification): Found {len(top_indices)} predictions")
 				for idx, conf in zip(top_indices, top_confs):
 					label = best.names[int(idx)]
 					norm = normalize_label(label)
 					key = ALIASES.get(norm, norm)
-					model_preds.append({"label": label, "conf": float(conf), "key": key, "source": model_name})
-			elif len(best.boxes) > 0:  # type: ignore[attr-defined]
+					conf_float = float(conf)
+					print(f"[DEBUG] Model {model_name}: {label} (key: {key}) - confidence: {conf_float:.4f}")
+					model_preds.append({"label": label, "conf": conf_float, "key": key, "source": model_name})
+			elif hasattr(best, "boxes") and len(best.boxes) > 0:  # type: ignore[attr-defined]
 				# Detection model - get top predictions by confidence
 				confidences = best.boxes.conf.tolist()  # type: ignore[attr-defined]
 				classes = best.boxes.cls.tolist()  # type: ignore[attr-defined]
+				
+				print(f"[DEBUG] Model {model_name} (detection): Found {len(confidences)} boxes")
 				
 				# Combine and sort by confidence
 				box_predictions = []
@@ -1140,7 +1145,9 @@ def predict():
 					label = best.names[int(cls_idx)]
 					norm = normalize_label(label)
 					key = ALIASES.get(norm, norm)
-					box_predictions.append({"label": label, "conf": float(conf), "key": key, "source": model_name, "index": i})
+					conf_float = float(conf)
+					print(f"[DEBUG] Model {model_name}: Box {i} - {label} (key: {key}) - confidence: {conf_float:.4f}")
+					box_predictions.append({"label": label, "conf": conf_float, "key": key, "source": model_name, "index": i})
 				
 				# Sort by confidence and get top unique keys
 				box_predictions.sort(key=lambda x: x["conf"], reverse=True)
@@ -1151,6 +1158,8 @@ def predict():
 						seen_keys.add(pred["key"])
 						if len(model_preds) >= max_predictions:
 							break
+			else:
+				print(f"[DEBUG] Model {model_name}: No predictions found (no probs, no boxes)")
 		except Exception as e:
 			error_msg = str(e)
 			print(f"[ERROR] Model {model_name} prediction failed: {error_msg}")
@@ -1186,14 +1195,17 @@ def predict():
 	
 	# Filter out unwanted predictions
 	excluded_keys = {normalize_label("Kettlebells"), normalize_label("Assisted Chin Up-Dip")}
+	predictions_before_filter = len(predictions)
 	predictions = [p for p in predictions if p.get("key") not in excluded_keys]
+	print(f"[DEBUG] After filtering excluded keys: {len(predictions)} predictions (removed {predictions_before_filter - len(predictions)})")
 	
 	if not predictions:
+		print("[ERROR] All predictions were filtered out by excluded_keys")
 		try:
 			os.remove(str(tmp_path))
 		except Exception:
 			pass
-		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+		return jsonify({"success": False, "error": "NO_PREDICTION", "message": "No exercise detected. Please try a clearer photo with a visible exercise machine."}), 422
 	
 	# Group predictions by key and select best from each model group
 	grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
