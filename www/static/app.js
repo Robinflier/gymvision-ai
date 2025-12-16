@@ -1025,6 +1025,7 @@ function initFileUpload() {
 				
 				const apiUrl = getApiUrl('/predict');
 				console.log('📤 Sending POST request to:', apiUrl);
+				console.log('📤 BACKEND_URL:', BACKEND_URL);
 				console.log('📤 File details:', {
 					name: file.name,
 					size: file.size,
@@ -1032,9 +1033,19 @@ function initFileUpload() {
 					lastModified: file.lastModified
 				});
 				
+				if (!BACKEND_URL) {
+					alert('ERROR: BACKEND_URL is not set! Cannot send request to backend.');
+					throw new Error('BACKEND_URL not configured');
+				}
+				
+				console.log('📤 Starting fetch request...');
 				const res = await fetch(apiUrl, {
 					method: 'POST',
 					body: formData
+				}).catch(err => {
+					console.error('❌ Fetch failed completely:', err);
+					alert('Network Error: ' + err.message + '\n\nCheck your internet connection and try again.');
+					throw err;
 				});
 				
 				console.log('📥 Response status:', res.status, res.statusText);
