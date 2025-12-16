@@ -1091,8 +1091,15 @@ def predict():
 		return jsonify({"error": "Saved image file is empty (0 bytes)"}), 400
 	
 	print(f"[DEBUG] Received image: {file.filename}, size: {file_size} bytes")
+	print(f"[DEBUG] Content-Type: {request.content_type}")
+	print(f"[DEBUG] Request method: {request.method}")
+	print(f"[DEBUG] Request headers: {dict(request.headers)}")
 
 	model, model1, model2, model3, model4 = get_models()
+	
+	# Check if models are loaded
+	models_loaded = sum(1 for m in [model, model1, model2, model3, model4] if m is not None)
+	print(f"[DEBUG] Models loaded: {models_loaded}/5")
 	
 	# Get predictions from all models (best.pt, best1.pt, best2.pt, best3.pt, best4.pt)
 	predictions = []

@@ -1039,14 +1039,25 @@ function initFileUpload() {
 				}
 				
 				console.log('📤 Starting fetch request...');
+				const startTime = Date.now();
 				const res = await fetch(apiUrl, {
 					method: 'POST',
-					body: formData
+					body: formData,
+					// Don't set Content-Type header - let browser set it with boundary for FormData
 				}).catch(err => {
-					console.error('❌ Fetch failed completely:', err);
-					alert('Network Error: ' + err.message + '\n\nCheck your internet connection and try again.');
+					const elapsed = Date.now() - startTime;
+					console.error('❌ Fetch failed completely after', elapsed, 'ms:', err);
+					console.error('❌ Error details:', {
+						name: err.name,
+						message: err.message,
+						stack: err.stack
+					});
+					alert('Network Error: ' + err.message + '\n\nURL: ' + apiUrl + '\n\nCheck your internet connection and try again.');
 					throw err;
 				});
+				
+				const elapsed = Date.now() - startTime;
+				console.log('📥 Request completed in', elapsed, 'ms');
 				
 				console.log('📥 Response status:', res.status, res.statusText);
 				console.log('📥 Response headers:', Object.fromEntries(res.headers.entries()));
