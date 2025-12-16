@@ -591,21 +591,40 @@ _model4 = None
 
 def get_models():
 	global _model, _model1, _model2, _model3, _model4
-	if any(m is None for m in (_model, _model1, _model2, _model3, _model4)):
-		if YOLO is None:
-			raise RuntimeError("Ultralytics not available. Install dependencies from requirements.txt")
-		if MODEL_PATH.exists():
-			_model = YOLO(str(MODEL_PATH))
-		if MODEL_PATH_1.exists():
-			_model1 = YOLO(str(MODEL_PATH_1))
-		if MODEL_PATH_2.exists():
-			_model2 = YOLO(str(MODEL_PATH_2))
-		if MODEL_PATH_3.exists():
-			_model3 = YOLO(str(MODEL_PATH_3))
-		if MODEL_PATH_4.exists():
-			_model4 = YOLO(str(MODEL_PATH_4))
-		if all(m is None for m in (_model, _model1, _model2, _model3, _model4)):
-			raise FileNotFoundError("No model files found. Check for best.pt, best1.pt, best2.pt, best3.pt or best4.pt")
+	# Lazy load models only when needed (not at startup)
+	# This prevents timeout during deployment
+	if YOLO is None:
+		raise RuntimeError("Ultralytics not available. Install dependencies from requirements.txt")
+	
+	# Load models one by one, only if they exist and haven't been loaded
+	if _model is None and MODEL_PATH.exists():
+		print(f"[INFO] Loading model: {MODEL_PATH}")
+		_model = YOLO(str(MODEL_PATH))
+		print(f"[INFO] Model loaded: best.pt")
+	
+	if _model1 is None and MODEL_PATH_1.exists():
+		print(f"[INFO] Loading model: {MODEL_PATH_1}")
+		_model1 = YOLO(str(MODEL_PATH_1))
+		print(f"[INFO] Model loaded: best1.pt")
+	
+	if _model2 is None and MODEL_PATH_2.exists():
+		print(f"[INFO] Loading model: {MODEL_PATH_2}")
+		_model2 = YOLO(str(MODEL_PATH_2))
+		print(f"[INFO] Model loaded: best2.pt")
+	
+	if _model3 is None and MODEL_PATH_3.exists():
+		print(f"[INFO] Loading model: {MODEL_PATH_3}")
+		_model3 = YOLO(str(MODEL_PATH_3))
+		print(f"[INFO] Model loaded: best3.pt")
+	
+	if _model4 is None and MODEL_PATH_4.exists():
+		print(f"[INFO] Loading model: {MODEL_PATH_4}")
+		_model4 = YOLO(str(MODEL_PATH_4))
+		print(f"[INFO] Model loaded: best4.pt")
+	
+	if all(m is None for m in (_model, _model1, _model2, _model3, _model4)):
+		raise FileNotFoundError("No model files found. Check for best.pt, best1.pt, best2.pt, best3.pt or best4.pt")
+	
 	return _model, _model1, _model2, _model3, _model4
 
 
@@ -1245,6 +1264,24 @@ def predict():
 	return jsonify(response)
 
 
+@app.route("/health", methods=["GET"])
+def health():
+	"""Health check endpoint to test if backend is working."""
+	try:
+		model, model1, model2, model3, model4 = get_models()
+		models_loaded = sum(1 for m in [model, model1, model2, model3, model4] if m is not None)
+		return jsonify({
+			"status": "ok",
+			"models_loaded": models_loaded,
+			"yolo_available": YOLO is not None
+		}), 200
+	except Exception as e:
+		return jsonify({
+			"status": "error",
+			"error": str(e),
+			"yolo_available": YOLO is not None
+		}), 500
+
 @app.route("/favicon.ico")
 def favicon():
 	return ("", 204)
@@ -1359,6 +1396,11 @@ def vision_workout():
 		current_exercises = ", ".join([ex.get("display", ex.get("key", "")) for ex in workout_context.get("exercises", [])])
 		context_info = f"\n\nCurrent workout: {workout_context.get('name', 'Workout')}\nCurrent exercises: {current_exercises}\nThe user wants to MODIFY this workout."
 	
+	# Check if message mentions muscle groups
+	muscle_groups = ["chest", "shoulder", "back", "bicep", "tricep", "leg", "quad", "hamstring", "glute", "calf", "abs", "core", "borst"]
+	msg_lower = message.lower()
+	mentions_muscle = any(muscle in msg_lower for muscle in muscle_groups)
+	
 	prompt = f"""Based on this user request: "{message}"
 {context_info}
 
@@ -1377,7 +1419,11 @@ Use exercise keys from this list (use the key exactly as shown):
 CRITICAL RULES:
 - Return ONLY valid JSON, no other text, no markdown, no code blocks
 - Use exact exercise keys from the list (the part after "key: ")
+- ALWAYS generate a workout - never return empty exercises array
+- If user specifies a NUMBER of exercises (e.g., "10 exercise push workout", "5 exercise chest workout"), you MUST create exactly that many exercises
+- If user mentions a muscle group (chest, shoulders, back, biceps, triceps, legs, etc.) without a number, create a workout with 4-6 exercises targeting that muscle group
 - Give ONLY what the user asks for - if they ask for "just pushups", give ONLY pushups
+- If user says "only chest" or "just chest", give 4-6 chest exercises
 - If user specifies exact exercises, use ONLY those exercises
 - If user asks for a workout type (push/pull/legs) without specifics, then suggest 4-6 exercises
 - If user says "no X" or "replace X with Y", adjust accordingly
@@ -1385,6 +1431,9 @@ CRITICAL RULES:
 - Match the muscle groups mentioned (push = chest/shoulders/triceps, pull = back/biceps, legs = quads/hamstrings/glutes)
 
 Examples:
+- User: "10 exercise push workout" → Create EXACTLY 10 push exercises (chest/shoulders/triceps)
+- User: "5 exercise chest workout" → Create EXACTLY 5 chest exercises
+- User: "only chest" or "just chest" → {{"name": "Chest Workout", "exercises": [{{"key": "bench_press", "display": "Bench Press"}}, {{"key": "incline_bench_press", "display": "Incline Bench Press"}}, {{"key": "dumbbell_fly", "display": "Dumbbell Fly"}}, {{"key": "cable_crossover", "display": "Cable Crossover"}}, {{"key": "pec_deck_machine", "display": "Pec Deck Machine"}}]}}
 - User: "just pushups" → {{"name": "Pushup Workout", "exercises": [{{"key": "push_up", "display": "Push-Up"}}]}}
 - User: "push workout" → {{"name": "Push Workout", "exercises": [{{"key": "bench_press", "display": "Bench Press"}}, {{"key": "incline_bench_press", "display": "Incline Bench Press"}}, {{"key": "shoulder_press_machine", "display": "Shoulder Press Machine"}}, {{"key": "tricep_pushdown", "display": "Tricep Pushdown"}}]}}
 - User: "bench press and tricep pushdown" → {{"name": "Workout", "exercises": [{{"key": "bench_press", "display": "Bench Press"}}, {{"key": "tricep_pushdown", "display": "Tricep Pushdown"}}]}}
@@ -1515,6 +1564,24 @@ def chat():
 	if workout_context:
 		current_exercises = ", ".join([ex.get("display", ex.get("key", "")) for ex in workout_context.get("exercises", [])])
 		context_note = f"\n\nNOTE: The user is currently building a workout called '{workout_context.get('name', 'Workout')}' with these exercises: {current_exercises}. If they ask to modify, add, or remove exercises, you should generate a workout JSON response."
+	
+	# Check if message mentions muscle groups - if so, this should be handled by workout generation, not chat
+	muscle_groups = ["chest", "shoulder", "back", "bicep", "tricep", "leg", "quad", "hamstring", "glute", "calf", "abs", "core", "borst"]
+	workout_keywords = ["workout", "make", "create", "maak", "train", "push", "pull", "legs", "oefeningen", "exercises"]
+	msg_lower = message.lower()
+	mentions_muscle = any(muscle in msg_lower for muscle in muscle_groups)
+	mentions_workout = any(keyword in msg_lower for keyword in workout_keywords)
+	
+	# If user mentions muscle groups or workout keywords, redirect to workout generation
+	if mentions_muscle or mentions_workout:
+		try:
+			workout_data = generate_workout_from_chat(message, "", workout_context)
+			if workout_data and workout_data.get("exercises"):
+				return jsonify({
+					"workout": workout_data
+				})
+		except Exception as e:
+			print(f"[ERROR] Workout generation error in chat: {e}")
 	
 	system_prompt = f"""You are Vision, an AI fitness assistant for the GymVision AI app. Your role is to help users with fitness and gym-related questions.
 

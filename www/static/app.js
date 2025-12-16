@@ -25,30 +25,40 @@ let supabaseClient = null;
 
 async function initSupabase() {
 	if (!supabaseClient) {
-		if (typeof window.createClient === 'undefined') {
-			// Wait for Supabase library to load
-			await new Promise(resolve => setTimeout(resolve, 100));
-			if (typeof window.createClient === 'undefined') {
-				console.error('Supabase createClient not loaded');
+		try {
+			if (typeof window.createClient === 'undefined' || window.createClient === null) {
+				// Wait for Supabase library to load (retry up to 3 times)
+				for (let i = 0; i < 3; i++) {
+					await new Promise(resolve => setTimeout(resolve, 200));
+					if (typeof window.createClient !== 'undefined' && window.createClient !== null) {
+						break;
+					}
+				}
+				if (typeof window.createClient === 'undefined' || window.createClient === null) {
+					console.error('Supabase createClient not loaded after retries');
+					return null;
+				}
+			}
+			
+			// Get config from window (injected by backend from environment variables)
+			const SUPABASE_URL = window.SUPABASE_URL;
+			const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY;
+			
+			if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+				console.error('Supabase configuration not found. Make sure SUPABASE_URL and SUPABASE_ANON_KEY are set in environment variables.');
 				return null;
 			}
-		}
-		
-		// Get config from window (injected by backend from environment variables)
-		const SUPABASE_URL = window.SUPABASE_URL;
-		const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY;
-		
-		if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-			console.error('Supabase configuration not found. Make sure SUPABASE_URL and SUPABASE_ANON_KEY are set in environment variables.');
+			
+			supabaseClient = window.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+				auth: {
+					persistSession: true,
+					autoRefreshToken: true,
+				}
+			});
+		} catch (error) {
+			console.error('Error initializing Supabase:', error);
 			return null;
 		}
-		
-		supabaseClient = window.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-			auth: {
-				persistSession: true,
-				autoRefreshToken: true,
-			}
-		});
 	}
 	return supabaseClient;
 }
@@ -70,8 +80,6 @@ const DEFAULT_SET_COUNT = 3;
 const CONTENT_MAP = {
 	'login': 'login-content',
 	'register': 'register-content',
-	'forgot-password': 'forgot-password-content',
-	'reset-password': 'reset-password-content',
 	'workouts': 'workouts-content',
 	'workout-builder': 'workout-builder-content',
 	'progress': 'progress-content',
@@ -232,32 +240,20 @@ async function getCurrentUser() {
 			.single();
 		
 		if (userError && userError.code === 'PGRST116') {
-			// User doesn't exist in public.users
-			// The trigger should have created it automatically, but if not, try to create it
-			// Get username from user metadata
-			const username = user.user_metadata?.username || user.email?.split('@')[0] || 'user';
-			
-			console.log("User not found in public.users, attempting to create...");
+			// User doesn't exist in public.users, create it
 			const { error: insertError } = await supabaseClient
 				.from('users')
 				.insert({
 					id: user.id,
-					email: user.email,
-					username: username
+					email: user.email
 				});
 			
 			if (insertError) {
-				console.error("Error creating user record in public.users:", insertError);
-				console.error("Full error details:", JSON.stringify(insertError, null, 2));
-				// Don't throw - the trigger might have created it, or it might be a permissions issue
-				// The user can still continue - they just might not be able to save data until this is fixed
-			} else {
-				console.log("Successfully created user record in public.users");
+				console.error("Error creating user record:", insertError);
+				// Continue anyway - the trigger should handle it
 			}
 		} else if (userError) {
 			console.error("Error checking user record:", userError);
-		} else {
-			console.log("User found in public.users:", userRecord);
 		}
 	} catch (e) {
 		console.error("Error verifying user record:", e);
@@ -302,18 +298,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 	await initSupabase();
 	
 	// Initialize login/register forms (always available)
-		initLoginForm();
-		initRegisterForm();
-		initForgotPasswordForm();
-		initResetPasswordForm();
-		
+	initLoginForm();
+	initRegisterForm();
+	
 	// Add event listeners for login/register switching
 	const showRegisterLink = document.getElementById('show-register-link');
 	const showLoginLink = document.getElementById('show-login-link');
-	const showForgotPasswordLink = document.getElementById('show-forgot-password-link');
-	const backToLoginLink = document.getElementById('back-to-login-link');
-	const backToLoginFromResetLink = document.getElementById('back-to-login-from-reset-link');
-	
 	if (showRegisterLink) {
 		showRegisterLink.addEventListener('click', (e) => {
 			e.preventDefault();
@@ -324,47 +314,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 		showLoginLink.addEventListener('click', (e) => {
 			e.preventDefault();
 			showScreen('login');
-		});
-	}
-	if (showForgotPasswordLink) {
-		showForgotPasswordLink.addEventListener('click', (e) => {
-			e.preventDefault();
-			showScreen('forgot-password');
-		});
-	}
-	if (backToLoginLink) {
-		backToLoginLink.addEventListener('click', (e) => {
-			e.preventDefault();
-			showScreen('login');
-		});
-	}
-	if (backToLoginFromResetLink) {
-		backToLoginFromResetLink.addEventListener('click', (e) => {
-			e.preventDefault();
-			showScreen('login');
-		});
-	}
-	
-	// Check for password reset token in URL (for deep linking from email)
-	checkPasswordResetToken();
-	
-	// Set up Capacitor App listener for deep links (mobile app)
-	// Check if we're running in Capacitor
-	if (window.Capacitor) {
-		// Try to use @capacitor/app plugin if available
-		if (window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
-			window.Capacitor.Plugins.App.addListener('appUrlOpen', (data) => {
-				console.log('App opened with URL:', data.url);
-				handleDeepLink(data.url);
-			});
-		}
-		// Fallback: listen for app state changes and check URL
-		// This handles cases where the app is opened from a deep link
-		window.addEventListener('appUrlOpen', (event) => {
-			if (event.detail && event.detail.url) {
-				console.log('App opened with URL (event):', event.detail.url);
-				handleDeepLink(event.detail.url);
-			}
 		});
 	}
 	
@@ -391,7 +340,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 	initProgress();
 	initSettings();
 	initVision();
-		initExerciseVideoModal();
+	initExerciseVideoModal();
 	initExerciseCard();
 	loadStreak();
 	loadRecentScans();
@@ -561,12 +510,8 @@ function initRegisterForm() {
 	const form = document.getElementById('register-form');
 	if (!form) return;
 	
-	// Try multiple possible error element IDs
-	const errorEl = document.getElementById('register-error-message') || 
-	                document.querySelector('#register-content .auth-error') ||
-	                document.querySelector('#register-content [id*="error"]');
-	const submitBtn = document.getElementById('register-submit-btn') ||
-	                  document.querySelector('#register-content button[type="submit"]');
+	const errorEl = document.getElementById('register-error-message');
+	const submitBtn = document.getElementById('register-submit-btn');
 	
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault();
@@ -577,9 +522,9 @@ function initRegisterForm() {
 		}
 		if (errorEl) errorEl.classList.remove('show');
 		
-		const email = document.getElementById('register-email')?.value?.trim();
-		const username = document.getElementById('register-username')?.value?.trim();
+		const email = document.getElementById('register-email')?.value;
 		const password = document.getElementById('register-password')?.value;
+		const username = document.getElementById('register-username')?.value; // Optional
 		
 		if (!email || !password) {
 			if (errorEl) {
@@ -612,109 +557,22 @@ function initRegisterForm() {
 			return;
 		}
 		
-		try {
-			const { data, error } = await supabaseClient.auth.signUp({
-				email,
-				password,
-				options: {
-					data: {
-						username: username || email.split('@')[0]
-					}
-				}
-			});
-			
-			if (error) {
-				let errorMessage = error.message;
-				if (error.message.includes('already registered') || error.message.includes('already exists')) {
-					errorMessage = 'This email is already registered. Please sign in instead.';
-				} else if (error.message.includes('Password')) {
-					errorMessage = 'Password must be at least 6 characters';
-				}
-				
-				if (errorEl) {
-					errorEl.textContent = errorMessage;
-					errorEl.classList.add('show');
-				} else {
-					alert(errorMessage);
-				}
-				if (submitBtn) {
-					submitBtn.disabled = false;
-					submitBtn.textContent = 'Sign Up';
-				}
-				return;
-			}
-			
-			// Registration successful in Supabase Auth
-			// The trigger should automatically create the user in public.users
-			// Wait a moment for the trigger to complete
-			if (data.user) {
-				console.log('User created in Supabase Auth:', data.user.id);
-				
-				// Wait for trigger to complete (give it 2 seconds)
-				await new Promise(resolve => setTimeout(resolve, 2000));
-				
-				// Verify user was created in public.users (trigger should have done this)
-				try {
-					const { data: userRecord, error: verifyError } = await supabaseClient
-						.from('users')
-						.select('id, email, username')
-						.eq('id', data.user.id)
-						.single();
-					
-					if (verifyError && verifyError.code === 'PGRST116') {
-						// User not in public.users yet - trigger might have failed
-						// Try to create it manually as fallback
-						console.log('Trigger did not create user, creating manually...');
-						const userUsername = data.user.user_metadata?.username || username || data.user.email?.split('@')[0] || 'user';
-						
-						const { error: insertError } = await supabaseClient
-							.from('users')
-							.insert({
-								id: data.user.id,
-								email: data.user.email,
-								username: userUsername
-							});
-						
-						if (insertError) {
-							console.error("Failed to create user in public.users:", insertError);
-							console.error("Full error:", JSON.stringify(insertError, null, 2));
-							
-							// Show helpful error message
-							if (errorEl) {
-								errorEl.textContent = 'Account created, but database error. Please try logging in - your account may work. Error: ' + (insertError.message || insertError.code || 'Unknown');
-								errorEl.classList.add('show');
-							}
-							if (submitBtn) {
-								submitBtn.disabled = false;
-								submitBtn.textContent = 'Sign Up';
-							}
-							return;
-						} else {
-							console.log('Successfully created user in public.users (fallback)');
-						}
-					} else if (verifyError) {
-						console.error("Error verifying user creation:", verifyError);
-						// Continue anyway - user might still be created
-					} else {
-						console.log('User found in public.users (trigger worked!):', userRecord);
-					}
-				} catch (verifyErr) {
-					console.error("Error verifying user creation:", verifyErr);
-					// Continue anyway - user might still be created by trigger
+		const { error } = await supabaseClient.auth.signUp({
+			email,
+			password,
+			options: {
+				data: {
+					username: username || email.split('@')[0]
 				}
 			}
-			
-			// Success!
-			alert('Account created successfully! You can now sign in.');
-			showScreen('login');
-			
-		} catch (err) {
-			console.error('Registration error:', err);
-			let errorMessage = err.message || 'An unexpected error occurred. Please try again.';
-			
-			// Check if it's a database/user creation error
-			if (err.message && (err.message.includes('Database') || err.message.includes('user') || err.message.includes('PGRST'))) {
-				errorMessage = 'Account created in Supabase Auth, but failed to create user record. The trigger should handle this automatically. Please try logging in.';
+		});
+		
+		if (error) {
+			let errorMessage = error.message;
+			if (error.message.includes('already registered') || error.message.includes('already exists')) {
+				errorMessage = 'This email is already registered. Please sign in instead.';
+			} else if (error.message.includes('Password')) {
+				errorMessage = 'Password must be at least 6 characters';
 			}
 			
 			if (errorEl) {
@@ -727,666 +585,134 @@ function initRegisterForm() {
 				submitBtn.disabled = false;
 				submitBtn.textContent = 'Sign Up';
 			}
-		}
-	});
-}
-
-// ======================
-// 🔑 FORGOT PASSWORD LOGIC
-// ======================
-function initForgotPasswordForm() {
-	const form = document.getElementById('forgot-password-form');
-	if (!form) return;
-	
-	const errorEl = document.getElementById('forgot-password-error-message');
-	const successEl = document.getElementById('forgot-password-success-message');
-	const submitBtn = document.getElementById('forgot-password-submit-btn');
-	
-	form.addEventListener('submit', async (e) => {
-		e.preventDefault();
-		
-		if (submitBtn) {
-			submitBtn.disabled = true;
-			submitBtn.textContent = 'Sending...';
-		}
-		if (errorEl) errorEl.classList.remove('show');
-		if (successEl) successEl.classList.remove('show');
-		
-		const email = document.getElementById('forgot-password-email')?.value;
-		
-		if (!email) {
-			if (errorEl) {
-				errorEl.textContent = 'Please enter your email address';
-				errorEl.classList.add('show');
-			}
-			if (submitBtn) {
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Send Reset Code';
-			}
 			return;
 		}
 		
-		if (!supabaseClient) {
-			await initSupabase();
-		}
-		if (!supabaseClient) {
-			if (errorEl) {
-				errorEl.textContent = 'Supabase not initialized. Please refresh the page.';
-				errorEl.classList.add('show');
-			}
-			if (submitBtn) {
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Send Reset Code';
-			}
-			return;
-		}
-		
+		// Registration successful - ensure user exists in public.users table
+		// The trigger should automatically create it, but we'll verify and create if needed
 		try {
-			// Send password reset code via backend API
-			const backendUrl = window.BACKEND_URL || window.location.origin;
+			// Wait a moment for the trigger to complete
+			await new Promise(resolve => setTimeout(resolve, 1000));
 			
-			// Store email immediately for reset password form (before API call)
-			sessionStorage.setItem('password_reset_email', email);
+			const { data: { user }, error: getUserError } = await supabaseClient.auth.getUser();
 			
-			// Show loading message briefly
-			if (successEl) {
-				successEl.textContent = 'Sending reset code...';
-				successEl.classList.add('show');
+			if (getUserError) {
+				console.error("Error getting user after signup:", getUserError);
+				// Still show success - the account was created
+				alert('Account created! Please log in.');
+				showScreen('login');
+				return;
 			}
-			if (errorEl) errorEl.classList.remove('show');
 			
-			// Send email in background (don't block navigation, but don't abort it)
-			if (backendUrl) {
-				console.log('Sending forgot password request to:', `${backendUrl}/api/forgot-password`);
+			if (!user) {
+				console.error("No user returned after signup");
+				alert('Account created! Please log in.');
+				showScreen('login');
+				return;
+			}
+			
+			// Check if user exists in public.users, create if not
+			const { data: userRecord, error: userError } = await supabaseClient
+				.from('users')
+				.select('id')
+				.eq('id', user.id)
+				.single();
+			
+			if (userError && userError.code === 'PGRST116') {
+				// User doesn't exist in public.users, create it
+				// This should be allowed by the INSERT policy
+				console.log("User not found in public.users, creating...");
+				const { data: insertData, error: insertError } = await supabaseClient
+					.from('users')
+					.insert({
+						id: user.id,
+						email: user.email
+					})
+					.select();
 				
-				// Use AbortController for timeout (60 seconds for Render cold start)
-				const controller = new AbortController();
-				const timeoutId = setTimeout(() => {
-					console.warn('Password reset email request timed out after 60 seconds');
-					controller.abort();
-				}, 60000); // 60 seconds
-				
-				// Start fetch but don't wait for it - let it complete in background
-				fetch(`${backendUrl}/api/forgot-password`, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json'
-					},
-					body: JSON.stringify({ email }),
-					mode: 'cors',
-					credentials: 'omit',
-					signal: controller.signal,
-					keepalive: true // Keep request alive even if page navigates
-				}).then(response => {
-					clearTimeout(timeoutId);
-					if (response.ok) {
-						return response.json();
-			} else {
-						return response.json().then(data => {
-							console.warn('Password reset email may not have been sent:', data.error || 'Unknown error');
-						});
-					}
-				}).then(data => {
-					if (data && data.success) {
-						// SECURITY: Only show code if email failed (prevent password reset hijacking)
-						if (data.email_failed && data.code) {
-							// Email failed - show code as fallback (last resort)
-							console.warn('Email failed, showing code as fallback');
-							sessionStorage.setItem('password_reset_code_fallback', data.code);
-							
-							setTimeout(() => {
-								const resetScreen = document.getElementById('reset-password-content');
-								if (resetScreen && !resetScreen.classList.contains('hidden')) {
-									const errorEl = document.getElementById('reset-password-error-message');
-									if (errorEl) {
-										errorEl.innerHTML = `⚠️ Email could not be sent. Your reset code is: <strong style="color: #7c5cff; font-size: 20px; letter-spacing: 3px; display: inline-block; padding: 8px 16px; background: rgba(124, 92, 255, 0.1); border-radius: 8px; margin: 8px 0;">${data.code}</strong>`;
-										errorEl.style.color = '#ffa500';
-										errorEl.style.backgroundColor = 'rgba(255, 165, 0, 0.1)';
-										errorEl.style.padding = '16px';
-										errorEl.style.borderRadius = '8px';
-										errorEl.style.marginBottom = '16px';
-										errorEl.style.textAlign = 'center';
-										errorEl.classList.add('show');
-									}
-									// Auto-fill the code input
-									const tokenInput = document.getElementById('reset-password-token');
-									if (tokenInput) {
-										tokenInput.value = data.code;
-									}
-								}
-							}, 500);
+					if (insertError) {
+						console.error("Database error saving new user:", insertError);
+						console.error("Error code:", insertError.code);
+						console.error("Error message:", insertError.message);
+						console.error("Error details:", insertError.details);
+						console.error("Error hint:", insertError.hint);
+						console.error("Full error object:", insertError);
+						console.error("Full error JSON:", JSON.stringify(insertError, null, 2));
+						
+						// Unique constraint violation - user might already exist (trigger worked!)
+						if (insertError.code === '23505') {
+							console.log("User already exists (likely created by trigger) - this is OK, continuing...");
+							// Don't show error, just continue - trigger worked!
 						} else {
-							// Email was sent successfully - don't show code (security!)
-							console.log('Password reset code sent successfully via email');
-							// Show success message without code
-							setTimeout(() => {
-								const resetScreen = document.getElementById('reset-password-content');
-								if (resetScreen && !resetScreen.classList.contains('hidden')) {
-									const errorEl = document.getElementById('reset-password-error-message');
-									if (errorEl) {
-										errorEl.innerHTML = `✅ Reset code sent to your email. Please check your inbox.`;
-										errorEl.style.color = '#4caf50';
-										errorEl.style.backgroundColor = 'rgba(76, 175, 80, 0.1)';
-										errorEl.style.padding = '16px';
-										errorEl.style.borderRadius = '8px';
-										errorEl.style.marginBottom = '16px';
-										errorEl.style.textAlign = 'center';
-										errorEl.classList.add('show');
-									}
-								}
-							}, 500);
+							// Show FULL error details in UI for debugging
+							let errorMsg = `ERROR ${insertError.code || 'UNKNOWN'}: ${insertError.message || 'No message'}`;
+							if (insertError.details) {
+								errorMsg += `\nDetails: ${insertError.details}`;
+							}
+							if (insertError.hint) {
+								errorMsg += `\nHint: ${insertError.hint}`;
+							}
+							
+							// More specific error message based on code
+							if (insertError.code === '42501') {
+								errorMsg = 'ERROR 42501: Permission denied.\n\nINSERT policy may not be set correctly.\n\nCheck Supabase: Authentication > Policies > users table\n\nRun COMPLETE_USER_SETUP.sql again.';
+							} else if (insertError.code === '23503') {
+								errorMsg = 'ERROR 23503: Foreign key constraint failed.\n\nUser may not exist in auth.users.\n\nThis should not happen - contact support.';
+							}
+							
+							// ALWAYS show the error with full details
+							if (errorEl) {
+								errorEl.textContent = errorMsg;
+								errorEl.classList.add('show');
+								errorEl.style.whiteSpace = 'pre-wrap'; // Allow line breaks
+								errorEl.style.maxHeight = '200px';
+								errorEl.style.overflow = 'auto';
+							} else {
+								alert(errorMsg);
+							}
+							if (submitBtn) {
+								submitBtn.disabled = false;
+								submitBtn.textContent = 'Sign Up';
+							}
+							return;
 						}
+					} else {
+						console.log("Successfully created user in public.users:", insertData);
 					}
-				}).catch(err => {
-					clearTimeout(timeoutId);
-					if (err.name !== 'AbortError') {
-						console.warn('Password reset email may not have been sent:', err.message || 'Network error');
-					}
-					// Don't show error to user - we're navigating anyway
-				});
+			} else if (userError && userError.code !== 'PGRST116') {
+				// Some other error occurred
+				console.error("Error checking user record:", userError);
+				console.error("Error code:", userError.code);
+				console.error("Error message:", userError.message);
+			} else {
+				console.log("User already exists in public.users - trigger worked!");
 			}
-			
-			// Clear form
-			if (form) form.reset();
-			
-			// Immediately navigate to reset password screen (don't wait for API response)
-			setTimeout(() => {
-				showScreen('reset-password');
-				// Update subtitle to show email
-				const subtitle = document.getElementById('reset-password-subtitle');
-				if (subtitle) {
-					subtitle.textContent = `Enter the code sent to ${email} and your new password`;
-				}
-			}, 300); // Short delay for smooth transition
-			
 		} catch (err) {
-			console.error('Forgot password error:', err);
-			console.error('Error details:', {
-				message: err.message,
-				name: err.name,
-				stack: err.stack,
-				backendUrl: window.BACKEND_URL || window.location.origin
-			});
-			
-			// Better error messages
-			let errorMessage = 'Failed to send reset code. Please try again.';
-			if (err.message) {
-				errorMessage = err.message;
-			} else if (err.name === 'AbortError' || err.name === 'TimeoutError') {
-				errorMessage = 'Request timed out. The server may be starting up. Please wait a moment and try again.';
-			} else if (err.name === 'TypeError') {
-				if (err.message && err.message.includes('Load failed')) {
-					errorMessage = 'Cannot connect to server. The server may be starting up (this can take up to 2 minutes). Please wait and try again.';
-				} else {
-					errorMessage = 'Network error. Please check your internet connection and try again.';
-				}
-			} else if (err.name === 'NetworkError' || (err.message && err.message.includes('Load failed'))) {
-				errorMessage = 'Network error. The server may be starting up (this can take up to 2 minutes). Please try again.';
-			}
-			
+			console.error("Unexpected error creating user record:", err);
+			console.error("Error stack:", err.stack);
+			// The trigger should have created the user, so this might be OK
+			// But we'll still show an error to be safe
 			if (errorEl) {
-				errorEl.textContent = errorMessage;
+				errorEl.textContent = 'Account created, but there was an issue. Please try logging in.';
 				errorEl.classList.add('show');
-			}
-			if (successEl) successEl.classList.remove('show');
-		} finally {
-			if (submitBtn) {
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Send Reset Code';
-			}
-		}
-	});
-}
-
-// ======================
-// 🔄 RESET PASSWORD LOGIC
-// ======================
-function initResetPasswordForm() {
-	const form = document.getElementById('reset-password-form');
-	if (!form) return;
-	
-	const errorEl = document.getElementById('reset-password-error-message');
-	const successEl = document.getElementById('reset-password-success-message');
-	const submitBtn = document.getElementById('reset-password-submit-btn');
-	const tokenInput = document.getElementById('reset-password-token');
-	
-	// Show email in subtitle if available
-	const email = sessionStorage.getItem('password_reset_email');
-	const subtitle = document.getElementById('reset-password-subtitle');
-	if (subtitle && email) {
-		subtitle.textContent = `Enter the code sent to ${email} and your new password`;
-	}
-	
-	// Check if we have a fallback code (if email failed)
-	const fallbackCode = sessionStorage.getItem('password_reset_code_fallback');
-	if (fallbackCode) {
-		const errorEl = document.getElementById('reset-password-error-message');
-		if (errorEl) {
-			errorEl.innerHTML = `⚠️ Email not sent. Your reset code is: <strong style="color: #7c5cff; font-size: 18px; letter-spacing: 2px;">${fallbackCode}</strong>`;
-			errorEl.style.color = '#ffa500';
-			errorEl.style.backgroundColor = 'rgba(255, 165, 0, 0.1)';
-			errorEl.style.padding = '12px';
-			errorEl.style.borderRadius = '8px';
-			errorEl.style.border = '1px solid #ffa500';
-			errorEl.style.marginBottom = '16px';
-			errorEl.classList.add('show');
-		}
-		// Pre-fill the code input
-		const tokenInput = document.getElementById('reset-password-token');
-		if (tokenInput) {
-			tokenInput.value = fallbackCode;
-		}
-	}
-	
-	// Auto-format token input (only numbers, max 6 digits)
-	if (tokenInput) {
-		tokenInput.addEventListener('input', (e) => {
-			// Only allow numbers
-			e.target.value = e.target.value.replace(/[^0-9]/g, '');
-			// Limit to 6 digits
-			if (e.target.value.length > 6) {
-				e.target.value = e.target.value.substring(0, 6);
-			}
-		});
-	}
-	
-	form.addEventListener('submit', async (e) => {
-		e.preventDefault();
-		
-		if (submitBtn) {
-			submitBtn.disabled = true;
-			submitBtn.textContent = 'Resetting...';
-		}
-		if (errorEl) errorEl.classList.remove('show');
-		if (successEl) successEl.classList.remove('show');
-		
-		const token = document.getElementById('reset-password-token')?.value?.trim();
-		const newPassword = document.getElementById('reset-password-new')?.value;
-		const confirmPassword = document.getElementById('reset-password-confirm')?.value;
-		const email = sessionStorage.getItem('password_reset_email');
-		
-		if (!token || !newPassword || !confirmPassword) {
-			if (errorEl) {
-				errorEl.textContent = 'Please fill in all fields';
-				errorEl.classList.add('show');
+			} else {
+				alert('Account created, but there was an issue. Please try logging in.');
 			}
 			if (submitBtn) {
 				submitBtn.disabled = false;
-				submitBtn.textContent = 'Reset Password';
+				submitBtn.textContent = 'Sign Up';
 			}
-			return;
-		}
-		
-		if (token.length !== 6) {
-			if (errorEl) {
-				errorEl.textContent = 'Reset code must be 6 digits';
-				errorEl.classList.add('show');
-			}
-			if (submitBtn) {
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Reset Password';
-			}
-			return;
-		}
-		
-		if (!email) {
-			if (errorEl) {
-				errorEl.textContent = 'Email not found. Please request a new reset code.';
-				errorEl.classList.add('show');
-			}
-			if (submitBtn) {
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Reset Password';
-			}
-			return;
-		}
-		
-		if (newPassword.length < 6) {
-			if (errorEl) {
-				errorEl.textContent = 'Password must be at least 6 characters';
-				errorEl.classList.add('show');
-			}
-			if (submitBtn) {
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Reset Password';
-			}
-			return;
-		}
-		
-		if (newPassword !== confirmPassword) {
-			if (errorEl) {
-				errorEl.textContent = 'Passwords do not match';
-				errorEl.classList.add('show');
-			}
-			if (submitBtn) {
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Reset Password';
-			}
-			return;
-		}
-		
-		try {
-			// Call backend API to reset password
-			const backendUrl = window.BACKEND_URL || window.location.origin;
-			
-			if (!backendUrl) {
-				throw new Error('Backend URL not configured. Please set BACKEND_URL in index.html');
-			}
-			
-			console.log('Sending reset password request to:', `${backendUrl}/api/reset-password`);
-			
-			// Use AbortController for timeout (120 seconds for Render cold start)
-			const controller = new AbortController();
-			const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 seconds
-			
-			const response = await fetch(`${backendUrl}/api/reset-password`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({
-					email: email,
-					code: token,
-					password: newPassword
-				}),
-				mode: 'cors',
-				credentials: 'omit',
-				signal: controller.signal
-			});
-			
-			clearTimeout(timeoutId);
-			
-			if (!response.ok) {
-				// Try to parse error response
-				let errorData;
-				try {
-					errorData = await response.json();
-				} catch (e) {
-					errorData = { error: `Server error: ${response.status} ${response.statusText}` };
-				}
-				throw new Error(errorData.error || `Failed to reset password (${response.status})`);
-			}
-			
-			const data = await response.json();
-			
-			// Success - redirect to login
-			if (errorEl) errorEl.classList.remove('show');
-			if (successEl) {
-				successEl.textContent = 'Password reset successfully! Redirecting to login...';
-				successEl.classList.add('show');
-			}
-			
-			// Clear form and stored email
-			if (form) form.reset();
-			sessionStorage.removeItem('password_reset_email');
-			
-			// Redirect to login after short delay
+			// Still redirect to login - the account was created in auth.users
 			setTimeout(() => {
 				showScreen('login');
 			}, 2000);
-			
-		} catch (err) {
-			console.error('Reset password error:', err);
-			console.error('Error details:', {
-				message: err.message,
-				name: err.name,
-				stack: err.stack,
-				backendUrl: window.BACKEND_URL || window.location.origin
-			});
-			
-			// Better error messages
-			let errorMessage = 'Failed to reset password. The code may be invalid or expired.';
-			if (err.message) {
-				errorMessage = err.message;
-			} else if (err.name === 'AbortError' || err.name === 'TimeoutError') {
-				errorMessage = 'Request timed out. The server may be starting up. Please wait a moment and try again.';
-			} else if (err.name === 'TypeError' && err.message && err.message.includes('fetch')) {
-				errorMessage = 'Cannot connect to server. Please check your internet connection and try again.';
-			} else if (err.name === 'NetworkError' || (err.message && err.message.includes('Load failed'))) {
-				errorMessage = 'Network error. The server may be starting up (this can take up to 2 minutes). Please try again.';
-			}
-			
-			if (errorEl) {
-				errorEl.textContent = errorMessage;
-				errorEl.classList.add('show');
-			}
-			if (successEl) successEl.classList.remove('show');
-		} finally {
-			if (submitBtn) {
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Reset Password';
-			}
+			return;
 		}
+		
+		// Registration successful
+		alert('Account created! Please log in.');
+		showScreen('login');
 	});
-}
-
-// ======================
-// 🔗 PASSWORD RESET TOKEN HANDLING
-// ======================
-function handleDeepLink(url) {
-	// Handle deep link: gymvisionai://reset-password?access_token=...&type=recovery
-	// Or: gymvisionai://reset-password#access_token=...&type=recovery (Supabase uses hash)
-	console.log('Handling deep link:', url);
-	
-	try {
-		// Supabase often uses hash (#) instead of query string (?)
-		let accessToken = null;
-		let refreshToken = null;
-		let type = null;
-		
-		// Check for hash first (Supabase default)
-		if (url.includes('#')) {
-			const hashPart = url.split('#')[1];
-			const hashParams = new URLSearchParams(hashPart);
-			accessToken = hashParams.get('access_token');
-			refreshToken = hashParams.get('refresh_token');
-			type = hashParams.get('type');
-		}
-		
-		// Fallback to query string
-		if (!accessToken && url.includes('?')) {
-			const queryPart = url.split('?')[1].split('#')[0];
-			const queryParams = new URLSearchParams(queryPart);
-			accessToken = queryParams.get('access_token');
-			refreshToken = queryParams.get('refresh_token');
-			type = queryParams.get('type');
-		}
-		
-		// Check if this is a reset-password link
-		if (url.includes('reset-password') && type === 'recovery' && accessToken) {
-			console.log('Reset password token detected, setting session...');
-			if (!supabaseClient) {
-				initSupabase().then(() => {
-					handleResetToken(accessToken, refreshToken);
-				});
-			} else {
-				handleResetToken(accessToken, refreshToken);
-			}
-			return;
-		}
-		
-		// Also try URL constructor for proper parsing
-		const urlObj = new URL(url);
-		if (urlObj.pathname === '/reset-password' || urlObj.hostname === 'reset-password') {
-			accessToken = urlObj.searchParams.get('access_token') || urlObj.hash.split('access_token=')[1]?.split('&')[0];
-			refreshToken = urlObj.searchParams.get('refresh_token') || urlObj.hash.split('refresh_token=')[1]?.split('&')[0];
-			type = urlObj.searchParams.get('type') || urlObj.hash.split('type=')[1]?.split('&')[0];
-			
-			if (type === 'recovery' && accessToken) {
-				console.log('Reset password token detected (URL constructor), setting session...');
-				if (!supabaseClient) {
-					initSupabase().then(() => {
-						handleResetToken(accessToken, refreshToken);
-					});
-				} else {
-					handleResetToken(accessToken, refreshToken);
-				}
-			}
-		}
-	} catch (e) {
-		console.error('Error parsing deep link:', e);
-		// Fallback: manual parsing
-		if (url.includes('reset-password')) {
-			// Extract from hash or query
-			const hashMatch = url.match(/#access_token=([^&]+)/);
-			const typeMatch = url.match(/[#&]type=([^&]+)/);
-			const refreshMatch = url.match(/#refresh_token=([^&]+)/);
-			
-			if (hashMatch && typeMatch && typeMatch[1] === 'recovery') {
-				const accessToken = decodeURIComponent(hashMatch[1]);
-				const refreshToken = refreshMatch ? decodeURIComponent(refreshMatch[1]) : null;
-				
-				console.log('Reset password token detected (fallback), setting session...');
-				if (!supabaseClient) {
-					initSupabase().then(() => {
-						handleResetToken(accessToken, refreshToken);
-					});
-				} else {
-					handleResetToken(accessToken, refreshToken);
-				}
-			}
-		}
-	}
-}
-
-function checkPasswordResetToken() {
-	// Check if URL contains password reset token (from email link)
-	// Supabase sends tokens in hash (#) or query string (?)
-	const hash = window.location.hash;
-	const search = window.location.search;
-	
-	let accessToken = null;
-	let refreshToken = null;
-	let type = null;
-	
-	// Check hash first (Supabase often uses hash for auth redirects)
-	if (hash) {
-		const hashParams = new URLSearchParams(hash.substring(1));
-		accessToken = hashParams.get('access_token');
-		refreshToken = hashParams.get('refresh_token');
-		type = hashParams.get('type');
-	}
-	
-	// Fallback to query string
-	if (!accessToken && search) {
-		const urlParams = new URLSearchParams(search);
-		accessToken = urlParams.get('access_token');
-		refreshToken = urlParams.get('refresh_token');
-		type = urlParams.get('type');
-	}
-	
-	// Also check for Supabase verify URL format
-	// Sometimes Supabase redirects to /auth/v1/verify?token=...&type=...
-	const pathMatch = window.location.pathname.match(/\/auth\/v1\/verify/);
-	if (pathMatch) {
-		const urlParams = new URLSearchParams(window.location.search);
-		const token = urlParams.get('token');
-		type = urlParams.get('type');
-		
-		if (token && type === 'recovery') {
-			// Extract token from Supabase verify URL
-			// We need to exchange this for access_token via Supabase
-			handleSupabaseVerifyToken(token);
-			return;
-		}
-	}
-	
-	if (type === 'recovery' && accessToken) {
-		// Set the session with the recovery token
-		if (!supabaseClient) {
-			initSupabase().then(() => {
-				handleResetToken(accessToken, refreshToken);
-			});
-		} else {
-			handleResetToken(accessToken, refreshToken);
-		}
-	}
-}
-
-async function handleSupabaseVerifyToken(token) {
-	// When Supabase sends a verify token, we need to exchange it for a session
-	// This happens when the redirect URL points to Supabase's verify endpoint
-	try {
-		if (!supabaseClient) {
-			await initSupabase();
-		}
-		
-		// Exchange the verify token for an access token via Supabase API
-		const supabaseUrl = window.SUPABASE_URL;
-		const supabaseKey = window.SUPABASE_ANON_KEY;
-		
-		if (!supabaseUrl || !supabaseKey) {
-			throw new Error('Supabase configuration missing');
-		}
-		
-		// Call Supabase verify endpoint to exchange token for session
-		const verifyUrl = `${supabaseUrl}/auth/v1/verify?token=${encodeURIComponent(token)}&type=recovery`;
-		const response = await fetch(verifyUrl, {
-			method: 'GET',
-			headers: {
-				'apikey': supabaseKey,
-				'Accept': 'application/json'
-			}
-		});
-		
-		if (!response.ok) {
-			throw new Error('Token verification failed');
-		}
-		
-		const data = await response.json();
-		
-		// If we get access_token, set the session
-		if (data.access_token) {
-			const { error } = await supabaseClient.auth.setSession({
-				access_token: data.access_token,
-				refresh_token: data.refresh_token || ''
-			});
-			
-			if (error) {
-				throw error;
-			}
-			
-			// Show reset password screen
-			showScreen('reset-password');
-			window.history.replaceState({}, document.title, window.location.pathname);
-		} else {
-			// Fallback: store token and show reset screen
-			// User will enter password and we'll use the token
-			showScreen('reset-password');
-			sessionStorage.setItem('password_reset_token', token);
-			window.history.replaceState({}, document.title, window.location.pathname);
-		}
-	} catch (error) {
-		console.error('Error handling verify token:', error);
-		alert('Invalid or expired reset link. Please request a new one.');
-		showScreen('forgot-password');
-	}
-}
-
-async function handleResetToken(accessToken, refreshToken) {
-	try {
-		if (!supabaseClient) {
-			await initSupabase();
-		}
-		
-		const { error } = await supabaseClient.auth.setSession({
-			access_token: accessToken,
-			refresh_token: refreshToken || ''
-		});
-		
-		if (error) {
-			throw error;
-		}
-		
-		// Show reset password screen
-		showScreen('reset-password');
-		// Clean URL
-		window.history.replaceState({}, document.title, window.location.pathname);
-	} catch (error) {
-		console.error('Error setting recovery session:', error);
-		alert('Invalid or expired reset link. Please request a new one.');
-		showScreen('forgot-password');
-	}
 }
 
 // ======================
@@ -1543,62 +869,171 @@ function initFileUpload() {
 	const snapshot = document.getElementById('snapshot');
 	const manualPreview = document.getElementById('manual-preview');
 	
+	// Helper function to process a photo file (used by both file input and Capacitor Camera)
+	async function processPhotoFile(file) {
+		if (!file) return;
+		
+		const reader = new FileReader();
+		reader.onload = (event) => {
+			const img = new Image();
+			img.onload = () => {
+				snapshot.width = img.width;
+				snapshot.height = img.height;
+				const ctx = snapshot.getContext('2d');
+				ctx.drawImage(img, 0, 0);
+				// Store preview data URL so we can show it in the dotted box
+				window.lastUploadPreview = img.src;
+				// Store the actual file for classification
+				window.lastUploadFile = file;
+				// Show the preview image in the dotted square
+				if (manualPreview) {
+					manualPreview.src = img.src;
+					manualPreview.classList.remove('hidden');
+				}
+				if (camera) camera.classList.add('hidden');
+				if (snapshot) snapshot.classList.add('hidden');
+				classifyBtn.disabled = false;
+			};
+			img.src = event.target.result;
+		};
+		reader.readAsDataURL(file);
+	}
+	
+	// SIMPLE CAMERA HANDLING - Works on iOS via Capacitor
+	const isCapacitor = typeof window !== 'undefined' && window.Capacitor;
+	
 	if (fileInput) {
+		const fileInputLabel = fileInput.closest('label');
+		
+		if (fileInputLabel) {
+			fileInputLabel.addEventListener('click', async (e) => {
+				// Always prevent default to handle manually
+				e.preventDefault();
+				e.stopPropagation();
+				
+				// On iOS/Capacitor, use Camera plugin
+				if (isCapacitor) {
+					try {
+						// Get Camera plugin
+						const { Camera } = await import('@capacitor/camera');
+						
+						const image = await Camera.getPhoto({
+							quality: 90,
+							allowEditing: false,
+							resultType: 'base64',
+							source: 'CAMERA'
+						});
+						
+						if (image && image.base64String) {
+							// Convert to File
+							const byteCharacters = atob(image.base64String);
+							const byteNumbers = new Array(byteCharacters.length);
+							for (let i = 0; i < byteCharacters.length; i++) {
+								byteNumbers[i] = byteCharacters.charCodeAt(i);
+							}
+							const byteArray = new Uint8Array(byteNumbers);
+							const blob = new Blob([byteArray], { type: 'image/jpeg' });
+							const file = new File([blob], 'photo.jpg', { type: 'image/jpeg' });
+							
+							// Store file
+							window.lastUploadFile = file;
+							
+							// Process and show preview
+							await processPhotoFile(file);
+						}
+					} catch (error) {
+						// If camera fails, fallback to file input
+						if (!error.message || (!error.message.includes('cancel') && !error.message.includes('User cancelled'))) {
+							fileInput.click();
+						}
+					}
+				} else {
+					// Web: use file input
+					fileInput.click();
+				}
+			});
+		}
+		
+		// Also handle file input change (for web fallback)
 		fileInput.addEventListener('change', (e) => {
 			const file = e.target.files[0];
 			if (file) {
-				const reader = new FileReader();
-				reader.onload = (event) => {
-					const img = new Image();
-					img.onload = () => {
-						snapshot.width = img.width;
-						snapshot.height = img.height;
-						const ctx = snapshot.getContext('2d');
-						ctx.drawImage(img, 0, 0);
-						// Store preview data URL so we can show it in the dotted box
-						window.lastUploadPreview = img.src;
-						// Show the preview image in the dotted square
-						if (manualPreview) {
-							manualPreview.src = img.src;
-							manualPreview.classList.remove('hidden');
-						}
-						if (camera) camera.classList.add('hidden');
-						if (snapshot) snapshot.classList.add('hidden');
-						classifyBtn.disabled = false;
-					};
-					img.src = event.target.result;
-				};
-				reader.readAsDataURL(file);
+				window.lastUploadFile = file;
+				processPhotoFile(file);
 			}
 		});
 	}
 	
 	if (classifyBtn) {
 		classifyBtn.addEventListener('click', async () => {
-			const file = fileInput?.files[0];
-			if (!file) return;
+			// Get file - MUST exist
+			const file = window.lastUploadFile || fileInput?.files[0];
+			
+			if (!file) {
+				alert('Please take a photo first!');
+				return;
+			}
 			
 			classifyBtn.disabled = true;
 			classifyBtn.textContent = 'Detecting...';
 			
 			try {
+				// First check backend health
+				const healthUrl = getApiUrl('/health');
+				let healthOk = false;
+				try {
+					const healthRes = await fetch(healthUrl);
+					if (healthRes.ok) {
+						const health = await healthRes.json();
+						if (health.models_loaded > 0) {
+							healthOk = true;
+						} else {
+							alert('Backend has no AI models loaded. Please check server.');
+							return;
+						}
+					}
+				} catch (e) {
+					// Health check failed, continue anyway
+				}
+				
+				// Send to backend
 				const formData = new FormData();
 				formData.append('image', file);
 				
-				const res = await fetch('/predict', {
+				const apiUrl = getApiUrl('/predict');
+				const res = await fetch(apiUrl, {
 					method: 'POST',
 					body: formData
 				});
 				
-				const data = await res.json();
+				if (!res.ok) {
+					const errorText = await res.text().catch(() => 'Unknown error');
+					console.error('Backend error:', res.status, errorText);
+					
+					if (res.status === 422) {
+						// NO_PREDICTION - show modal
+						showAIDetectErrorModal();
+					} else if (res.status === 500) {
+						alert('Server error (500). The AI models may not be working. Check Render logs.');
+						showAIDetectErrorModal();
+					} else {
+						alert('Server error: ' + res.status + '\n' + errorText.substring(0, 100));
+						showAIDetectErrorModal();
+					}
+					return;
+				}
 				
-				// Check for NO_PREDICTION error
-				if (data.success === false && data.error === "NO_PREDICTION") {
+				const data = await res.json();
+				console.log('Backend response:', data);
+				
+				if (data.success === false || data.error === 'NO_PREDICTION') {
+					// No prediction - show modal
 					showAIDetectErrorModal();
 				} else if (data.error) {
+					alert('Error: ' + data.error);
 					showAIDetectErrorModal();
 				} else {
-					// Attach preview image of the uploaded photo for the dotted box
+					// SUCCESS - Show results
 					if (window.lastUploadPreview) {
 						data._previewImage = window.lastUploadPreview;
 					}
@@ -1606,7 +1041,8 @@ function initFileUpload() {
 					saveRecentScan(data);
 				}
 			} catch (e) {
-				console.error('Classification failed:', e);
+				console.error('Fetch error:', e);
+				alert('Network error: ' + (e.message || 'Could not connect to server. Check your internet.'));
 				showAIDetectErrorModal();
 			} finally {
 				classifyBtn.disabled = false;
@@ -2449,6 +1885,165 @@ function startNewWorkout(workoutData = null) {
 	switchTab('workout-builder');
 }
 
+// Quick workout generator - instant response based on keywords
+function generateQuickWorkout(message) {
+	const msg = message.toLowerCase().trim();
+	
+	// Check for specific exercises first (most specific)
+	if (msg.includes('pushup') || msg.includes('push-up') || msg.includes('push up')) {
+		return {
+			name: 'Push-Up Workout',
+			exercises: [
+				{ key: 'push_up', display: 'Push-Up' }
+			]
+		};
+	}
+	
+	// Check for specific exercise combinations
+	if (msg.includes('dip')) {
+		const exercises = [];
+		if (msg.includes('pushup') || msg.includes('push-up') || msg.includes('push up')) {
+			exercises.push({ key: 'push_up', display: 'Push-Up' });
+		}
+		if (msg.includes('dip')) {
+			exercises.push({ key: 'dips', display: 'Dips' });
+		}
+		if (exercises.length > 0) {
+			return {
+				name: 'Workout',
+				exercises: exercises
+			};
+		}
+	}
+	
+	// Shoulders workout (check for "shoulder" or "shoulders" - with or without "workout")
+	if (msg.includes('shoulder')) {
+		return {
+			name: 'Shoulders Workout',
+			exercises: [
+				{ key: 'shoulder_press_machine', display: 'Shoulder Press Machine' },
+				{ key: 'lateral_raise_machine', display: 'Lateral Raise Machine' },
+				{ key: 'front_raise', display: 'Front Raise' },
+				{ key: 'rear_delt_fly', display: 'Rear Delt Fly' },
+				{ key: 'cable_face_pull', display: 'Cable Face Pull' }
+			]
+		};
+	}
+	
+	// Chest workout (check for "chest" - handles "only chest", "chest workout", etc.)
+	if (msg.includes('chest') || msg.includes('borst')) {
+		return {
+			name: 'Chest Workout',
+			exercises: [
+				{ key: 'bench_press', display: 'Bench Press' },
+				{ key: 'incline_bench_press', display: 'Incline Bench Press' },
+				{ key: 'dumbbell_fly', display: 'Dumbbell Fly' },
+				{ key: 'cable_crossover', display: 'Cable Crossover' },
+				{ key: 'pec_deck_machine', display: 'Pec Deck Machine' }
+			]
+		};
+	}
+	
+	// Back workout
+	if (msg.includes('back')) {
+		return {
+			name: 'Back Workout',
+			exercises: [
+				{ key: 'lat_pulldown', display: 'Lat Pulldown' },
+				{ key: 'seated_row', display: 'Seated Row' },
+				{ key: 'one_arm_dumbbell_row', display: 'One Arm Dumbbell Row' },
+				{ key: 'bent_over_row', display: 'Bent Over Row' },
+				{ key: 'deadlift', display: 'Deadlift' }
+			]
+		};
+	}
+	
+	// Biceps workout
+	if (msg.includes('bicep')) {
+		return {
+			name: 'Biceps Workout',
+			exercises: [
+				{ key: 'barbell_curl', display: 'Barbell Curl' },
+				{ key: 'dumbbell_curl', display: 'Dumbbell Curl' },
+				{ key: 'hammer_curl', display: 'Hammer Curl' },
+				{ key: 'preacher_curl', display: 'Preacher Curl' },
+				{ key: 'cable_curl', display: 'Cable Curl' }
+			]
+		};
+	}
+	
+	// Triceps workout
+	if (msg.includes('tricep')) {
+		return {
+			name: 'Triceps Workout',
+			exercises: [
+				{ key: 'tricep_pushdown', display: 'Tricep Pushdown' },
+				{ key: 'overhead_tricep_extension', display: 'Overhead Tricep Extension' },
+				{ key: 'dips', display: 'Dips' }
+			]
+		};
+	}
+	
+	// Legs workout (check for leg, quad, hamstring, glute, calf)
+	if (msg.includes('leg') || msg.includes('quad') || msg.includes('hamstring') || msg.includes('glute') || msg.includes('calf')) {
+		return {
+			name: 'Legs Workout',
+			exercises: [
+				{ key: 'leg_press', display: 'Leg Press' },
+				{ key: 'leg_extension', display: 'Leg Extension' },
+				{ key: 'lying_leg_curl', display: 'Lying Leg Curl' },
+				{ key: 'hip_thrust', display: 'Hip Thrust' },
+				{ key: 'standing_calf_raise', display: 'Standing Calf Raise' }
+			]
+		};
+	}
+	
+	// Full body (check before generic push/pull/legs)
+	if (msg.includes('full body') || msg.includes('fullbody') || msg.includes('full-body')) {
+		return {
+			name: 'Full Body Workout',
+			exercises: [
+				{ key: 'bench_press', display: 'Bench Press' },
+				{ key: 'lat_pulldown', display: 'Lat Pulldown' },
+				{ key: 'leg_press', display: 'Leg Press' },
+				{ key: 'shoulder_press_machine', display: 'Shoulder Press Machine' },
+				{ key: 'barbell_curl', display: 'Barbell Curl' },
+				{ key: 'tricep_pushdown', display: 'Tricep Pushdown' }
+			]
+		};
+	}
+	
+	// Push workout - only if it's explicitly "push workout" or "push day", not just "push" in other words
+	if ((msg.match(/\bpush\b/) && (msg.includes('workout') || msg.includes('day') || msg.includes('train')))) {
+		return {
+			name: 'Push Workout',
+			exercises: [
+				{ key: 'bench_press', display: 'Bench Press' },
+				{ key: 'incline_bench_press', display: 'Incline Bench Press' },
+				{ key: 'shoulder_press_machine', display: 'Shoulder Press Machine' },
+				{ key: 'lateral_raise_machine', display: 'Lateral Raise Machine' },
+				{ key: 'tricep_pushdown', display: 'Tricep Pushdown' }
+			]
+		};
+	}
+	
+	// Pull workout
+	if ((msg.match(/\bpull\b/) && (msg.includes('workout') || msg.includes('day') || msg.includes('train')))) {
+		return {
+			name: 'Pull Workout',
+			exercises: [
+				{ key: 'lat_pulldown', display: 'Lat Pulldown' },
+				{ key: 'seated_row', display: 'Seated Row' },
+				{ key: 'one_arm_dumbbell_row', display: 'One Arm Dumbbell Row' },
+				{ key: 'barbell_curl', display: 'Barbell Curl' },
+				{ key: 'dumbbell_curl', display: 'Dumbbell Curl' }
+			]
+		};
+	}
+	
+	return null; // No quick match, use AI
+}
+
 function applyWorkoutFromVision(workoutData) {
 	// Convert workout data to proper format
 	const exercises = workoutData.exercises.map(hydrateExerciseFromMetadata);
@@ -2716,16 +2311,35 @@ function renderWorkoutList() {
 		workoutList.appendChild(li);
 	});
 	
-	// Add exercise button
-	const addBtn = document.createElement('button');
-	addBtn.className = 'btn workout-add-exercise-btn';
-	addBtn.textContent = '+ Add Exercise';
-	addBtn.onclick = () => {
-		openExerciseSelector();
-	};
-	workoutList.appendChild(addBtn);
-
 	saveWorkoutDraft();
+	
+	// Add exercise button and cancel button (outside the ul, in the parent section)
+	const workoutSection = document.getElementById('workout');
+	if (workoutSection && workoutList) {
+		// Remove existing buttons if they exist (to avoid duplicates)
+		const existingAddBtn = workoutSection.querySelector('.workout-add-exercise-btn');
+		const existingCancelBtn = workoutSection.querySelector('.workout-cancel-btn');
+		if (existingAddBtn) existingAddBtn.remove();
+		if (existingCancelBtn) existingCancelBtn.remove();
+		
+		// Add exercise button (insert after the ul)
+		const addBtn = document.createElement('button');
+		addBtn.className = 'btn workout-add-exercise-btn';
+		addBtn.textContent = '+ Add Exercise';
+		addBtn.onclick = () => {
+			openExerciseSelector();
+		};
+		workoutList.insertAdjacentElement('afterend', addBtn);
+
+		// Cancel workout button (insert after the add exercise button)
+		const cancelBtn = document.createElement('button');
+		cancelBtn.className = 'btn workout-cancel-btn';
+		cancelBtn.textContent = 'Cancel workout';
+		cancelBtn.onclick = () => {
+			cancelWorkout();
+		};
+		addBtn.insertAdjacentElement('afterend', cancelBtn);
+	}
 }
 
 function capitalizeFirstLetter(str) {
@@ -3235,6 +2849,25 @@ function clearWorkoutDraft() {
 		console.error('Failed to clear workout draft:', e);
 	}
 	updateWorkoutStartButton();
+}
+
+function cancelWorkout() {
+	// Stop the workout timer
+	if (workoutTimer) {
+		clearInterval(workoutTimer);
+		workoutTimer = null;
+	}
+	
+	// Clear workout data
+	currentWorkout = null;
+	workoutStartTime = null;
+	editingWorkoutId = null;
+	
+	// Clear the draft
+	clearWorkoutDraft();
+	
+	// Switch back to workouts tab
+	switchTab('workouts');
 }
 
 function updateWorkoutStartButton() {
@@ -4718,8 +4351,8 @@ function initVision() {
 			input.value = '';
 			sendBtn.disabled = true;
 			
-			// Show loading state
-			const loadingMessageId = addChatMessage('Generating workout...', 'bot', true);
+			// Show immediate acknowledgment - instant response
+			const loadingMessageId = addChatMessage('I\'m creating your workout...', 'bot', false);
 			const loadingElement = document.querySelector(`[data-message-id="${loadingMessageId}"]`);
 			
 			try {
@@ -4734,12 +4367,123 @@ function initVision() {
 					}
 					: null;
 				
-				// Check if this is a workout request
+				// Check if user specified a number of exercises - if so, skip quick workout and use AI
+				const msgLower = message.toLowerCase();
+				const hasSpecificCount = /\d+\s*(exercise|oefening)/i.test(message) || 
+					/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s+(exercise|oefening)/i.test(message);
+				
+				// INSTANT: Try to generate quick workout first (works for muscle groups, exercises, etc.)
+				// But skip if user specified a specific number of exercises
+				const quickWorkout = hasSpecificCount ? null : generateQuickWorkout(message);
+				
+				// Check if this is a workout request (keywords OR if quick workout was generated OR muscle groups mentioned)
 				const workoutKeywords = ["workout", "make", "create", "maak", "train", "push", "pull", "legs", "oefeningen", "exercises"];
-				const isWorkoutRequest = workoutKeywords.some(keyword => message.toLowerCase().includes(keyword));
+				const muscleGroups = ["chest", "shoulder", "back", "bicep", "tricep", "leg", "quad", "hamstring", "glute", "calf", "abs", "core", "borst"];
+				const hasMuscleGroup = muscleGroups.some(muscle => msgLower.includes(muscle));
+				const isWorkoutRequest = quickWorkout !== null || 
+					workoutKeywords.some(keyword => msgLower.includes(keyword)) ||
+					hasMuscleGroup;
 				
 				if (isWorkoutRequest) {
-					// Use the new vision-workout endpoint
+					// INSTANT: Use quick workout if available
+					if (quickWorkout) {
+						// Remove loading message and show instant workout
+						if (loadingElement) loadingElement.remove();
+						applyWorkoutFromVision(quickWorkout);
+						switchTab('workouts');
+						setTimeout(() => {
+							showScreen('workout-builder');
+						}, 100);
+						addChatMessage(`✓ Created "${quickWorkout.name}" with ${quickWorkout.exercises.length} exercises!`, 'bot');
+						
+						sendBtn.disabled = false;
+						return;
+					}
+					
+					// If muscle group mentioned but no quick workout, try to generate one
+					if (hasMuscleGroup && !quickWorkout) {
+						// Try to create a quick workout based on muscle group
+						let fallbackWorkout = null;
+						if (msgLower.includes('chest') || msgLower.includes('borst')) {
+							fallbackWorkout = {
+								name: 'Chest Workout',
+								exercises: [
+									{ key: 'bench_press', display: 'Bench Press' },
+									{ key: 'incline_bench_press', display: 'Incline Bench Press' },
+									{ key: 'dumbbell_fly', display: 'Dumbbell Fly' },
+									{ key: 'cable_crossover', display: 'Cable Crossover' },
+									{ key: 'pec_deck_machine', display: 'Pec Deck Machine' }
+								]
+							};
+						} else if (msgLower.includes('shoulder')) {
+							fallbackWorkout = {
+								name: 'Shoulders Workout',
+								exercises: [
+									{ key: 'shoulder_press_machine', display: 'Shoulder Press Machine' },
+									{ key: 'lateral_raise_machine', display: 'Lateral Raise Machine' },
+									{ key: 'front_raise', display: 'Front Raise' },
+									{ key: 'rear_delt_fly', display: 'Rear Delt Fly' },
+									{ key: 'cable_face_pull', display: 'Cable Face Pull' }
+								]
+							};
+						} else if (msgLower.includes('back')) {
+							fallbackWorkout = {
+								name: 'Back Workout',
+								exercises: [
+									{ key: 'lat_pulldown', display: 'Lat Pulldown' },
+									{ key: 'seated_row', display: 'Seated Row' },
+									{ key: 'one_arm_dumbbell_row', display: 'One Arm Dumbbell Row' },
+									{ key: 'bent_over_row', display: 'Bent Over Row' },
+									{ key: 'deadlift', display: 'Deadlift' }
+								]
+							};
+						} else if (msgLower.includes('bicep')) {
+							fallbackWorkout = {
+								name: 'Biceps Workout',
+								exercises: [
+									{ key: 'barbell_curl', display: 'Barbell Curl' },
+									{ key: 'dumbbell_curl', display: 'Dumbbell Curl' },
+									{ key: 'hammer_curl', display: 'Hammer Curl' },
+									{ key: 'preacher_curl', display: 'Preacher Curl' },
+									{ key: 'cable_curl', display: 'Cable Curl' }
+								]
+							};
+						} else if (msgLower.includes('tricep')) {
+							fallbackWorkout = {
+								name: 'Triceps Workout',
+								exercises: [
+									{ key: 'tricep_pushdown', display: 'Tricep Pushdown' },
+									{ key: 'overhead_tricep_extension', display: 'Overhead Tricep Extension' },
+									{ key: 'dips', display: 'Dips' }
+								]
+							};
+						} else if (msgLower.includes('leg') || msgLower.includes('quad') || msgLower.includes('hamstring') || msgLower.includes('glute') || msgLower.includes('calf')) {
+							fallbackWorkout = {
+								name: 'Legs Workout',
+								exercises: [
+									{ key: 'leg_press', display: 'Leg Press' },
+									{ key: 'leg_extension', display: 'Leg Extension' },
+									{ key: 'lying_leg_curl', display: 'Lying Leg Curl' },
+									{ key: 'hip_thrust', display: 'Hip Thrust' },
+									{ key: 'standing_calf_raise', display: 'Standing Calf Raise' }
+								]
+							};
+						}
+						
+						if (fallbackWorkout) {
+							if (loadingElement) loadingElement.remove();
+							applyWorkoutFromVision(fallbackWorkout);
+							switchTab('workouts');
+							setTimeout(() => {
+								showScreen('workout-builder');
+							}, 100);
+							addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
+							sendBtn.disabled = false;
+							return;
+						}
+					}
+					
+					// Fallback: Use the new vision-workout endpoint
 					try {
 						const apiUrl = getApiUrl('api/vision-workout');
 						console.log('Calling vision-workout API:', apiUrl);
@@ -4753,6 +4497,18 @@ function initVision() {
 						// Create abort controller for timeout (60 seconds for Render cold start)
 						const controller = new AbortController();
 						const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+						
+						// Start request immediately without blocking - update message while waiting - instant feedback
+						let dotCount = 0;
+						const updateInterval = setInterval(() => {
+							if (loadingElement) {
+								const contentEl = loadingElement.querySelector('.vision-message-content');
+								if (contentEl) {
+									dotCount = (dotCount % 3) + 1;
+									contentEl.textContent = 'I\'m generating your workout' + '.'.repeat(dotCount);
+								}
+							}
+						}, 300);
 						
 						const res = await fetch(apiUrl, {
 					method: 'POST',
@@ -4769,6 +4525,7 @@ function initVision() {
 							signal: controller.signal
 				});
 						
+						clearInterval(updateInterval);
 						clearTimeout(timeoutId);
 						
 						console.log('Response status:', res.status, res.statusText);
@@ -4787,6 +4544,20 @@ function initVision() {
 							} catch {
 								errorData = { error: `Server error (${res.status}): ${errorText.substring(0, 100)}` };
 							}
+							// If muscle group was mentioned, try fallback workout
+							if (hasMuscleGroup) {
+								const fallbackWorkout = generateQuickWorkout(message);
+								if (fallbackWorkout) {
+									applyWorkoutFromVision(fallbackWorkout);
+									switchTab('workouts');
+									setTimeout(() => {
+										showScreen('workout-builder');
+									}, 100);
+									addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
+									sendBtn.disabled = false;
+									return;
+								}
+							}
 						addChatMessage(`Error: ${errorData.error || 'Failed to generate workout'}`, 'bot');
 							sendBtn.disabled = false;
 						return;
@@ -4796,6 +4567,20 @@ function initVision() {
 						console.log('Workout data received:', data);
 						
 				if (data.error) {
+					// If muscle group was mentioned, try fallback workout
+					if (hasMuscleGroup) {
+						const fallbackWorkout = generateQuickWorkout(message);
+						if (fallbackWorkout) {
+							applyWorkoutFromVision(fallbackWorkout);
+							switchTab('workouts');
+							setTimeout(() => {
+								showScreen('workout-builder');
+							}, 100);
+							addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
+							sendBtn.disabled = false;
+							return;
+						}
+					}
 					addChatMessage(`Error: ${data.error}`, 'bot');
 							sendBtn.disabled = false;
 							return;
@@ -4821,6 +4606,20 @@ function initVision() {
 								if (workoutsBtn) workoutsBtn.classList.add('active');
 							}, 150);
 						} else {
+						// If muscle group was mentioned, try fallback workout
+						if (hasMuscleGroup) {
+							const fallbackWorkout = generateQuickWorkout(message);
+							if (fallbackWorkout) {
+								applyWorkoutFromVision(fallbackWorkout);
+								switchTab('workouts');
+								setTimeout(() => {
+									showScreen('workout-builder');
+								}, 100);
+								addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
+								sendBtn.disabled = false;
+								return;
+							}
+						}
 						addChatMessage('No workout was generated. Please try again with a clearer request.', 'bot');
 							sendBtn.disabled = false;
 						}
@@ -4930,78 +4729,101 @@ function initExerciseVideoModal() {
 		e.preventDefault();
 		e.stopPropagation();
 		
-		// Find the exercise card container
-		const exerciseCard = btn.closest('.workout-exercise, .workout-edit-exercise');
-		if (!exerciseCard) return;
+		// Get video URL from button data attribute
+		let videoUrl = btn.dataset.video;
 		
-		// Ensure workout details are expanded in "Your Workouts" view
-		const workoutDetails = exerciseCard.closest('.workout-details');
-		if (workoutDetails && !workoutDetails.classList.contains('expanded')) {
-			workoutDetails.classList.add('expanded');
-		}
-		
-		// Check if video is already showing
-		const existingVideo = exerciseCard.querySelector('.exercise-video-inline');
-		if (existingVideo) {
-			existingVideo.remove();
+		// If no video URL, try to get it from hardcoded exercises first, then backend
+		if (!videoUrl) {
+			const exerciseKey = btn.dataset.exercise;
+			if (!exerciseKey) {
+				alert('Exercise information not available.');
 			return;
 		}
 		
-		let videoUrl = btn.dataset.video;
-		if (!videoUrl) {
-			const exerciseKey = btn.dataset.exercise;
-			if (!exerciseKey) return;
+			// First, check hardcoded exercises (for Capacitor)
+			const hardcodedExercise = HARDCODED_EXERCISES.find(ex => {
+				const key = normalizeExerciseKey(ex.key);
+				const targetKey = normalizeExerciseKey(exerciseKey);
+				return key === targetKey;
+			});
+			
+			if (hardcodedExercise?.video) {
+				videoUrl = hardcodedExercise.video;
+				btn.dataset.video = videoUrl; // Cache for next time
+			} else if (BACKEND_URL) {
+				// Only try backend if BACKEND_URL is configured
 			btn.disabled = true;
 			try {
 				const data = await fetchExerciseInfoByKey(exerciseKey);
 				if (data?.video) {
 					videoUrl = data.video;
-					btn.dataset.video = videoUrl;
+						btn.dataset.video = videoUrl; // Cache for next time
 				} else {
 					alert('No video available for this exercise yet.');
+						btn.disabled = false;
 					return;
 				}
 			} catch (error) {
 				console.error('Failed to load exercise video:', error);
 				alert('Could not load the exercise video. Please try again.');
+					btn.disabled = false;
 				return;
 			} finally {
 				btn.disabled = false;
+				}
+			} else {
+				alert('No video available for this exercise yet.');
+				return;
 			}
 		}
 		
-		// Create inline video container
-		const videoContainer = document.createElement('div');
-		videoContainer.className = 'exercise-video-inline';
-		videoContainer.innerHTML = `
-			<button class="exercise-video-inline-close" type="button" aria-label="Close video">✕</button>
-			<div class="exercise-video-inline-frame">
-				<iframe src="${escapeHtmlAttr(videoUrl)}" title="Exercise video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-			</div>
-		`;
+		// Extract video ID and create watch URL
+		let watchUrl = null;
 		
-		// Insert after the header, before sets
-		const setsContainer = exerciseCard.querySelector('.workout-edit-sets, .workout-view-sets');
-		if (setsContainer) {
-			exerciseCard.insertBefore(videoContainer, setsContainer);
+		if (videoUrl) {
+			if (videoUrl.includes('youtube.com/embed/')) {
+				// Extract video ID from embed URL
+				const match = videoUrl.match(/embed\/([^"&?\/\s]+)/);
+				if (match && match[1]) {
+					watchUrl = `https://www.youtube.com/watch?v=${match[1]}`;
+				}
+			} else if (videoUrl.includes('youtube.com/watch')) {
+				// Already a watch URL
+				watchUrl = videoUrl;
+			} else if (videoUrl.includes('youtu.be/')) {
+				// Short YouTube URL
+				const match = videoUrl.match(/youtu\.be\/([^"&?\/\s]+)/);
+				if (match && match[1]) {
+					watchUrl = `https://www.youtube.com/watch?v=${match[1]}`;
+				}
 		} else {
-			exerciseCard.appendChild(videoContainer);
+				// Try to extract video ID from various YouTube URL formats
+				const youtubeRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+				const match = videoUrl.match(youtubeRegex);
+				if (match && match[1]) {
+					watchUrl = `https://www.youtube.com/watch?v=${match[1]}`;
+				}
+			}
 		}
 		
-		// Close button handler
-		const closeBtn = videoContainer.querySelector('.exercise-video-inline-close');
-		if (closeBtn) {
-			closeBtn.addEventListener('click', (e) => {
-				e.stopPropagation();
-				videoContainer.remove();
-			});
+		// Open directly in YouTube app/browser
+		if (watchUrl) {
+			// Try to open in YouTube app first, then fallback to browser
+			if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser) {
+				window.Capacitor.Plugins.Browser.open({ url: watchUrl });
+			} else {
+				window.open(watchUrl, '_blank');
+			}
+		} else {
+			alert('No video available for this exercise.');
 		}
 	});
 }
 
 async function fetchExerciseInfoByKey(exerciseKey) {
+	const apiUrl = getApiUrl('/exercise-info');
 	const body = JSON.stringify({ exercise: exerciseKey });
-	const res = await fetch('/exercise-info', {
+	const res = await fetch(apiUrl, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body
@@ -5026,6 +4848,8 @@ function addChatMessage(text, role, isLoading = false) {
 	}
 	
 	if (role === 'bot') {
+		// Strip any trailing dots/ellipsis from text when loading
+		const displayText = isLoading ? text.replace(/\.{1,3}\s*$/, '') : text;
 		messageDiv.innerHTML = `
 			<div class="vision-avatar">
 				<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -5034,7 +4858,7 @@ function addChatMessage(text, role, isLoading = false) {
 					<path d="M2 12s3-4 10-4 10 4 10 4" stroke="var(--accent)" stroke-width="2" fill="none" stroke-linecap="round"/>
 				</svg>
 			</div>
-			<div class="vision-message-content">${text}${isLoading ? ' <span class="loading-dots">...</span>' : ''}</div>
+			<div class="vision-message-content">${displayText}${isLoading ? '<span class="loading-dots">...</span>' : ''}</div>
 		`;
 	} else {
 		messageDiv.innerHTML = `
@@ -5066,102 +4890,102 @@ function initExerciseCard() {
 // Hardcoded exercises list for Capacitor (when Flask server is not available)
 const HARDCODED_EXERCISES = [
 	// Chest
-	{"key": "bench_press", "display": "Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/benchpress.jpg"},
-	{"key": "incline_bench_press", "display": "Incline Bench Press", "muscles": ["Chest", "Shoulders", "Triceps"], "image": "static/images/inclinebenchpress.jpg"},
-	{"key": "decline_bench_press", "display": "Decline Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/declinebenchpress.jpg"},
-	{"key": "dumbbell_bench_press", "display": "Dumbbell Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/dumbbellbenchpress.png"},
-	{"key": "dumbbell_fly", "display": "Dumbbell Fly", "muscles": ["Chest", "Shoulders"], "image": "static/images/dumbbellfly.jpg"},
-	{"key": "cable_crossover", "display": "Cable Crossover", "muscles": ["Chest", "Shoulders", "Biceps"], "image": "static/images/cablecrossover.jpg"},
-	{"key": "pec_deck_machine", "display": "Pec Deck Machine", "muscles": ["Chest", "Shoulders"], "image": "static/images/pecdeckmachine.jpg"},
-	{"key": "chest_press_machine", "display": "Chest Press Machine", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/chestpressmachine.jpg"},
-	{"key": "push_up", "display": "Push-Up", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/pushup.jpg"},
-	{"key": "incline_dumbbell_press", "display": "Incline Dumbbell Press", "muscles": ["Chest", "Shoulders", "Triceps"], "image": "static/images/inclinedumbbellpress.jpg"},
-	{"key": "decline_dumbbell_press", "display": "Decline Dumbbell Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/declinedumbbellpress.jpg"},
+	{"key": "bench_press", "display": "Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/benchpress.jpg", "video": "https://www.youtube.com/embed/ejI1Nlsul9k"},
+	{"key": "incline_bench_press", "display": "Incline Bench Press", "muscles": ["Chest", "Shoulders", "Triceps"], "image": "static/images/inclinebenchpress.jpg", "video": "https://www.youtube.com/embed/lJ2o89kcnxY"},
+	{"key": "decline_bench_press", "display": "Decline Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/declinebenchpress.jpg", "video": "https://www.youtube.com/embed/iVh4B5bJ5OI"},
+	{"key": "dumbbell_bench_press", "display": "Dumbbell Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/dumbbellbenchpress.png", "video": "https://www.youtube.com/embed/YQ2s_Y7g5Qk"},
+	{"key": "dumbbell_fly", "display": "Dumbbell Fly", "muscles": ["Chest", "Shoulders"], "image": "static/images/dumbbellfly.jpg", "video": "https://www.youtube.com/embed/JFm8KbhjibM"},
+	{"key": "cable_crossover", "display": "Cable Crossover", "muscles": ["Chest", "Shoulders", "Biceps"], "image": "static/images/cablecrossover.jpg", "video": "https://www.youtube.com/embed/hhruLxo9yZU"},
+	{"key": "pec_deck_machine", "display": "Pec Deck Machine", "muscles": ["Chest", "Shoulders"], "image": "static/images/pecdeckmachine.jpg", "video": "https://www.youtube.com/embed/FDay9wFe5uE"},
+	{"key": "chest_press_machine", "display": "Chest Press Machine", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/chestpressmachine.jpg", "video": "https://www.youtube.com/embed/65npK4Ijz1c"},
+	{"key": "push_up", "display": "Push-Up", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/pushup.jpg", "video": "https://www.youtube.com/embed/WDIpL0pjun0"},
+	{"key": "incline_dumbbell_press", "display": "Incline Dumbbell Press", "muscles": ["Chest", "Shoulders", "Triceps"], "image": "static/images/inclinedumbbellpress.jpg", "video": "https://www.youtube.com/embed/jMQA3XtJSgo"},
+	{"key": "decline_dumbbell_press", "display": "Decline Dumbbell Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/declinedumbbellpress.jpg", "video": "https://www.youtube.com/embed/2B6WxyLaIrE"},
 	// Back
-	{"key": "pull_up", "display": "Pull-Up", "muscles": ["Back", "Biceps", "Shoulders"], "image": "static/images/pullup.jpg"},
-	{"key": "chin_up", "display": "Chin-Up", "muscles": ["Biceps", "Back", "Shoulders"], "image": "static/images/chinup.jpg"},
-	{"key": "lat_pulldown", "display": "Lat Pulldown", "muscles": ["Back", "Biceps", "Shoulders"], "image": "static/images/latpulldown.jpg"},
-	{"key": "wide_grip_pulldown", "display": "Wide Grip Pulldown", "muscles": ["Back", "Biceps", "Shoulders"], "image": "static/images/widegrippulldown.jpg"},
-	{"key": "close_grip_pulldown", "display": "Close Grip Pulldown", "muscles": ["Back", "Biceps", "Shoulders"], "image": "static/images/closegrippulldown.jpg"},
-	{"key": "straight_arm_pulldown", "display": "Straight Arm Pulldown", "muscles": ["Back", "Shoulders"], "image": "static/images/straightarmpulldown.jpg"},
-	{"key": "seated_row", "display": "Seated Row", "muscles": ["Back", "Biceps"], "image": "static/images/seatedrow.jpg"},
-	{"key": "t_bar_row", "display": "T-Bar Row", "muscles": ["Back", "Biceps"], "image": "static/images/tbarrow.jpg"},
-	{"key": "bent_over_row", "display": "Bent Over Row", "muscles": ["Back", "Biceps"], "image": "static/images/bentoverrow.jpg"},
-	{"key": "one_arm_dumbbell_row", "display": "One Arm Dumbbell Row", "muscles": ["Back", "Biceps"], "image": "static/images/onearmdumbbellrow.jpg"},
-	{"key": "chest_supported_row", "display": "Chest Supported Row", "muscles": ["Back", "Biceps"], "image": "static/images/chestsupportedrow.jpg"},
-	{"key": "lat_pullover_machine", "display": "Lat Pullover Machine", "muscles": ["Back", "Chest"], "image": "static/images/latpullovermachine.jpg"},
-	{"key": "deadlift", "display": "Deadlift", "muscles": ["Back", "Glutes", "Hamstrings"], "image": "static/images/deadlift.jpg"},
-	{"key": "romanian_deadlift", "display": "Romanian Deadlift", "muscles": ["Hamstrings", "Glutes", "Back"], "image": "static/images/romaniandeadlift.jpg"},
-	{"key": "sumo_deadlift", "display": "Sumo Deadlift", "muscles": ["Glutes", "Hamstrings", "Back"], "image": "static/images/sumodeadlift.jpg"},
+	{"key": "pull_up", "display": "Pull-Up", "muscles": ["Back", "Biceps", "Shoulders"], "image": "static/images/pullup.jpg", "video": "https://www.youtube.com/embed/eGo4IYlbE5g"},
+	{"key": "chin_up", "display": "Chin-Up", "muscles": ["Biceps", "Back", "Shoulders"], "image": "static/images/chinup.jpg", "video": "https://www.youtube.com/embed/8mryJ3w2S78"},
+	{"key": "lat_pulldown", "display": "Lat Pulldown", "muscles": ["Back", "Biceps", "Shoulders"], "image": "static/images/latpulldown.jpg", "video": "https://www.youtube.com/embed/JGeRYIZdojU"},
+	{"key": "wide_grip_pulldown", "display": "Wide Grip Pulldown", "muscles": ["Back", "Biceps", "Shoulders"], "image": "static/images/widegrippulldown.jpg", "video": "https://www.youtube.com/embed/YCKPD4BSD2E"},
+	{"key": "close_grip_pulldown", "display": "Close Grip Pulldown", "muscles": ["Back", "Biceps", "Shoulders"], "image": "static/images/closegrippulldown.jpg", "video": "https://www.youtube.com/embed/IjoFCmLX7z0"},
+	{"key": "straight_arm_pulldown", "display": "Straight Arm Pulldown", "muscles": ["Back", "Shoulders"], "image": "static/images/straightarmpulldown.jpg", "video": "https://www.youtube.com/embed/G9uNaXGTJ4w"},
+	{"key": "seated_row", "display": "Seated Row", "muscles": ["Back", "Biceps"], "image": "static/images/seatedrow.jpg", "video": "https://www.youtube.com/embed/UCXxvVItLoM"},
+	{"key": "t_bar_row", "display": "T-Bar Row", "muscles": ["Back", "Biceps"], "image": "static/images/tbarrow.jpg", "video": "https://www.youtube.com/embed/yPis7nlbqdY"},
+	{"key": "bent_over_row", "display": "Bent Over Row", "muscles": ["Back", "Biceps"], "image": "static/images/bentoverrow.jpg", "video": "https://www.youtube.com/embed/6FZHJGzMFEc"},
+	{"key": "one_arm_dumbbell_row", "display": "One Arm Dumbbell Row", "muscles": ["Back", "Biceps"], "image": "static/images/onearmdumbbellrow.jpg", "video": "https://www.youtube.com/embed/DMo3HJoawrU"},
+	{"key": "chest_supported_row", "display": "Chest Supported Row", "muscles": ["Back", "Biceps"], "image": "static/images/chestsupportedrow.jpg", "video": "https://www.youtube.com/embed/tZUYS7X50so"},
+	{"key": "lat_pullover_machine", "display": "Lat Pullover Machine", "muscles": ["Back", "Chest"], "image": "static/images/latpullovermachine.jpg", "video": "https://www.youtube.com/embed/oxpAl14EYyc"},
+	{"key": "deadlift", "display": "Deadlift", "muscles": ["Back", "Glutes", "Hamstrings"], "image": "static/images/deadlift.jpg", "video": "https://www.youtube.com/embed/AweC3UaM14o"},
+	{"key": "romanian_deadlift", "display": "Romanian Deadlift", "muscles": ["Hamstrings", "Glutes", "Back"], "image": "static/images/romaniandeadlift.jpg", "video": "https://www.youtube.com/embed/bT5OOBgY4bc"},
+	{"key": "sumo_deadlift", "display": "Sumo Deadlift", "muscles": ["Glutes", "Hamstrings", "Back"], "image": "static/images/sumodeadlift.jpg", "video": "https://www.youtube.com/embed/pfSMst14EFk"},
 	// Shoulders
-	{"key": "shoulder_press_machine", "display": "Shoulder Press Machine", "muscles": ["Shoulders", "Triceps"], "image": "static/images/shoulderpressmachine.jpg"},
-	{"key": "overhead_press", "display": "Overhead Press", "muscles": ["Shoulders", "Triceps"], "image": "static/images/overheadpress.jpg"},
-	{"key": "arnold_press", "display": "Arnold Press", "muscles": ["Shoulders", "Triceps"], "image": "static/images/arnoldpress.jpg"},
-	{"key": "dumbbell_shoulder_press", "display": "Dumbbell Shoulder Press", "muscles": ["Shoulders", "Triceps"], "image": "static/images/dumbbellshoulderpress.jpg"},
-	{"key": "front_raise", "display": "Front Raise", "muscles": ["Shoulders"], "image": "static/images/frontraise.jpg"},
-	{"key": "lateral_raise", "display": "Lateral Raise", "muscles": ["Shoulders"], "image": "static/images/lateralraise.jpg"},
-	{"key": "lateral_raise_machine", "display": "Lateral Raise Machine", "muscles": ["Shoulders"], "image": "static/images/lateralraisemachine.jpg"},
-	{"key": "rear_delt_fly", "display": "Rear Delt Fly", "muscles": ["Shoulders", "Back"], "image": "static/images/reardeltfly.jpg"},
-	{"key": "reverse_pec_deck", "display": "Reverse Pec Deck", "muscles": ["Shoulders", "Back"], "image": "static/images/reversepecdeck.jpg"},
-	{"key": "upright_row", "display": "Upright Row", "muscles": ["Shoulders", "Triceps"], "image": "static/images/uprightrow.jpg"},
-	{"key": "cable_face_pull", "display": "Cable Face Pull", "muscles": ["Shoulders", "Back"], "image": "static/images/cablefacepull.jpg"},
+	{"key": "shoulder_press_machine", "display": "Shoulder Press Machine", "muscles": ["Shoulders", "Triceps"], "image": "static/images/shoulderpressmachine.jpg", "video": "https://www.youtube.com/embed/WvLMauqrnK8"},
+	{"key": "overhead_press", "display": "Overhead Press", "muscles": ["Shoulders", "Triceps"], "image": "static/images/overheadpress.jpg", "video": "https://www.youtube.com/embed/G2qpTG1Eh40"},
+	{"key": "arnold_press", "display": "Arnold Press", "muscles": ["Shoulders", "Triceps"], "image": "static/images/arnoldpress.jpg", "video": "https://www.youtube.com/embed/jeJttN2EWCo"},
+	{"key": "dumbbell_shoulder_press", "display": "Dumbbell Shoulder Press", "muscles": ["Shoulders", "Triceps"], "image": "static/images/dumbbellshoulderpress.jpg", "video": "https://www.youtube.com/embed/HzIiNhHhhtA"},
+	{"key": "front_raise", "display": "Front Raise", "muscles": ["Shoulders"], "image": "static/images/frontraise.jpg", "video": "https://www.youtube.com/embed/hRJ6tR5-if0"},
+	{"key": "lateral_raise", "display": "Lateral Raise", "muscles": ["Shoulders"], "image": "static/images/lateralraise.jpg", "video": "https://www.youtube.com/embed/OuG1smZTsQQ"},
+	{"key": "lateral_raise_machine", "display": "Lateral Raise Machine", "muscles": ["Shoulders"], "image": "static/images/lateralraisemachine.jpg", "video": "https://www.youtube.com/embed/xMEs3zEzS8s"},
+	{"key": "rear_delt_fly", "display": "Rear Delt Fly", "muscles": ["Shoulders", "Back"], "image": "static/images/reardeltfly.jpg", "video": "https://www.youtube.com/embed/nlkF7_2O_Lw"},
+	{"key": "reverse_pec_deck", "display": "Reverse Pec Deck", "muscles": ["Shoulders", "Back"], "image": "static/images/reversepecdeck.jpg", "video": "https://www.youtube.com/embed/jw7oFFBnwCU"},
+	{"key": "upright_row", "display": "Upright Row", "muscles": ["Shoulders", "Triceps"], "image": "static/images/uprightrow.jpg", "video": "https://www.youtube.com/embed/um3VVzqunPU"},
+	{"key": "cable_face_pull", "display": "Cable Face Pull", "muscles": ["Shoulders", "Back"], "image": "static/images/cablefacepull.jpg", "video": "https://www.youtube.com/embed/0Po47vvj9g4"},
 	// Biceps
-	{"key": "barbell_curl", "display": "Barbell Curl", "muscles": ["Biceps"], "image": "static/images/barbellcurl.jpg"},
-	{"key": "dumbbell_curl", "display": "Dumbbell Curl", "muscles": ["Biceps"], "image": "static/images/dumbbellcurl.jpg"},
-	{"key": "alternating_dumbbell_curl", "display": "Alternating Dumbbell Curl", "muscles": ["Biceps"], "image": "static/images/alternatingdumbbellcurl.jpg"},
-	{"key": "hammer_curl", "display": "Hammer Curl", "muscles": ["Biceps"], "image": "static/images/hammercurl.jpg"},
-	{"key": "preacher_curl", "display": "Preacher Curl", "muscles": ["Biceps"], "image": "static/images/preachercurl.jpg"},
-	{"key": "cable_curl", "display": "Cable Curl", "muscles": ["Biceps"], "image": "static/images/cablecurl.jpg"},
-	{"key": "incline_dumbbell_curl", "display": "Incline Dumbbell Curl", "muscles": ["Biceps"], "image": "static/images/inclinedumbbellcurl.jpg"},
-	{"key": "ez_bar_curl", "display": "EZ Bar Curl", "muscles": ["Biceps"], "image": "static/images/ezbarcurl.jpg"},
-	{"key": "reverse_curl", "display": "Reverse Curl", "muscles": ["Biceps"], "image": "static/images/reversecurl.jpg"},
-	{"key": "spider_curl", "display": "Spider Curl", "muscles": ["Biceps"], "image": "static/images/spidercurl.jpg"},
+	{"key": "barbell_curl", "display": "Barbell Curl", "muscles": ["Biceps"], "image": "static/images/barbellcurl.jpg", "video": "https://www.youtube.com/embed/N5x5M1x1Gd0"},
+	{"key": "dumbbell_curl", "display": "Dumbbell Curl", "muscles": ["Biceps"], "image": "static/images/dumbbellcurl.jpg", "video": "https://www.youtube.com/embed/6DeLZ6cbgWQ"},
+	{"key": "alternating_dumbbell_curl", "display": "Alternating Dumbbell Curl", "muscles": ["Biceps"], "image": "static/images/alternatingdumbbellcurl.jpg", "video": "https://www.youtube.com/embed/o2Tma5Cek48"},
+	{"key": "hammer_curl", "display": "Hammer Curl", "muscles": ["Biceps"], "image": "static/images/hammercurl.jpg", "video": "https://www.youtube.com/embed/fM0TQLoesLs"},
+	{"key": "preacher_curl", "display": "Preacher Curl", "muscles": ["Biceps"], "image": "static/images/preachercurl.jpg", "video": "https://www.youtube.com/embed/Ja6ZlIDONac"},
+	{"key": "cable_curl", "display": "Cable Curl", "muscles": ["Biceps"], "image": "static/images/cablecurl.jpg", "video": "https://www.youtube.com/embed/F3Y03RnVY8Y"},
+	{"key": "incline_dumbbell_curl", "display": "Incline Dumbbell Curl", "muscles": ["Biceps"], "image": "static/images/inclinedumbbellcurl.jpg", "video": "https://www.youtube.com/embed/aG7CXiKxepw"},
+	{"key": "ez_bar_curl", "display": "EZ Bar Curl", "muscles": ["Biceps"], "image": "static/images/ezbarcurl.jpg", "video": "https://www.youtube.com/embed/-gSM-kqNlUw"},
+	{"key": "reverse_curl", "display": "Reverse Curl", "muscles": ["Biceps"], "image": "static/images/reversecurl.jpg", "video": "https://www.youtube.com/embed/hUA-fIpM7nA"},
+	{"key": "spider_curl", "display": "Spider Curl", "muscles": ["Biceps"], "image": "static/images/spidercurl.jpg", "video": "https://www.youtube.com/embed/ke2shAeQ0O8"},
 	// Triceps
-	{"key": "tricep_pushdown", "display": "Tricep Pushdown", "muscles": ["Triceps", "Shoulders"], "image": "static/images/triceppushdown.jpg"},
-	{"key": "overhead_tricep_extension", "display": "Overhead Tricep Extension", "muscles": ["Triceps", "Shoulders"], "image": "static/images/overheadtricepextension.jpg"},
-	{"key": "cable_overhead_extension", "display": "Cable Overhead Extension", "muscles": ["Triceps", "Shoulders"], "image": "static/images/cableoverheadextension.jpg"},
-	{"key": "close_grip_bench_press", "display": "Close Grip Bench Press", "muscles": ["Triceps", "Chest"], "image": "static/images/closegripbenchpress.jpg"},
-	{"key": "dips", "display": "Dips", "muscles": ["Triceps", "Chest", "Shoulders"], "image": "static/images/dips.jpg"},
-	{"key": "seated_dip_machine", "display": "Seated Dip Machine", "muscles": ["Triceps", "Chest"], "image": "static/images/seateddipmachine.jpg"},
-	{"key": "skull_crusher", "display": "Skull Crusher", "muscles": ["Triceps", "Shoulders"], "image": "static/images/skullcrusher.jpg"},
-	{"key": "rope_pushdown", "display": "Rope Pushdown", "muscles": ["Triceps", "Shoulders"], "image": "static/images/ropepushdown.jpg"},
-	{"key": "single_arm_cable_pushdown", "display": "Single Arm Cable Pushdown", "muscles": ["Triceps"], "image": "static/images/singlearmcablepushdown.jpg"},
-	{"key": "diamond_push_up", "display": "Diamond Push-Up", "muscles": ["Triceps", "Chest", "Shoulders"], "image": "static/images/diamondpushup.jpg"},
+	{"key": "tricep_pushdown", "display": "Tricep Pushdown", "muscles": ["Triceps", "Shoulders"], "image": "static/images/triceppushdown.jpg", "video": "https://www.youtube.com/embed/6Fzep104f0s"},
+	{"key": "overhead_tricep_extension", "display": "Overhead Tricep Extension", "muscles": ["Triceps", "Shoulders"], "image": "static/images/overheadtricepextension.jpg", "video": "https://www.youtube.com/embed/a9oPnZReIRE"},
+	{"key": "cable_overhead_extension", "display": "Cable Overhead Extension", "muscles": ["Triceps", "Shoulders"], "image": "static/images/cableoverheadextension.jpg", "video": "https://www.youtube.com/embed/ns-RGsbzqok"},
+	{"key": "close_grip_bench_press", "display": "Close Grip Bench Press", "muscles": ["Triceps", "Chest"], "image": "static/images/closegripbenchpress.jpg", "video": "https://www.youtube.com/embed/FiQUzPtS90E"},
+	{"key": "dips", "display": "Dips", "muscles": ["Triceps", "Chest", "Shoulders"], "image": "static/images/dips.jpg", "video": "https://www.youtube.com/embed/oA8Sxv2WeOs"},
+	{"key": "seated_dip_machine", "display": "Seated Dip Machine", "muscles": ["Triceps", "Chest"], "image": "static/images/seateddipmachine.jpg", "video": "https://www.youtube.com/embed/Zg0tT27iYuY"},
+	{"key": "skull_crusher", "display": "Skull Crusher", "muscles": ["Triceps", "Shoulders"], "image": "static/images/skullcrusher.jpg", "video": "https://www.youtube.com/embed/l3rHYPtMUo8"},
+	{"key": "rope_pushdown", "display": "Rope Pushdown", "muscles": ["Triceps", "Shoulders"], "image": "static/images/ropepushdown.jpg", "video": "https://www.youtube.com/embed/-xa-6cQaZKY"},
+	{"key": "single_arm_cable_pushdown", "display": "Single Arm Cable Pushdown", "muscles": ["Triceps"], "image": "static/images/singlearmcablepushdown.jpg", "video": "https://www.youtube.com/embed/Cp_bShvMY4c"},
+	{"key": "diamond_push_up", "display": "Diamond Push-Up", "muscles": ["Triceps", "Chest", "Shoulders"], "image": "static/images/diamondpushup.jpg", "video": "https://www.youtube.com/embed/K8bKxVcwjrk"},
 	// Quads
-	{"key": "squat", "display": "Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/squat.jpg"},
-	{"key": "hack_squat", "display": "Hack Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/hacksquat.jpg"},
-	{"key": "leg_press", "display": "Leg Press", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/legpress.jpg"},
-	{"key": "leg_extension", "display": "Leg Extension", "muscles": ["Quads"], "image": "static/images/legextension.jpg"},
-	{"key": "bulgarian_split_squat", "display": "Bulgarian Split Squat", "muscles": ["Quads", "Glutes"], "image": "static/images/bulgariansplitsquat.jpg"},
-	{"key": "smith_machine_squat", "display": "Smith Machine Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/smithmachinesquat.jpg"},
-	{"key": "v_squat", "display": "V Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/vsquat.jpg"},
-	{"key": "smith_machine_bench_press", "display": "Smith Machine Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/smithmachinebenchpress.jpg"},
-	{"key": "smith_machine_incline_bench_press", "display": "Smith Machine Incline Bench Press", "muscles": ["Chest", "Shoulders", "Triceps"], "image": "static/images/smithmachineinclinebenchpress.jpg"},
-	{"key": "smith_machine_decline_bench_press", "display": "Smith Machine Decline Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/smithmachinedeclinebenchpress.jpg"},
-	{"key": "smith_machine_shoulder_press", "display": "Smith Machine Shoulder Press", "muscles": ["Shoulders", "Triceps"], "image": "static/images/smithmachineshoulderpress.jpg"},
-	{"key": "goblet_squat", "display": "Goblet Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/gobletsquat.jpg"},
+	{"key": "squat", "display": "Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/squat.jpg", "video": "https://www.youtube.com/embed/rrJIyZGlK8c"},
+	{"key": "hack_squat", "display": "Hack Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/hacksquat.jpg", "video": "https://www.youtube.com/embed/rYgNArpwE7E"},
+	{"key": "leg_press", "display": "Leg Press", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/legpress.jpg", "video": "https://www.youtube.com/embed/yZmx_Ac3880"},
+	{"key": "leg_extension", "display": "Leg Extension", "muscles": ["Quads"], "image": "static/images/legextension.jpg", "video": "https://www.youtube.com/embed/m0FOpMEgero"},
+	{"key": "bulgarian_split_squat", "display": "Bulgarian Split Squat", "muscles": ["Quads", "Glutes"], "image": "static/images/bulgariansplitsquat.jpg", "video": "https://www.youtube.com/embed/vgn7bSXkgkA"},
+	{"key": "smith_machine_squat", "display": "Smith Machine Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/smithmachinesquat.jpg", "video": "https://www.youtube.com/embed/-eO_VydErV0"},
+	{"key": "v_squat", "display": "V Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/vsquat.jpg", "video": "https://www.youtube.com/embed/u2n1vqVDYE4"},
+	{"key": "smith_machine_bench_press", "display": "Smith Machine Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/smithmachinebenchpress.jpg", "video": "https://www.youtube.com/embed/O5viuEPDXKY"},
+	{"key": "smith_machine_incline_bench_press", "display": "Smith Machine Incline Bench Press", "muscles": ["Chest", "Shoulders", "Triceps"], "image": "static/images/smithmachineinclinebenchpress.jpg", "video": "https://www.youtube.com/embed/8urE8Z8AMQ4"},
+	{"key": "smith_machine_decline_bench_press", "display": "Smith Machine Decline Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/smithmachinedeclinebenchpress.jpg", "video": "https://www.youtube.com/embed/R1Cwq8rJ_bI"},
+	{"key": "smith_machine_shoulder_press", "display": "Smith Machine Shoulder Press", "muscles": ["Shoulders", "Triceps"], "image": "static/images/smithmachineshoulderpress.jpg", "video": "https://www.youtube.com/embed/OLqZDUUD2b0"},
+	{"key": "goblet_squat", "display": "Goblet Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/gobletsquat.jpg", "video": "https://www.youtube.com/embed/pEGfGwp6IEA"},
 	// Hamstrings
-	{"key": "lying_leg_curl", "display": "Lying Leg Curl", "muscles": ["Hamstrings", "Glutes"], "image": "static/images/lyinglegcurl.jpg"},
-	{"key": "seated_leg_curl_machine", "display": "Seated Leg Curl Machine", "muscles": ["Hamstrings", "Glutes"], "image": "static/images/seatedlegcurlmachine.jpg"},
-	{"key": "good_morning", "display": "Good Morning", "muscles": ["Hamstrings", "Glutes", "Back"], "image": "static/images/goodmorning.jpg"},
+	{"key": "lying_leg_curl", "display": "Lying Leg Curl", "muscles": ["Hamstrings", "Glutes"], "image": "static/images/lyinglegcurl.jpg", "video": "https://www.youtube.com/embed/SbSNUXPRkc8"},
+	{"key": "seated_leg_curl_machine", "display": "Seated Leg Curl Machine", "muscles": ["Hamstrings", "Glutes"], "image": "static/images/seatedlegcurlmachine.jpg", "video": "https://www.youtube.com/embed/Orxowest56U"},
+	{"key": "good_morning", "display": "Good Morning", "muscles": ["Hamstrings", "Glutes", "Back"], "image": "static/images/goodmorning.jpg", "video": "https://www.youtube.com/embed/dEJ0FTm-CEk"},
 	// Glutes
-	{"key": "hip_thrust", "display": "Hip Thrust", "muscles": ["Glutes", "Hamstrings"], "image": "static/images/hipthrust.jpg"},
-	{"key": "cable_kickback", "display": "Cable Kickback", "muscles": ["Glutes", "Hamstrings"], "image": "static/images/cablekickback.jpg"},
-	{"key": "abductor_machine", "display": "Abductor Machine", "muscles": ["Glutes"], "image": "static/images/abductormachine.jpg"},
-	{"key": "adductor_machine", "display": "Adductor Machine", "muscles": ["Glutes"], "image": "static/images/adductormachine.jpg"},
+	{"key": "hip_thrust", "display": "Hip Thrust", "muscles": ["Glutes", "Hamstrings"], "image": "static/images/hipthrust.jpg", "video": "https://www.youtube.com/embed/pUdIL5x0fWg"},
+	{"key": "cable_kickback", "display": "Cable Kickback", "muscles": ["Glutes", "Hamstrings"], "image": "static/images/cablekickback.jpg", "video": "https://www.youtube.com/embed/zjVK1sOqFdw"},
+	{"key": "abductor_machine", "display": "Abductor Machine", "muscles": ["Glutes"], "image": "static/images/abductormachine.jpg", "video": "https://www.youtube.com/embed/G_8LItOiZ0Q"},
+	{"key": "adductor_machine", "display": "Adductor Machine", "muscles": ["Glutes"], "image": "static/images/adductormachine.jpg", "video": "https://www.youtube.com/embed/CjAVezAggkI"},
 	// Calves
-	{"key": "standing_calf_raise", "display": "Standing Calf Raise", "muscles": ["Calves"], "image": "static/images/standingcalfraise.jpg"},
-	{"key": "seated_calf_raise", "display": "Seated Calf Raise", "muscles": ["Calves"], "image": "static/images/seatedcalfraise.jpg"},
-	{"key": "leg_press_calf_raise", "display": "Leg Press Calf Raise", "muscles": ["Calves"], "image": "static/images/legpresscalfraise.jpg"},
-	{"key": "donkey_calf_raise", "display": "Donkey Calf Raise", "muscles": ["Calves"], "image": "static/images/donkeycalfraise.jpg"},
+	{"key": "standing_calf_raise", "display": "Standing Calf Raise", "muscles": ["Calves"], "image": "static/images/standingcalfraise.jpg", "video": "https://www.youtube.com/embed/g_E7_q1z2bo"},
+	{"key": "seated_calf_raise", "display": "Seated Calf Raise", "muscles": ["Calves"], "image": "static/images/seatedcalfraise.jpg", "video": "https://www.youtube.com/embed/2Q-HQ3mnePg"},
+	{"key": "leg_press_calf_raise", "display": "Leg Press Calf Raise", "muscles": ["Calves"], "image": "static/images/legpresscalfraise.jpg", "video": "https://www.youtube.com/embed/KxEYX_cuesM"},
+	{"key": "donkey_calf_raise", "display": "Donkey Calf Raise", "muscles": ["Calves"], "image": "static/images/donkeycalfraise.jpg", "video": "https://www.youtube.com/embed/r30EoMPSNns"},
 	// Abs
-	{"key": "crunch", "display": "Crunch", "muscles": ["Abs"], "image": "static/images/crunch.jpg"},
-	{"key": "cable_crunch", "display": "Cable Crunch", "muscles": ["Abs"], "image": "static/images/cablecrunch.jpg"},
-	{"key": "decline_sit_up", "display": "Decline Sit-Up", "muscles": ["Abs"], "image": "static/images/declinesitup.jpg"},
-	{"key": "hanging_leg_raise", "display": "Hanging Leg Raise", "muscles": ["Abs"], "image": "static/images/hanginglegraise.jpg"},
-	{"key": "knee_raise", "display": "Knee Raise", "muscles": ["Abs"], "image": "static/images/kneeraise.jpg"},
-	{"key": "russian_twist", "display": "Russian Twist", "muscles": ["Abs", "Back"], "image": "static/images/russiantwist.jpg"},
-	{"key": "rotary_torso_machine", "display": "Rotary Torso Machine", "muscles": ["Abs", "Back"], "image": "static/images/rotarytorsomachine.jpg"}
+	{"key": "crunch", "display": "Crunch", "muscles": ["Abs"], "image": "static/images/crunch.jpg", "video": "https://www.youtube.com/embed/NnVhqMQRvmM"},
+	{"key": "cable_crunch", "display": "Cable Crunch", "muscles": ["Abs"], "image": "static/images/cablecrunch.jpg", "video": "https://www.youtube.com/embed/b9FJ4hIK3pI"},
+	{"key": "decline_sit_up", "display": "Decline Sit-Up", "muscles": ["Abs"], "image": "static/images/declinesitup.jpg", "video": "https://www.youtube.com/embed/DAnTf16NcT0"},
+	{"key": "hanging_leg_raise", "display": "Hanging Leg Raise", "muscles": ["Abs"], "image": "static/images/hanginglegraise.jpg", "video": "https://www.youtube.com/embed/7FwGZ8qY5OU"},
+	{"key": "knee_raise", "display": "Knee Raise", "muscles": ["Abs"], "image": "static/images/kneeraise.jpg", "video": "https://www.youtube.com/embed/RD_A-Z15ER4"},
+	{"key": "russian_twist", "display": "Russian Twist", "muscles": ["Abs", "Back"], "image": "static/images/russiantwist.jpg", "video": "https://www.youtube.com/embed/99T1EfpMwPA"},
+	{"key": "rotary_torso_machine", "display": "Rotary Torso Machine", "muscles": ["Abs", "Back"], "image": "static/images/rotarytorsomachine.jpg", "video": "https://www.youtube.com/embed/h5naeryzGjE"}
 ];
 
 async function loadExercises() {
@@ -5288,6 +5112,30 @@ function loadRecentScans() {
 		};
 		list.appendChild(item);
 	});
+}
+
+// AI Detect Error Modal
+function showAIDetectErrorModal() {
+	const modal = document.getElementById('ai-detect-error-modal');
+	if (modal) {
+		modal.classList.remove('hidden');
+		
+		// Close on backdrop click
+		const backdrop = modal.querySelector('.ai-detect-error-backdrop');
+		if (backdrop) {
+			backdrop.onclick = () => {
+				modal.classList.add('hidden');
+			};
+		}
+		
+		// Close on button click
+		const tryAgainBtn = document.getElementById('ai-detect-error-try-again');
+		if (tryAgainBtn) {
+			tryAgainBtn.onclick = () => {
+				modal.classList.add('hidden');
+			};
+		}
+	}
 }
 
 // Make exercise selector accessible from workout builder
