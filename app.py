@@ -945,17 +945,27 @@ def delete_account():
 		user_id = user_response.user.id
 		
 		# Delete user using admin API (requires service role key)
-		# Note: If using anon key, this will fail - user must delete via Supabase dashboard
-		# For now, we'll use the admin client to delete
 		if SUPABASE_SERVICE_ROLE_KEY:
+			print(f"[DELETE ACCOUNT] Attempting to delete user {user_id} using service role key")
 			admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 			# Delete user from auth.users (this will cascade delete from other tables due to ON DELETE CASCADE)
 			delete_response = admin_client.auth.admin.delete_user(user_id)
 			
-			if hasattr(delete_response, 'error') and delete_response.error:
-				return jsonify({"error": f"Failed to delete account: {delete_response.error}"}), 500
+			print(f"[DELETE ACCOUNT] Delete response: {delete_response}")
 			
-			return jsonify({"success": True, "message": "Account deleted successfully"}), 200
+			# Check for errors in the response
+			if hasattr(delete_response, 'error') and delete_response.error:
+				error_msg = str(delete_response.error)
+				print(f"[DELETE ACCOUNT] Error: {error_msg}")
+				return jsonify({"error": f"Failed to delete account: {error_msg}"}), 500
+			
+			# Check if response has data indicating success
+			if hasattr(delete_response, 'data') or not hasattr(delete_response, 'error'):
+				print(f"[DELETE ACCOUNT] Successfully deleted user {user_id}")
+				return jsonify({"success": True, "message": "Account deleted successfully"}), 200
+			else:
+				print(f"[DELETE ACCOUNT] Unexpected response format: {delete_response}")
+				return jsonify({"error": "Unexpected response from Supabase"}), 500
 		else:
 			# Fallback: Return instructions if service role key is not configured
 			return jsonify({

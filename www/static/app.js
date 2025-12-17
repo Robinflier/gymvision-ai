@@ -4353,6 +4353,21 @@ async function deleteAccount() {
 		// Get access token
 		const access_token = session.access_token;
 		
+		if (!access_token) {
+			alert('Error: No access token found. Please log out and log back in, then try again.');
+			return;
+		}
+		
+		console.log('🗑️ Starting account deletion...');
+		console.log('🗑️ Backend URL:', getApiUrl('/delete-account'));
+		
+		// Show loading indicator
+		const deleteBtn = document.getElementById('delete-account-btn');
+		if (deleteBtn) {
+			deleteBtn.disabled = true;
+			deleteBtn.textContent = 'Deleting...';
+		}
+		
 		// Call backend to delete account
 		const response = await fetch(getApiUrl('/delete-account'), {
 			method: 'POST',
@@ -4362,7 +4377,22 @@ async function deleteAccount() {
 			}
 		});
 		
-		const data = await response.json();
+		console.log('🗑️ Response status:', response.status);
+		
+		let data;
+		try {
+			data = await response.json();
+			console.log('🗑️ Response data:', data);
+		} catch (jsonError) {
+			const text = await response.text();
+			console.error('🗑️ Failed to parse JSON:', text);
+			alert('Error: Server returned invalid response. Status: ' + response.status + '\n\nResponse: ' + text.substring(0, 200));
+			if (deleteBtn) {
+				deleteBtn.disabled = false;
+				deleteBtn.textContent = 'Delete Account';
+			}
+			return;
+		}
 		
 		if (response.ok && data.success) {
 			alert('✅ Your account has been deleted successfully.');
@@ -4376,12 +4406,28 @@ async function deleteAccount() {
 			if (data.contact_email) {
 				alert(`Account deletion requires server configuration.\n\nPlease contact support at:\n${data.contact_email}\n\nWe will delete your account within 48 hours.`);
 			} else {
-				alert('Error deleting account: ' + (data.error || 'Unknown error') + '\n\nPlease try again or contact support.');
+				const errorMsg = data.error || 'Unknown error';
+				console.error('🗑️ Delete account error:', errorMsg);
+				alert('Error deleting account: ' + errorMsg + '\n\nStatus: ' + response.status + '\n\nPlease try again or contact support.');
+			}
+			if (deleteBtn) {
+				deleteBtn.disabled = false;
+				deleteBtn.textContent = 'Delete Account';
 			}
 		}
 	} catch (e) {
-		console.error('Delete account failed:', e);
-		alert('Error deleting account: ' + (e.message || 'Network error') + '\n\nPlease try again or contact support at info.gymvisionai@gmail.com');
+		console.error('🗑️ Delete account failed:', e);
+		console.error('🗑️ Error details:', {
+			name: e.name,
+			message: e.message,
+			stack: e.stack
+		});
+		alert('Error deleting account: ' + (e.message || 'Network error') + '\n\nPlease check the console for details or contact support at info.gymvisionai@gmail.com');
+		const deleteBtn = document.getElementById('delete-account-btn');
+		if (deleteBtn) {
+			deleteBtn.disabled = false;
+			deleteBtn.textContent = 'Delete Account';
+		}
 	}
 }
 
