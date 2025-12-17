@@ -4319,6 +4319,81 @@ function initLogout() {
 		});
 	}
 
+// 🗑️ DELETE ACCOUNT
+async function deleteAccount() {
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		alert('Error: Cannot connect to authentication service.');
+		return;
+	}
+	
+	// Get current session
+	const { data: { session } } = await supabaseClient.auth.getSession();
+	if (!session) {
+		alert('Error: You must be logged in to delete your account.');
+		return;
+	}
+	
+	// Double confirmation
+	const confirm1 = confirm('⚠️ WARNING: This will permanently delete your account and all your data.\n\nThis action cannot be undone.\n\nAre you sure you want to continue?');
+	if (!confirm1) return;
+	
+	const confirm2 = confirm('⚠️ FINAL WARNING: All your workouts, progress, and data will be permanently deleted.\n\nType "DELETE" in the next prompt to confirm.');
+	if (!confirm2) return;
+	
+	const confirmText = prompt('Type "DELETE" to confirm account deletion:');
+	if (confirmText !== 'DELETE') {
+		alert('Account deletion cancelled.');
+		return;
+	}
+	
+	try {
+		// Get access token
+		const access_token = session.access_token;
+		
+		// Call backend to delete account
+		const response = await fetch(getApiUrl('/delete-account'), {
+			method: 'POST',
+			headers: {
+				'Authorization': `Bearer ${access_token}`,
+				'Content-Type': 'application/json'
+			}
+		});
+		
+		const data = await response.json();
+		
+		if (response.ok && data.success) {
+			alert('✅ Your account has been deleted successfully.');
+			// Clear local storage
+			localStorage.clear();
+			// Sign out and redirect to login
+			await supabaseClient.auth.signOut();
+			showScreen('login');
+		} else {
+			// If service role key is not configured, show contact info
+			if (data.contact_email) {
+				alert(`Account deletion requires server configuration.\n\nPlease contact support at:\n${data.contact_email}\n\nWe will delete your account within 48 hours.`);
+			} else {
+				alert('Error deleting account: ' + (data.error || 'Unknown error') + '\n\nPlease try again or contact support.');
+			}
+		}
+	} catch (e) {
+		console.error('Delete account failed:', e);
+		alert('Error deleting account: ' + (e.message || 'Network error') + '\n\nPlease try again or contact support at info.gymvisionai@gmail.com');
+	}
+}
+
+function initDeleteAccount() {
+	const btn = document.getElementById('delete-account-btn');
+	if (!btn) return;
+	
+	btn.addEventListener('click', async () => {
+		await deleteAccount();
+	});
+}
+
 // ========== SETTINGS ==========
 function initSettings() {
 	initLogout(); // Initialize logout button
