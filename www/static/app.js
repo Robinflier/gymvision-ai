@@ -4322,6 +4322,7 @@ function initLogout() {
 // ========== SETTINGS ==========
 function initSettings() {
 	initLogout(); // Initialize logout button
+	initDeleteAccount(); // Initialize delete account button
 }
 
 async function loadSettings() {
