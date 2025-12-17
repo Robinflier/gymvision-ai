@@ -914,6 +914,62 @@ def get_user():
 		return jsonify({"error": "Failed to verify user", "details": str(e)}), 401
 
 
+@app.route("/delete-account", methods=["POST"])
+def delete_account():
+	"""Delete user account from Supabase. Requires authentication."""
+	access_token = request.headers.get("Authorization", "").replace("Bearer ", "")
+	if not access_token:
+		return jsonify({"error": "Authentication required"}), 401
+	
+	SUPABASE_URL = os.getenv("SUPABASE_URL")
+	# Use service role key for admin operations (deleting users)
+	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+	
+	if not SUPABASE_URL:
+		return jsonify({"error": "Supabase configuration missing"}), 500
+	
+	# If service role key is not available, use anon key (less secure but works for self-deletion)
+	SUPABASE_KEY = SUPABASE_SERVICE_ROLE_KEY or os.getenv("SUPABASE_ANON_KEY")
+	
+	if not SUPABASE_KEY:
+		return jsonify({"error": "Supabase key missing"}), 500
+	
+	try:
+		# First verify the user
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+		
+		user_id = user_response.user.id
+		
+		# Delete user using admin API (requires service role key)
+		# Note: If using anon key, this will fail - user must delete via Supabase dashboard
+		# For now, we'll use the admin client to delete
+		if SUPABASE_SERVICE_ROLE_KEY:
+			admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+			# Delete user from auth.users (this will cascade delete from other tables due to ON DELETE CASCADE)
+			delete_response = admin_client.auth.admin.delete_user(user_id)
+			
+			if hasattr(delete_response, 'error') and delete_response.error:
+				return jsonify({"error": f"Failed to delete account: {delete_response.error}"}), 500
+			
+			return jsonify({"success": True, "message": "Account deleted successfully"}), 200
+		else:
+			# Fallback: Return instructions if service role key is not configured
+			return jsonify({
+				"error": "Account deletion requires server configuration. Please contact support at info.gymvisionai@gmail.com to delete your account.",
+				"contact_email": "info.gymvisionai@gmail.com"
+			}), 501
+			
+	except Exception as e:
+		print(f"Error deleting account: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to delete account: {str(e)}"}), 500
+
+
 # ========== MAIN APP ROUTES ==========
 
 @app.route("/")
