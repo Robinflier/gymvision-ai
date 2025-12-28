@@ -948,24 +948,35 @@ def delete_account():
 		if SUPABASE_SERVICE_ROLE_KEY:
 			print(f"[DELETE ACCOUNT] Attempting to delete user {user_id} using service role key")
 			admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-			# Delete user from auth.users (this will cascade delete from other tables due to ON DELETE CASCADE)
-			delete_response = admin_client.auth.admin.delete_user(user_id)
 			
-			print(f"[DELETE ACCOUNT] Delete response: {delete_response}")
-			
-			# Check for errors in the response
-			if hasattr(delete_response, 'error') and delete_response.error:
-				error_msg = str(delete_response.error)
-				print(f"[DELETE ACCOUNT] Error: {error_msg}")
-				return jsonify({"error": f"Failed to delete account: {error_msg}"}), 500
-			
-			# Check if response has data indicating success
-			if hasattr(delete_response, 'data') or not hasattr(delete_response, 'error'):
-				print(f"[DELETE ACCOUNT] Successfully deleted user {user_id}")
-				return jsonify({"success": True, "message": "Account deleted successfully"}), 200
-			else:
-				print(f"[DELETE ACCOUNT] Unexpected response format: {delete_response}")
-				return jsonify({"error": "Unexpected response from Supabase"}), 500
+			try:
+				# Delete user from auth.users (this will cascade delete from other tables due to ON DELETE CASCADE)
+				delete_response = admin_client.auth.admin.delete_user(user_id)
+				
+				print(f"[DELETE ACCOUNT] Delete response type: {type(delete_response)}")
+				print(f"[DELETE ACCOUNT] Delete response: {delete_response}")
+				
+				# Supabase Python client returns a response object
+				# Check if it's a successful response (no error attribute or error is None)
+				if hasattr(delete_response, 'error'):
+					if delete_response.error is not None:
+						error_msg = str(delete_response.error)
+						print(f"[DELETE ACCOUNT] Error: {error_msg}")
+						return jsonify({"error": f"Failed to delete account: {error_msg}"}), 500
+					else:
+						# No error, success
+						print(f"[DELETE ACCOUNT] Successfully deleted user {user_id}")
+						return jsonify({"success": True, "message": "Account deleted successfully"}), 200
+				else:
+					# Response doesn't have error attribute, assume success
+					print(f"[DELETE ACCOUNT] Successfully deleted user {user_id} (no error attribute)")
+					return jsonify({"success": True, "message": "Account deleted successfully"}), 200
+					
+			except Exception as delete_error:
+				print(f"[DELETE ACCOUNT] Exception during delete: {delete_error}")
+				import traceback
+				traceback.print_exc()
+				return jsonify({"error": f"Failed to delete account: {str(delete_error)}"}), 500
 		else:
 			# Fallback: Return instructions if service role key is not configured
 			return jsonify({
@@ -1500,7 +1511,14 @@ def vision_workout():
 	if not GROQ_API_KEY:
 		return jsonify({"error": "Groq API key not configured. Set GROQ_API_KEY environment variable."}), 500
 	
-	data = request.get_json()
+	try:
+		data = request.get_json()
+	except Exception as e:
+		return jsonify({"error": f"Invalid request data: {str(e)}"}), 400
+	
+	if not data:
+		return jsonify({"error": "No data provided"}), 400
+	
 	message = data.get("message", "").strip()
 	workout_context = data.get("workoutContext")
 	
@@ -1525,11 +1543,6 @@ def vision_workout():
 		current_exercises = ", ".join([ex.get("display", ex.get("key", "")) for ex in workout_context.get("exercises", [])])
 		context_info = f"\n\nCurrent workout: {workout_context.get('name', 'Workout')}\nCurrent exercises: {current_exercises}\nThe user wants to MODIFY this workout."
 	
-	# Check if message mentions muscle groups
-	muscle_groups = ["chest", "shoulder", "back", "bicep", "tricep", "leg", "quad", "hamstring", "glute", "calf", "abs", "core", "borst"]
-	msg_lower = message.lower()
-	mentions_muscle = any(muscle in msg_lower for muscle in muscle_groups)
-	
 	prompt = f"""Based on this user request: "{message}"
 {context_info}
 
@@ -1549,40 +1562,65 @@ CRITICAL RULES:
 - Return ONLY valid JSON, no other text, no markdown, no code blocks
 - Use exact exercise keys from the list (the part after "key: ")
 - ALWAYS generate a workout - never return empty exercises array
-- If user specifies a NUMBER of exercises (e.g., "10 exercise push workout", "5 exercise chest workout"), you MUST create exactly that many exercises
-- If user mentions a muscle group (chest, shoulders, back, biceps, triceps, legs, etc.) without a number, create a workout with 4-6 exercises targeting that muscle group
-- Give ONLY what the user asks for - if they ask for "just pushups", give ONLY pushups
-- If user says "only chest" or "just chest", give 4-6 chest exercises
+- READ THE USER'S REQUEST CAREFULLY and understand what they ACTUALLY want
+- Do NOT assume what the user wants based on keywords alone - interpret the full context
+- If user specifies a NUMBER of exercises, you MUST create exactly that many exercises
 - If user specifies exact exercises, use ONLY those exercises
-- If user asks for a workout type (push/pull/legs) without specifics, then suggest 4-6 exercises
+- If user asks for a workout type (push/pull/legs), understand what they mean and create appropriate exercises
+- If user mentions a muscle group, ONLY include exercises for that muscle group if they explicitly ask for it
+- Give ONLY what the user asks for - if they ask for "just pushups", give ONLY pushups
 - If user says "no X" or "replace X with Y", adjust accordingly
 - Do NOT add extra exercises if user asks for specific ones
-- Match the muscle groups mentioned (push = chest/shoulders/triceps, pull = back/biceps, legs = quads/hamstrings/glutes)
+- Do NOT automatically create workouts just because a muscle group keyword is mentioned - understand the full context
 
 Examples:
 - User: "10 exercise push workout" → Create EXACTLY 10 push exercises (chest/shoulders/triceps)
 - User: "5 exercise chest workout" → Create EXACTLY 5 chest exercises
-- User: "only chest" or "just chest" → {{"name": "Chest Workout", "exercises": [{{"key": "bench_press", "display": "Bench Press"}}, {{"key": "incline_bench_press", "display": "Incline Bench Press"}}, {{"key": "dumbbell_fly", "display": "Dumbbell Fly"}}, {{"key": "cable_crossover", "display": "Cable Crossover"}}, {{"key": "pec_deck_machine", "display": "Pec Deck Machine"}}]}}
+- User: "I want to train my back today" → Create a back workout with appropriate exercises
 - User: "just pushups" → {{"name": "Pushup Workout", "exercises": [{{"key": "push_up", "display": "Push-Up"}}]}}
-- User: "push workout" → {{"name": "Push Workout", "exercises": [{{"key": "bench_press", "display": "Bench Press"}}, {{"key": "incline_bench_press", "display": "Incline Bench Press"}}, {{"key": "shoulder_press_machine", "display": "Shoulder Press Machine"}}, {{"key": "tricep_pushdown", "display": "Tricep Pushdown"}}]}}
 - User: "bench press and tricep pushdown" → {{"name": "Workout", "exercises": [{{"key": "bench_press", "display": "Bench Press"}}, {{"key": "tricep_pushdown", "display": "Tricep Pushdown"}}]}}
+- User: "I'm doing back exercises" → This is a statement, not a request for a workout. But if they say "make me a back workout", then create one.
 """
 	
 	try:
 		# Groq SDK handles Authorization header internally
 		# API key is loaded from environment variable only
 		client = Groq(api_key=GROQ_API_KEY)
-		response = client.chat.completions.create(
-			model="llama-3.3-70b-versatile",
-			messages=[
-				{"role": "system", "content": "You are a fitness expert. Return ONLY valid JSON, no explanations. Start your response with { and end with }."},
-				{"role": "user", "content": prompt}
-			],
-			temperature=0.3,
-			max_tokens=800
-		)
 		
-		content = response.choices[0].message.content.strip()
+		# Wrap API call in try-except to catch any Groq SDK errors
+		try:
+			response = client.chat.completions.create(
+				model="llama-3.3-70b-versatile",
+				messages=[
+					{"role": "system", "content": "You are a fitness expert. Return ONLY valid JSON, no explanations. Start your response with { and end with }."},
+					{"role": "user", "content": prompt}
+				],
+				temperature=0.3,
+				max_tokens=800
+			)
+		except Exception as groq_error:
+			error_str = str(groq_error)
+			print(f"[ERROR] Groq API error: {error_str}")
+			import traceback
+			traceback.print_exc()
+			# Return a generic error message - frontend will use fallback workout
+			return jsonify({"error": "AI service temporarily unavailable. Please try again in a moment."}), 500
+		
+		if not response or not hasattr(response, 'choices') or not response.choices:
+			return jsonify({"error": "No response from AI. Please try again."}), 500
+		
+		if not response.choices[0] or not hasattr(response.choices[0], 'message'):
+			return jsonify({"error": "Invalid response from AI. Please try again."}), 500
+		
+		if not response.choices[0].message or not hasattr(response.choices[0].message, 'content'):
+			return jsonify({"error": "Empty response from AI. Please try again."}), 500
+		
+		content = response.choices[0].message.content
+		if not content:
+			return jsonify({"error": "Empty content from AI. Please try again."}), 500
+		
+		content = content.strip()
+		
 		# Try to extract JSON from response (might have markdown code blocks)
 		if "```" in content:
 			# Extract JSON from code block
@@ -1601,8 +1639,28 @@ Examples:
 		if content.endswith("```"):
 			content = content[:-3].strip()
 		
-		# Parse JSON
-		workout_json = json.loads(content)
+		# Try to find JSON object in the content (in case there's extra text)
+		if "{" in content and "}" in content:
+			start_idx = content.find("{")
+			end_idx = content.rfind("}")
+			if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+				content = content[start_idx:end_idx + 1]
+		
+		# Parse JSON with better error handling
+		try:
+			workout_json = json.loads(content)
+		except json.JSONDecodeError as parse_error:
+			print(f"[ERROR] JSON parse error: {parse_error}")
+			print(f"[DEBUG] Content was: {content[:500]}")
+			# Try to fix common JSON issues
+			# Remove any trailing commas before closing braces/brackets
+			import re
+			content = re.sub(r',\s*}', '}', content)
+			content = re.sub(r',\s*]', ']', content)
+			try:
+				workout_json = json.loads(content)
+			except:
+				raise ValueError(f"Failed to parse JSON response from AI. The AI may have returned invalid JSON. Original error: {parse_error}")
 		
 		# Validate and clean up the workout
 		if not workout_json.get("exercises"):
@@ -1614,20 +1672,40 @@ Examples:
 		# Validate exercises exist in metadata
 		valid_exercises = []
 		for ex in exercise_list:
-			key = ex.get("key", "").lower()
-			display = ex.get("display", "")
+			key = ex.get("key", "").lower().strip()
+			display = ex.get("display", "").strip()
 			
-			# Try to find exercise by key
+			# Try to find exercise by key (exact match)
 			meta_key = None
 			for meta_key_candidate, meta in MACHINE_METADATA.items():
 				if meta_key_candidate.lower() == key:
 					meta_key = meta_key_candidate
 					break
 			
-			# If not found by key, try by display name
+			# If not found by key, try by display name (exact match)
 			if not meta_key:
 				for meta_key_candidate, meta in MACHINE_METADATA.items():
-					if meta.get("display", "").lower() == display.lower():
+					if meta.get("display", "").lower().strip() == display.lower():
+						meta_key = meta_key_candidate
+						break
+			
+			# If still not found, try fuzzy matching on display name
+			if not meta_key and display:
+				display_lower = display.lower()
+				for meta_key_candidate, meta in MACHINE_METADATA.items():
+					meta_display = meta.get("display", "").lower()
+					# Check if display name contains key parts or vice versa
+					if (display_lower in meta_display or meta_display in display_lower) and len(display_lower) > 3:
+						meta_key = meta_key_candidate
+						break
+			
+			# If still not found, try matching key parts
+			if not meta_key and key:
+				key_parts = key.replace("_", " ").split()
+				for meta_key_candidate, meta in MACHINE_METADATA.items():
+					meta_key_lower = meta_key_candidate.lower().replace("_", " ")
+					# Check if all key parts are in the metadata key
+					if all(part in meta_key_lower for part in key_parts if len(part) > 2):
 						meta_key = meta_key_candidate
 						break
 			
@@ -1641,7 +1719,13 @@ Examples:
 				print(f"[WARNING] Could not find exercise: key='{key}', display='{display}'")
 		
 		if not valid_exercises:
-			return jsonify({"error": "No valid exercises found in workout"}), 500
+			# Try to provide helpful error message
+			invalid_exercises = [ex.get("display", ex.get("key", "unknown")) for ex in exercise_list if ex not in [{"key": v["key"], "display": v["display"]} for v in valid_exercises]]
+			error_msg = f"No valid exercises found in workout. "
+			if invalid_exercises:
+				error_msg += f"Could not find: {', '.join(invalid_exercises[:3])}. "
+			error_msg += "Please try using exercise names from the exercise list."
+			return jsonify({"error": error_msg}), 500
 		
 		return jsonify({
 			"workout": {
@@ -1649,15 +1733,24 @@ Examples:
 				"exercises": valid_exercises
 			}
 		})
-	except json.JSONDecodeError as e:
-		print(f"[ERROR] Failed to parse workout JSON: {e}")
-		print(f"[DEBUG] Content was: {content[:500]}")
-		return jsonify({"error": "Failed to parse workout response from AI"}), 500
+	except (json.JSONDecodeError, ValueError) as e:
+		error_msg = str(e)
+		print(f"[ERROR] Failed to parse workout JSON: {error_msg}")
+		if 'content' in locals():
+			print(f"[DEBUG] Content was: {content[:500]}")
+		# Provide user-friendly error message
+		return jsonify({"error": "The AI returned an invalid response. Please try rephrasing your request or try again."}), 500
 	except Exception as e:
-		print(f"[ERROR] Workout generation failed: {e}")
+		error_msg = str(e)
+		print(f"[ERROR] Workout generation failed: {error_msg}")
 		import traceback
 		traceback.print_exc()
-		return jsonify({"error": f"Failed to generate workout: {str(e)}"}), 500
+		# Check if it's a pattern matching error from Groq or any other error
+		if "pattern" in error_msg.lower() or "match" in error_msg.lower() or "expected" in error_msg.lower() or "string" in error_msg.lower():
+			# This is likely a Groq API error - return a generic error message
+			return jsonify({"error": "AI service temporarily unavailable. Please try again in a moment."}), 500
+		# Generic error for any other issues
+		return jsonify({"error": "Failed to generate workout. Please try again."}), 500
 
 
 @app.route("/chat", methods=["POST"])

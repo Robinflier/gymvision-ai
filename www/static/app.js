@@ -3,62 +3,34 @@
 // ======================
 // Supabase config is injected from backend via window.SUPABASE_URL and window.SUPABASE_ANON_KEY
 // These are loaded from environment variables on the server side
-
-// Backend API URL - set this to your deployed Flask backend URL (e.g., https://your-app.onrender.com)
-// Leave empty for local development (will use relative paths)
-// IMPORTANT: For Capacitor, you MUST set this to your deployed backend URL
-const BACKEND_URL = window.BACKEND_URL || ''; // Set this in index.html for Capacitor
-
-// Helper function to get full API URL
-function getApiUrl(path) {
-	// Remove leading slash if present
-	const cleanPath = path.startsWith('/') ? path.slice(1) : path;
-	// In Capacitor, use BACKEND_URL if set, otherwise try relative (won't work but shows error)
-	if (BACKEND_URL) {
-		return `${BACKEND_URL}/${cleanPath}`;
-	}
-	// For local development, use relative path
-	return `/${cleanPath}`;
-}
-
 let supabaseClient = null;
 
 async function initSupabase() {
 	if (!supabaseClient) {
-		try {
-			if (typeof window.createClient === 'undefined' || window.createClient === null) {
-				// Wait for Supabase library to load (retry up to 3 times)
-				for (let i = 0; i < 3; i++) {
-					await new Promise(resolve => setTimeout(resolve, 200));
-					if (typeof window.createClient !== 'undefined' && window.createClient !== null) {
-						break;
-					}
-				}
-				if (typeof window.createClient === 'undefined' || window.createClient === null) {
-					console.error('Supabase createClient not loaded after retries');
-					return null;
-				}
-			}
-			
-			// Get config from window (injected by backend from environment variables)
-			const SUPABASE_URL = window.SUPABASE_URL;
-			const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY;
-			
-			if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-				console.error('Supabase configuration not found. Make sure SUPABASE_URL and SUPABASE_ANON_KEY are set in environment variables.');
+		if (typeof window.createClient === 'undefined') {
+			// Wait for Supabase library to load
+			await new Promise(resolve => setTimeout(resolve, 100));
+			if (typeof window.createClient === 'undefined') {
+				console.error('Supabase createClient not loaded');
 				return null;
 			}
-			
-			supabaseClient = window.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-				auth: {
-					persistSession: true,
-					autoRefreshToken: true,
-				}
-			});
-		} catch (error) {
-			console.error('Error initializing Supabase:', error);
+		}
+		
+		// Get config from window (injected by backend from environment variables)
+		const SUPABASE_URL = window.SUPABASE_URL;
+		const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY;
+		
+		if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+			console.error('Supabase configuration not found. Make sure SUPABASE_URL and SUPABASE_ANON_KEY are set in environment variables.');
 			return null;
 		}
+		
+		supabaseClient = window.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+			auth: {
+				persistSession: true,
+				autoRefreshToken: true,
+			}
+		});
 	}
 	return supabaseClient;
 }
@@ -72,109 +44,30 @@ let currentWorkout = null;
 let editingWorkoutId = null;
 let workoutTimer = null;
 let workoutStartTime = null;
+let restTimer = null;
+let restTimerInterval = null;
+let restTimerSeconds = 0;
+let restTimerRunning = false;
 const WORKOUT_DRAFT_KEY = 'currentWorkoutDraft';
 const DEFAULT_SET_COUNT = 3;
-
-// ========== CLIENT-SIDE NAVIGATION (SPA) ==========
-// Map of content IDs to their corresponding tab names
-const CONTENT_MAP = {
-	'login': 'login-content',
-	'register': 'register-content',
-	'workouts': 'workouts-content',
-	'workout-builder': 'workout-builder-content',
-	'progress': 'progress-content',
-	'settings': 'settings-content',
-	'vision': 'vision-content',
-	'home': 'home-content'
-};
-
-// Update navbar visibility based on active screen
-function updateNavbarVisibility(activeScreen) {
-	const navbar = document.querySelector('.navbar');
-	if (!navbar) return;
-	
-	// Hide navbar on login/register
-	if (activeScreen === 'login' || activeScreen === 'register') {
-		navbar.style.display = 'none';
-	} else {
-		navbar.style.display = 'flex';
-	}
-}
-
-// Show a specific content screen and hide all others
-function showScreen(screenName) {
-	// Hide all content divs
-	const allContent = document.querySelectorAll('.content');
-	allContent.forEach(content => {
-		content.classList.add('hidden');
-	});
-	
-	// Show the requested content
-	const contentId = CONTENT_MAP[screenName] || CONTENT_MAP['workouts'];
-	const contentEl = document.getElementById(contentId);
-	if (contentEl) {
-		contentEl.classList.remove('hidden');
-	}
-	
-	// Update navbar visibility
-	updateNavbarVisibility(screenName);
-	
-	// Reset login state when showing login screen
-	if (screenName === 'login') {
-		resetLoginState();
-	}
-	
-	// Load settings stats when navigating to settings
-	if (screenName === 'settings') {
-		loadSettings();
-	}
-	
-	// Update active tab button (only for main nav tabs: workouts, progress, settings)
-	if (screenName !== 'login' && screenName !== 'register') {
-		const navbar = document.getElementById('main-navbar');
-		if (navbar) {
-			const navButtons = navbar.querySelectorAll('.nav-btn');
-			navButtons.forEach(btn => {
-				const tab = btn.getAttribute('data-tab');
-				if (tab === screenName) {
-					btn.classList.add('active');
-				} else {
-					btn.classList.remove('active');
-				}
-			});
-		}
-	}
-	
-	// Update currentTab for tab navigation
-	if (screenName !== 'login' && screenName !== 'register') {
-		currentTab = screenName;
-	}
-}
 
 function createDefaultSets(count = DEFAULT_SET_COUNT) {
 	return Array.from({ length: count }, () => ({ weight: '', reps: '' }));
 }
 
-async function getLastExerciseData(exerciseKey) {
-	const user = await getCurrentUser();
-	if (!user) return null;
-	
-	try {
+function getLastExerciseData(exerciseKey) {
 	// Find the most recent workout that contains this exercise
-		const { data: workouts, error } = await supabaseClient
-			.from('workouts')
-			.select('*')
-			.eq('user_id', user.id)
-			.order('date', { ascending: false });
-		
-		if (error) {
-			console.error("Supabase error loading workouts for exercise data:", error);
-			return null;
-		}
-		if (!workouts || workouts.length === 0) return null;
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	
+	// Sort workouts by date (newest first)
+	const sortedWorkouts = [...workouts].sort((a, b) => {
+		const dateA = new Date(a.date || 0);
+		const dateB = new Date(b.date || 0);
+		return dateB - dateA;
+	});
 	
 	// Find the first workout that has this exercise
-		for (const workout of workouts) {
+	for (const workout of sortedWorkouts) {
 		if (!workout.exercises || !Array.isArray(workout.exercises)) continue;
 		
 		const exercise = workout.exercises.find(ex => {
@@ -194,10 +87,6 @@ async function getLastExerciseData(exerciseKey) {
 	}
 	
 	return null;
-	} catch (error) {
-		console.error('Error getting last exercise data:', error);
-	return null;
-	}
 }
 
 function isBodyweightExercise(exercise) {
@@ -212,55 +101,6 @@ function isBodyweightExercise(exercise) {
 	       display.includes('chin-up') || display.includes('dip') && !display.includes('machine') ||
 	       (display.includes('crunch') && !display.includes('cable')) || display.includes('sit-up') || 
 	       display.includes('leg raise') || display.includes('knee raise');
-}
-
-// Helper function to get current user from Supabase
-async function getCurrentUser() {
-	if (!supabaseClient) {
-		await initSupabase();
-	}
-	if (!supabaseClient) return null;
-	
-	const { data: { user }, error } = await supabaseClient.auth.getUser();
-	if (error) {
-		console.error("Supabase error getting user:", error);
-		return null;
-	}
-	if (!user) {
-		console.error("No user found in auth.getUser()");
-		return null;
-	}
-	
-	// Verify user exists in public.users table (create if needed)
-	try {
-		const { data: userRecord, error: userError } = await supabaseClient
-			.from('users')
-			.select('id')
-			.eq('id', user.id)
-			.single();
-		
-		if (userError && userError.code === 'PGRST116') {
-			// User doesn't exist in public.users, create it
-			const { error: insertError } = await supabaseClient
-				.from('users')
-				.insert({
-					id: user.id,
-					email: user.email
-				});
-			
-			if (insertError) {
-				console.error("Error creating user record:", insertError);
-				// Continue anyway - the trigger should handle it
-			}
-		} else if (userError) {
-			console.error("Error checking user record:", userError);
-		}
-	} catch (e) {
-		console.error("Error verifying user record:", e);
-		// Continue anyway
-	}
-	
-	return user;
 }
 
 // Helper function to fetch user from backend with Authorization header
@@ -297,37 +137,28 @@ async function fetchUser() {
 document.addEventListener('DOMContentLoaded', async () => {
 	await initSupabase();
 	
-	// Initialize login/register forms (always available)
-	initLoginForm();
-	initRegisterForm();
-	
-	// Add event listeners for login/register switching
-	const showRegisterLink = document.getElementById('show-register-link');
-	const showLoginLink = document.getElementById('show-login-link');
-	if (showRegisterLink) {
-		showRegisterLink.addEventListener('click', (e) => {
-			e.preventDefault();
-			showScreen('register');
-		});
-	}
-	if (showLoginLink) {
-		showLoginLink.addEventListener('click', (e) => {
-			e.preventDefault();
-			showScreen('login');
-		});
-	}
-	
-	// Check authentication state
-	const { data: { session } } = supabaseClient ? await supabaseClient.auth.getSession() : { data: { session: null } };
-	
-	if (!session) {
-		// Not logged in - show login screen
-		showScreen('login');
+	// PUBLIC PAGES MUST NOT REQUIRE AUTH
+	if (isPublicPage()) {
+		initLoginForm();
+		initRegisterForm();
+		
+		// Check if already logged in on public pages - redirect to home
+		// Wait a bit for session to be restored
+		await new Promise(resolve => setTimeout(resolve, 100));
+		if (supabaseClient) {
+			const { data: { session } } = await supabaseClient.auth.getSession();
+			if (session) {
+				// Already logged in, redirect to home
+				window.location.href = '/';
+				return;
+			}
+		}
 		return;
 	}
 	
-	// Logged in - show main app
-	showScreen('workouts');
+	// PRIVATE PAGES - Wait for auth check to complete
+	const ok = await requireLogin();
+	if (!ok) return;
 	
 	// Init app features (SAFE now - user is authenticated)
 	initLogout(); // Initialize logout button
@@ -340,51 +171,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 	initProgress();
 	initSettings();
 	initVision();
-	initExerciseVideoModal();
+		initExerciseVideoModal();
 	initExerciseCard();
 	loadStreak();
 	loadRecentScans();
 	loadExercises();
 	loadWorkouts();
 	updateWorkoutStartButton();
+	
+	// Check if daily reminder should be cancelled (if workout already done today)
+	checkAndCancelDailyReminder();
 });
 
 // ======================
 // 🔑 LOGIN LOGIC
 // ======================
-// Reset login form state
-function resetLoginState() {
-	const emailInput = document.querySelector("#login-email");
-	const passwordInput = document.querySelector("#login-password");
-	const errorEl = document.getElementById('login-error-message');
-	const submitBtn = document.getElementById('login-submit-btn');
-	
-	// Clear input values
-	if (emailInput) emailInput.value = '';
-	if (passwordInput) passwordInput.value = '';
-	
-	// Hide error messages
-	if (errorEl) {
-		errorEl.classList.remove('show');
-		errorEl.textContent = '';
-	}
-	
-	// Reset button state
-	if (submitBtn) {
-		submitBtn.disabled = false;
-		submitBtn.textContent = 'Sign In';
-	}
-	
-	// Reset auth loading state
-	authLoading = false;
-}
-
 function initLoginForm() {
 	const form = document.getElementById('login-form');
 	if (!form) return;
 	
-	const errorEl = document.getElementById('login-error-message');
-	const submitBtn = document.getElementById('login-submit-btn');
+	const errorEl = document.getElementById('error-message');
+	const submitBtn = document.getElementById('submit-btn');
 	
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault();
@@ -395,8 +202,8 @@ function initLoginForm() {
 		}
 		if (errorEl) errorEl.classList.remove('show');
 		
-		const email = document.querySelector("#login-email")?.value;
-		const password = document.querySelector("#login-password")?.value;
+		const email = document.getElementById('email')?.value;
+		const password = document.getElementById('password')?.value;
 		
 		if (!email || !password) {
 			if (errorEl) {
@@ -429,11 +236,9 @@ function initLoginForm() {
 			return;
 		}
 		
-		try {
 		const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
 		
 		if (error) {
-				// Login failed - show error and reset button
 			let errorMessage = error.message;
 			if (error.message.includes('Invalid login credentials')) {
 				errorMessage = 'Invalid email or password';
@@ -462,43 +267,15 @@ function initLoginForm() {
 		// Verify session exists
 		const { data: { session } } = await supabaseClient.auth.getSession();
 		if (session) {
-				// Initialize app features now that user is logged in
-			initLogout();
-			initNavigation();
-			initTabs();
-			initFileUpload();
-				initManualInput();
-				initExerciseSelector();
-				initWorkoutBuilder();
-				initProgress();
-				initSettings();
-				initVision();
-				initExerciseVideoModal();
-				initExerciseCard();
-				loadStreak();
-				loadRecentScans();
-				loadExercises();
-				loadWorkouts();
-				updateWorkoutStartButton();
-			}
-			
-			// Show workouts screen (main app) after successful login
-			showScreen('workouts');
-		} catch (err) {
-			// Catch any unexpected errors
-			console.error('Login error:', err);
-			const errorMessage = err.message || 'An unexpected error occurred. Please try again.';
-			
-			if (errorEl) {
-				errorEl.textContent = errorMessage;
-				errorEl.classList.add('show');
+			// Redirect to next parameter if exists, otherwise go to home
+			const nextPage = new URLSearchParams(window.location.search).get('next');
+			const redirectTo = nextPage ? decodeURIComponent(nextPage) : '/';
+			window.location.href = redirectTo;
 		} else {
-				alert(errorMessage);
-			}
-			if (submitBtn) {
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Sign In';
-			}
+			// Session not ready yet, but redirect anyway
+			const nextPage = new URLSearchParams(window.location.search).get('next');
+			const redirectTo = nextPage ? decodeURIComponent(nextPage) : '/';
+			window.location.href = redirectTo;
 		}
 	});
 }
@@ -510,8 +287,8 @@ function initRegisterForm() {
 	const form = document.getElementById('register-form');
 	if (!form) return;
 	
-	const errorEl = document.getElementById('register-error-message');
-	const submitBtn = document.getElementById('register-submit-btn');
+	const errorEl = document.getElementById('error-message');
+	const submitBtn = document.getElementById('submit-btn');
 	
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault();
@@ -522,9 +299,9 @@ function initRegisterForm() {
 		}
 		if (errorEl) errorEl.classList.remove('show');
 		
-		const email = document.getElementById('register-email')?.value;
-		const password = document.getElementById('register-password')?.value;
-		const username = document.getElementById('register-username')?.value; // Optional
+		const email = document.getElementById('email')?.value;
+		const password = document.getElementById('password')?.value;
+		const username = document.getElementById('username')?.value; // Optional
 		
 		if (!email || !password) {
 			if (errorEl) {
@@ -588,140 +365,23 @@ function initRegisterForm() {
 			return;
 		}
 		
-		// Registration successful - ensure user exists in public.users table
-		// The trigger should automatically create it, but we'll verify and create if needed
-		try {
-			// Wait a moment for the trigger to complete
-			await new Promise(resolve => setTimeout(resolve, 1000));
-			
-			const { data: { user }, error: getUserError } = await supabaseClient.auth.getUser();
-			
-			if (getUserError) {
-				console.error("Error getting user after signup:", getUserError);
-				// Still show success - the account was created
-				alert('Account created! Please log in.');
-				showScreen('login');
-				return;
-			}
-			
-			if (!user) {
-				console.error("No user returned after signup");
-				alert('Account created! Please log in.');
-				showScreen('login');
-				return;
-			}
-			
-			// Check if user exists in public.users, create if not
-			const { data: userRecord, error: userError } = await supabaseClient
-				.from('users')
-				.select('id')
-				.eq('id', user.id)
-				.single();
-			
-			if (userError && userError.code === 'PGRST116') {
-				// User doesn't exist in public.users, create it
-				// This should be allowed by the INSERT policy
-				console.log("User not found in public.users, creating...");
-				const { data: insertData, error: insertError } = await supabaseClient
-					.from('users')
-					.insert({
-						id: user.id,
-						email: user.email
-					})
-					.select();
-				
-					if (insertError) {
-						console.error("Database error saving new user:", insertError);
-						console.error("Error code:", insertError.code);
-						console.error("Error message:", insertError.message);
-						console.error("Error details:", insertError.details);
-						console.error("Error hint:", insertError.hint);
-						console.error("Full error object:", insertError);
-						console.error("Full error JSON:", JSON.stringify(insertError, null, 2));
-						
-						// Unique constraint violation - user might already exist (trigger worked!)
-						if (insertError.code === '23505') {
-							console.log("User already exists (likely created by trigger) - this is OK, continuing...");
-							// Don't show error, just continue - trigger worked!
-						} else {
-							// Show FULL error details in UI for debugging
-							let errorMsg = `ERROR ${insertError.code || 'UNKNOWN'}: ${insertError.message || 'No message'}`;
-							if (insertError.details) {
-								errorMsg += `\nDetails: ${insertError.details}`;
-							}
-							if (insertError.hint) {
-								errorMsg += `\nHint: ${insertError.hint}`;
-							}
-							
-							// More specific error message based on code
-							if (insertError.code === '42501') {
-								errorMsg = 'ERROR 42501: Permission denied.\n\nINSERT policy may not be set correctly.\n\nCheck Supabase: Authentication > Policies > users table\n\nRun COMPLETE_USER_SETUP.sql again.';
-							} else if (insertError.code === '23503') {
-								errorMsg = 'ERROR 23503: Foreign key constraint failed.\n\nUser may not exist in auth.users.\n\nThis should not happen - contact support.';
-							}
-							
-							// ALWAYS show the error with full details
-							if (errorEl) {
-								errorEl.textContent = errorMsg;
-								errorEl.classList.add('show');
-								errorEl.style.whiteSpace = 'pre-wrap'; // Allow line breaks
-								errorEl.style.maxHeight = '200px';
-								errorEl.style.overflow = 'auto';
-							} else {
-								alert(errorMsg);
-							}
-							if (submitBtn) {
-								submitBtn.disabled = false;
-								submitBtn.textContent = 'Sign Up';
-							}
-							return;
-						}
-					} else {
-						console.log("Successfully created user in public.users:", insertData);
-					}
-			} else if (userError && userError.code !== 'PGRST116') {
-				// Some other error occurred
-				console.error("Error checking user record:", userError);
-				console.error("Error code:", userError.code);
-				console.error("Error message:", userError.message);
-			} else {
-				console.log("User already exists in public.users - trigger worked!");
-			}
-		} catch (err) {
-			console.error("Unexpected error creating user record:", err);
-			console.error("Error stack:", err.stack);
-			// The trigger should have created the user, so this might be OK
-			// But we'll still show an error to be safe
-			if (errorEl) {
-				errorEl.textContent = 'Account created, but there was an issue. Please try logging in.';
-				errorEl.classList.add('show');
-			} else {
-				alert('Account created, but there was an issue. Please try logging in.');
-			}
-			if (submitBtn) {
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Sign Up';
-			}
-			// Still redirect to login - the account was created in auth.users
-			setTimeout(() => {
-				showScreen('login');
-			}, 2000);
-			return;
-		}
+		// Registration successful - set defaults for new account
+		localStorage.setItem('restTimerEnabled', 'true'); // Rest timer automatically on
 		
-		// Registration successful
+		// Request notification permission for new account
+		await requestNotificationPermission();
+		
 		alert('Account created! Please log in.');
-		showScreen('login');
+		window.location.href = '/login';
 	});
 }
 
 // ======================
-// 🔒 PUBLIC ROUTES (DEPRECATED - Now using SPA)
+// 🔒 PUBLIC ROUTES
 // ======================
 function isPublicPage() {
-	// In SPA mode, we don't use pathname-based routing
-	// This function is kept for backwards compatibility but always returns false
-	return false;
+	const path = window.location.pathname;
+	return path.includes('login') || path.includes('register') || path.includes('verify');
 }
 
 // ======================
@@ -767,7 +427,7 @@ async function requireLogin() {
 		}
 		if (!supabaseClient) {
 			authCheckComplete = false;
-			showScreen('login');
+			window.location.href = '/login';
 			return false;
 		}
 		
@@ -776,14 +436,15 @@ async function requireLogin() {
 		if (error) {
 			console.error('Session check error:', error);
 			authCheckComplete = false;
-			showScreen('login');
+			window.location.href = '/login';
 			return false;
 		}
 		
 		if (!session) {
-			// Not logged in, show login screen
+			// Not logged in, redirect to login with next parameter
+			const currentPath = window.location.pathname;
 			authCheckComplete = false;
-			showScreen('login');
+			window.location.href = `/login?next=${encodeURIComponent(currentPath)}`;
 			return false;
 		}
 		
@@ -810,10 +471,10 @@ async function logout() {
 	try {
 		await supabaseClient.auth.signOut();
 		localStorage.removeItem('workouts'); // Optional: clear workouts on logout
-		showScreen('login'); // This will hide the navbar via updateNavbarVisibility()
+		window.location.href = '/login';
 	} catch (e) {
 		console.error('Logout failed:', e);
-		showScreen('login'); // This will hide the navbar via updateNavbarVisibility()
+		window.location.href = '/login';
 	}
 }
 
@@ -829,8 +490,22 @@ function initNavigation() {
 }
 
 function switchTab(tab) {
-		// Use showScreen for consistent navigation
-		showScreen(tab);
+	// Update nav buttons
+	document.querySelectorAll('.nav-btn').forEach(btn => {
+		btn.classList.toggle('active', btn.dataset.tab === tab);
+	});
+	
+	// Hide all content
+	document.querySelectorAll('.content').forEach(content => {
+		content.classList.add('hidden');
+	});
+	
+	// Show selected content
+	const contentId = `${tab}-content`;
+	const content = document.getElementById(contentId);
+	if (content) {
+		content.classList.remove('hidden');
+		currentTab = tab;
 		
 		// Load tab-specific data
 		if (tab === 'workouts') {
@@ -840,6 +515,7 @@ function switchTab(tab) {
 			loadProgress();
 		} else if (tab === 'settings') {
 			loadSettings();
+		}
 	}
 }
 
@@ -869,242 +545,62 @@ function initFileUpload() {
 	const snapshot = document.getElementById('snapshot');
 	const manualPreview = document.getElementById('manual-preview');
 	
-	// Helper function to process a photo file (used by both file input and Capacitor Camera)
-	async function processPhotoFile(file) {
-		if (!file) return;
-		
-		const reader = new FileReader();
-		reader.onload = (event) => {
-			const img = new Image();
-			img.onload = () => {
-				snapshot.width = img.width;
-				snapshot.height = img.height;
-				const ctx = snapshot.getContext('2d');
-				ctx.drawImage(img, 0, 0);
-				// Store preview data URL so we can show it in the dotted box
-				window.lastUploadPreview = img.src;
-				// Store the actual file for classification
-				window.lastUploadFile = file;
-				// Show the preview image in the dotted square
-				if (manualPreview) {
-					manualPreview.src = img.src;
-					manualPreview.classList.remove('hidden');
-				}
-				if (camera) camera.classList.add('hidden');
-				if (snapshot) snapshot.classList.add('hidden');
-				classifyBtn.disabled = false;
-			};
-			img.src = event.target.result;
-		};
-		reader.readAsDataURL(file);
-	}
-	
-	// SIMPLE CAMERA HANDLING - Works on iOS via Capacitor
-	const isCapacitor = typeof window !== 'undefined' && window.Capacitor;
-	
 	if (fileInput) {
-		const fileInputLabel = fileInput.closest('label');
-		
-		if (fileInputLabel) {
-			fileInputLabel.addEventListener('click', async (e) => {
-				// Always prevent default to handle manually
-				e.preventDefault();
-				e.stopPropagation();
-				
-				// On iOS/Capacitor, use Camera plugin
-				if (isCapacitor) {
-					try {
-						// Get Camera plugin
-						const { Camera } = await import('@capacitor/camera');
-						
-						const image = await Camera.getPhoto({
-							quality: 90,
-							allowEditing: false,
-							resultType: 'base64',
-							source: 'CAMERA'
-						});
-						
-					if (image && image.base64String) {
-						console.log('📸 Got camera image, base64 length:', image.base64String.length);
-						
-						// Convert to File
-						const byteCharacters = atob(image.base64String);
-						const byteNumbers = new Array(byteCharacters.length);
-						for (let i = 0; i < byteCharacters.length; i++) {
-							byteNumbers[i] = byteCharacters.charCodeAt(i);
-						}
-						const byteArray = new Uint8Array(byteNumbers);
-						const blob = new Blob([byteArray], { type: 'image/jpeg' });
-						const file = new File([blob], 'photo.jpg', { type: 'image/jpeg' });
-						
-						console.log('📸 Created file:', file.name, 'size:', file.size, 'bytes', 'type:', file.type);
-						
-						if (file.size === 0) {
-							alert('Error: Photo file is empty. Please try again.');
-							return;
-						}
-						
-						// Store file
-						window.lastUploadFile = file;
-						
-						// Process and show preview
-						await processPhotoFile(file);
-					}
-					} catch (error) {
-						// If camera fails, fallback to file input
-						if (!error.message || (!error.message.includes('cancel') && !error.message.includes('User cancelled'))) {
-							fileInput.click();
-						}
-					}
-				} else {
-					// Web: use file input
-					fileInput.click();
-				}
-			});
-		}
-		
-		// Also handle file input change (for web fallback)
 		fileInput.addEventListener('change', (e) => {
 			const file = e.target.files[0];
 			if (file) {
-				window.lastUploadFile = file;
-				processPhotoFile(file);
+				const reader = new FileReader();
+				reader.onload = (event) => {
+					const img = new Image();
+					img.onload = () => {
+						snapshot.width = img.width;
+						snapshot.height = img.height;
+						const ctx = snapshot.getContext('2d');
+						ctx.drawImage(img, 0, 0);
+						// Store preview data URL so we can show it in the dotted box
+						window.lastUploadPreview = img.src;
+						// Show the preview image in the dotted square
+						if (manualPreview) {
+							manualPreview.src = img.src;
+							manualPreview.classList.remove('hidden');
+						}
+						if (camera) camera.classList.add('hidden');
+						if (snapshot) snapshot.classList.add('hidden');
+						classifyBtn.disabled = false;
+					};
+					img.src = event.target.result;
+				};
+				reader.readAsDataURL(file);
 			}
 		});
 	}
 	
 	if (classifyBtn) {
 		classifyBtn.addEventListener('click', async () => {
-			// Get file - MUST exist
-			const file = window.lastUploadFile || fileInput?.files[0];
-			
-			if (!file) {
-				alert('Please take a photo first!');
-				return;
-			}
-			
-			// Verify file is not empty
-			if (file.size === 0) {
-				alert('Error: Photo file is empty. Please take a new photo.');
-				return;
-			}
-			
-			console.log('📤 Sending image to backend:', file.name, 'size:', file.size, 'bytes', 'type:', file.type);
+			const file = fileInput?.files[0];
+			if (!file) return;
 			
 			classifyBtn.disabled = true;
 			classifyBtn.textContent = 'Detecting...';
 			
 			try {
-				// First check backend health
-				const healthUrl = getApiUrl('/health');
-				let healthOk = false;
-				try {
-					const healthRes = await fetch(healthUrl);
-					if (healthRes.ok) {
-						const health = await healthRes.json();
-						console.log('✅ Health check:', health);
-						if (health.models_loaded > 0) {
-							healthOk = true;
-						} else {
-							alert('Backend has no AI models loaded. Please check server.');
-							return;
-						}
-					} else {
-						console.warn('⚠️ Health check failed:', healthRes.status);
-					}
-				} catch (e) {
-					console.warn('⚠️ Health check error (continuing anyway):', e);
-					// Health check failed, continue anyway
-				}
-				
-				// Send to backend
 				const formData = new FormData();
 				formData.append('image', file);
 				
-				console.log('📤 FormData created, sending POST to:', getApiUrl('/predict'));
-				
-				const apiUrl = getApiUrl('/predict');
-				console.log('📤 Sending POST request to:', apiUrl);
-				console.log('📤 BACKEND_URL:', BACKEND_URL);
-				console.log('📤 File details:', {
-					name: file.name,
-					size: file.size,
-					type: file.type,
-					lastModified: file.lastModified
-				});
-				
-				if (!BACKEND_URL) {
-					alert('ERROR: BACKEND_URL is not set! Cannot send request to backend.');
-					throw new Error('BACKEND_URL not configured');
-				}
-				
-				console.log('📤 Starting fetch request...');
-				const startTime = Date.now();
-				const res = await fetch(apiUrl, {
+				const res = await fetch('/predict', {
 					method: 'POST',
-					body: formData,
-					// Don't set Content-Type header - let browser set it with boundary for FormData
-				}).catch(err => {
-					const elapsed = Date.now() - startTime;
-					console.error('❌ Fetch failed completely after', elapsed, 'ms:', err);
-					console.error('❌ Error details:', {
-						name: err.name,
-						message: err.message,
-						stack: err.stack
-					});
-					alert('Network Error: ' + err.message + '\n\nURL: ' + apiUrl + '\n\nCheck your internet connection and try again.');
-					throw err;
+					body: formData
 				});
-				
-				const elapsed = Date.now() - startTime;
-				console.log('📥 Request completed in', elapsed, 'ms');
-				
-				console.log('📥 Response status:', res.status, res.statusText);
-				console.log('📥 Response headers:', Object.fromEntries(res.headers.entries()));
-				
-				if (!res.ok) {
-					const errorText = await res.text().catch(() => 'Unknown error');
-					console.error('❌ Backend error:', res.status, errorText);
-					
-					// Try to parse as JSON for better error message
-					let errorData = null;
-					try {
-						errorData = JSON.parse(errorText);
-					} catch (e) {
-						// Not JSON, use text as is
-					}
-					
-					const errorMessage = errorData?.error || errorText || 'Unknown error';
-					
-					if (res.status === 422) {
-						// NO_PREDICTION - show modal
-						console.error('❌ No prediction from AI models:', errorMessage);
-						showAIDetectErrorModal('We couldn\'t detect an exercise from this photo. Please try a clearer photo with a visible exercise machine. Error: ' + errorMessage);
-					} else if (res.status === 400) {
-						alert('Bad Request: ' + errorMessage + '\n\nThis usually means the image file is corrupted or empty.');
-						showAIDetectErrorModal();
-					} else if (res.status === 500) {
-						alert('Server error (500): ' + errorMessage + '\n\nThe AI models may not be working. Check Render logs.');
-						showAIDetectErrorModal();
-					} else {
-						alert('Server error (' + res.status + '): ' + errorMessage);
-						showAIDetectErrorModal();
-					}
-					return;
-				}
 				
 				const data = await res.json();
-				console.log('✅ Backend response:', data);
 				
-				if (data.success === false || data.error === 'NO_PREDICTION') {
-					// No prediction - show modal
-					console.error('❌ No prediction from backend:', data);
-					showAIDetectErrorModal('We couldn\'t detect an exercise from this photo. Please try a clearer photo with a visible exercise machine.');
+				// Check for NO_PREDICTION error
+				if (data.success === false && data.error === "NO_PREDICTION") {
+					showAIDetectErrorModal();
 				} else if (data.error) {
-					alert('Error: ' + data.error);
 					showAIDetectErrorModal();
 				} else {
-					// SUCCESS - Show results
+					// Attach preview image of the uploaded photo for the dotted box
 					if (window.lastUploadPreview) {
 						data._previewImage = window.lastUploadPreview;
 					}
@@ -1112,8 +608,7 @@ function initFileUpload() {
 					saveRecentScan(data);
 				}
 			} catch (e) {
-				console.error('Fetch error:', e);
-				alert('Network error: ' + (e.message || 'Could not connect to server. Check your internet.'));
+				console.error('Classification failed:', e);
 				showAIDetectErrorModal();
 			} finally {
 				classifyBtn.disabled = false;
@@ -1411,11 +906,9 @@ function initExerciseSelector() {
 		});
 	}
 	
-	// Muscle filters - clear container first to prevent duplicates
+	// Muscle filters
 	const muscles = ['All', 'Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Abs'];
 	if (musclesContainer) {
-		// Clear existing buttons to prevent duplicates
-		musclesContainer.innerHTML = '';
 		muscles.forEach(muscle => {
 			const btn = document.createElement('button');
 			btn.textContent = muscle;
@@ -1444,14 +937,6 @@ function initExerciseSelector() {
 		const predictionsContainer = document.getElementById('exercise-selector-predictions');
 		if (predictionsContainer) {
 			predictionsContainer.style.display = 'none';
-		}
-		
-		// If exercises haven't loaded yet, wait for them
-		if (!allExercises || allExercises.length === 0) {
-			loadExercises().then(() => {
-				filterExercises(query, muscle);
-			});
-			return;
 		}
 		
 		let filtered = allExercises;
@@ -1507,8 +992,11 @@ function initExerciseSelector() {
 				</div>
 			`;
 			item.onclick = () => {
+				try {
 				const ctx = window.exerciseSelectorContext || null;
-				const labelLower = (ex.display || ex.key || '').toLowerCase().trim();
+					const exerciseKey = ex.key || '';
+					const exerciseDisplay = ex.display || exerciseKey || 'Unknown Exercise';
+					const labelLower = exerciseDisplay.toLowerCase().trim();
 				
 				// Check if this is a generic detection that needs refinement
 				const refinements = {
@@ -1564,17 +1052,35 @@ function initExerciseSelector() {
 				// Otherwise, proceed with normal selection
 				if (ctx === 'insights') {
 					// Use insights view for history
-					handleExerciseInsightsForName(ex.display || ex.key);
+						if (typeof handleExerciseInsightsForName === 'function') {
+							handleExerciseInsightsForName(exerciseDisplay);
+						} else {
+							console.error('handleExerciseInsightsForName is not defined');
+						}
 				} else if (currentTab === 'workout-builder') {
 					// Add to workout
+						if (typeof addExerciseToWorkout === 'function') {
 					addExerciseToWorkout(ex);
+						} else {
+							console.error('addExerciseToWorkout is not defined');
+						}
 				} else {
 					// Display exercise info on home
-					selectExercise(ex.key);
+						if (typeof selectExercise === 'function' && exerciseKey) {
+							selectExercise(exerciseKey);
+						} else {
+							console.error('selectExercise is not defined or exercise key is missing', { exerciseKey, ex });
+						}
 				}
 				window.exerciseSelectorContext = null;
+					if (selector) {
 				selector.classList.add('hidden');
+					}
 				document.body.classList.remove('selector-open');
+				} catch (error) {
+					console.error('Error in exercise selector onclick:', error, { exercise: ex });
+					// Don't show alert for user - just log it
+				}
 			};
 			resultsContainer.appendChild(item);
 		});
@@ -1820,9 +1326,15 @@ async function classifyForExerciseSelector(file, predictionsContainer, selectorE
 	}
 }
 
-function openExerciseSelector() {
+async function openExerciseSelector() {
 	const selector = document.getElementById('exercise-selector');
 	if (selector) {
+		// Make sure exercises are loaded before opening selector
+		if (!exercisesLoaded || allExercises.length === 0) {
+			console.log('Exercises not loaded yet, loading now...');
+			await loadExercises();
+		}
+		
 		selector.classList.remove('hidden');
 		document.body.classList.add('selector-open');
 		const searchInput = document.getElementById('exercise-selector-search');
@@ -1836,19 +1348,9 @@ function openExerciseSelector() {
 			preds.innerHTML = '';
 			preds.style.display = 'none';
 		}
-		// Ensure exercises are loaded before showing
-		if (!allExercises || allExercises.length === 0) {
-			loadExercises().then(() => {
 		const filterFn = window.filterExercisesForSelector;
 		if (typeof filterFn === 'function') {
 			filterFn('', null);
-				}
-			});
-		} else {
-			const filterFn = window.filterExercisesForSelector;
-			if (typeof filterFn === 'function') {
-				filterFn('', null);
-			}
 		}
 	}
 }
@@ -1970,24 +1472,7 @@ function generateQuickWorkout(message) {
 		};
 	}
 	
-	// Check for specific exercise combinations
-	if (msg.includes('dip')) {
-		const exercises = [];
-		if (msg.includes('pushup') || msg.includes('push-up') || msg.includes('push up')) {
-			exercises.push({ key: 'push_up', display: 'Push-Up' });
-		}
-		if (msg.includes('dip')) {
-			exercises.push({ key: 'dips', display: 'Dips' });
-		}
-		if (exercises.length > 0) {
-			return {
-				name: 'Workout',
-				exercises: exercises
-			};
-		}
-	}
-	
-	// Shoulders workout (check for "shoulder" or "shoulders" - with or without "workout")
+	// Shoulders workout
 	if (msg.includes('shoulder')) {
 		return {
 			name: 'Shoulders Workout',
@@ -2001,7 +1486,7 @@ function generateQuickWorkout(message) {
 		};
 	}
 	
-	// Chest workout (check for "chest" - handles "only chest", "chest workout", etc.)
+	// Chest workout
 	if (msg.includes('chest') || msg.includes('borst')) {
 		return {
 			name: 'Chest Workout',
@@ -2055,7 +1540,7 @@ function generateQuickWorkout(message) {
 		};
 	}
 	
-	// Legs workout (check for leg, quad, hamstring, glute, calf)
+	// Legs workout
 	if (msg.includes('leg') || msg.includes('quad') || msg.includes('hamstring') || msg.includes('glute') || msg.includes('calf')) {
 		return {
 			name: 'Legs Workout',
@@ -2069,7 +1554,7 @@ function generateQuickWorkout(message) {
 		};
 	}
 	
-	// Full body (check before generic push/pull/legs)
+	// Full body
 	if (msg.includes('full body') || msg.includes('fullbody') || msg.includes('full-body')) {
 		return {
 			name: 'Full Body Workout',
@@ -2084,7 +1569,7 @@ function generateQuickWorkout(message) {
 		};
 	}
 	
-	// Push workout - only if it's explicitly "push workout" or "push day", not just "push" in other words
+	// Push workout
 	if ((msg.match(/\bpush\b/) && (msg.includes('workout') || msg.includes('day') || msg.includes('train')))) {
 		return {
 			name: 'Push Workout',
@@ -2230,7 +1715,7 @@ async function addExerciseToWorkout(exercise) {
 		existingSets = createDefaultSets(previousSetsForPlaceholder.length || DEFAULT_SET_COUNT);
 	} else {
 		// New exercise - try to get last workout data for placeholders
-		const lastSets = await getLastExerciseData(exerciseData.key || exerciseData.display);
+		const lastSets = getLastExerciseData(exerciseData.key || exerciseData.display);
 		if (lastSets && lastSets.length > 0) {
 			previousSetsForPlaceholder = lastSets;
 			existingSets = createDefaultSets(lastSets.length);
@@ -2315,12 +1800,22 @@ function renderWorkoutList() {
 			if ((setIdx % 2) === 1) {
 				setRow.classList.add('even');
 			}
+			const currentUnit = getWeightUnit();
+			// Convert weight to current unit if it exists
+			let displayWeight = set.weight ?? '';
+			if (displayWeight && set.weight) {
+				// Assume stored weights are in kg, convert if needed
+				const storedUnit = 'kg'; // We store in kg
+				if (storedUnit !== currentUnit) {
+					displayWeight = convertWeight(set.weight, storedUnit, currentUnit);
+				}
+			}
 			setRow.innerHTML = `
 				<div class="set-col">
 				<div class="workout-edit-set-number">${setIdx + 1}</div>
 				</div>
 				${isBodyweight ? '' : `<div class="weight-col">
-					<input type="number" class="workout-edit-set-input weight" placeholder="${weightPlaceholder}" inputmode="decimal" value="${set.weight ?? ''}" aria-label="Set weight (kg)">
+					<input type="number" class="workout-edit-set-input weight" placeholder="${weightPlaceholder}" inputmode="decimal" value="${displayWeight}" aria-label="Set weight (${currentUnit})">
 				</div>`}
 				<div class="reps-col">
 					<input type="number" class="workout-edit-set-input reps" placeholder="${repsPlaceholder}" inputmode="numeric" value="${set.reps ?? ''}" aria-label="Set reps">
@@ -2338,14 +1833,19 @@ function renderWorkoutList() {
 			
 			if (weightInput) {
 				weightInput.addEventListener('input', (e) => {
+					// Store the value as entered (will be converted to kg on save)
 					ex.sets[setIdx].weight = e.target.value ? Number(e.target.value) : '';
 					saveWorkoutDraft();
+					// Check if set is complete and show rest timer
+					checkAndShowRestTimer(ex.sets[setIdx]);
 				});
 			}
 			
 				repsInput.addEventListener('input', (e) => {
 				ex.sets[setIdx].reps = e.target.value ? Number(e.target.value) : '';
 				saveWorkoutDraft();
+				// Check if set is complete and show rest timer
+				checkAndShowRestTimer(ex.sets[setIdx]);
 				});
 			
 			deleteBtn.addEventListener('click', () => {
@@ -2422,14 +1922,8 @@ function capitalizeFirstLetter(str) {
 	return firstChar.toUpperCase() + str.slice(1);
 }
 
-async function saveWorkout() {
+function saveWorkout() {
 	if (!currentWorkout) return;
-	
-	const user = await getCurrentUser();
-	if (!user) {
-		console.error('User not authenticated');
-		return;
-	}
 	
 	const workoutName = document.getElementById('workout-name');
 	if (workoutName) {
@@ -2439,10 +1933,24 @@ async function saveWorkout() {
 		workoutName.value = capitalizedName; // Update the input field to show capitalized version
 	}
 	
-	currentWorkout.exercises = (currentWorkout.exercises || []).map(ex => ({
+	// Convert weights to kg for storage (we always store in kg)
+	const currentUnit = getWeightUnit();
+	currentWorkout.exercises = (currentWorkout.exercises || []).map(ex => {
+		const isBodyweight = isBodyweightExercise(ex);
+		return {
 		...ex,
-		sets: (ex.sets || []).filter(set => set.weight !== '' || set.reps !== '')
-	}));
+			sets: (ex.sets || []).filter(set => set.weight !== '' || set.reps !== '').map(set => {
+				// Convert weight to kg if needed (only for non-bodyweight exercises)
+				if (!isBodyweight && set.weight && currentUnit === 'lbs') {
+					return {
+						...set,
+						weight: parseFloat(convertWeight(set.weight, 'lbs', 'kg'))
+					};
+				}
+				return set;
+			})
+		};
+	});
 	
 	let duration = currentWorkout.duration || 0;
 	if (!editingWorkoutId && workoutStartTime) {
@@ -2450,86 +1958,31 @@ async function saveWorkout() {
 	}
 	currentWorkout.duration = duration;
 	
-	// Convert date to YYYY-MM-DD format for date column
-	const workoutDate = editingWorkoutId 
-		? (currentWorkout.date ? new Date(currentWorkout.date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0])
-		: new Date().toISOString().split('T')[0];
+	// Save to localStorage for now
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	const payload = {
+				...currentWorkout,
+		id: editingWorkoutId || currentWorkout.id || Date.now(),
+		date: editingWorkoutId ? (currentWorkout.date || new Date().toISOString()) : new Date().toISOString()
+	};
 	
-	// Calculate total volume from exercises
-	let totalVolume = null;
-	if (currentWorkout.exercises && Array.isArray(currentWorkout.exercises)) {
-		totalVolume = currentWorkout.exercises.reduce((sum, ex) => {
-			if (ex.sets && Array.isArray(ex.sets)) {
-				const exerciseVolume = ex.sets.reduce((setSum, set) => {
-					const weight = parseFloat(set.weight) || 0;
-					const reps = parseFloat(set.reps) || 0;
-					return setSum + (weight * reps);
-				}, 0);
-				return sum + exerciseVolume;
-			}
-			return sum;
-		}, 0);
-	}
-	
-	try {
 	if (editingWorkoutId) {
-			// Update existing workout
-			const { data, error } = await supabaseClient
-				.from('workouts')
-				.update({
-					name: currentWorkout.name,
-					exercises: currentWorkout.exercises, // Keep exercises JSONB for backward compatibility
-					duration: duration,
-					date: workoutDate,
-					total_volume: totalVolume
-				})
-				.eq('id', editingWorkoutId)
-				.eq('user_id', user.id)
-				.select()
-				.single();
-			
-			if (error) {
-				console.error("Supabase error updating workout:", error);
-				console.error("Error code:", error.code);
-				console.error("Error message:", error.message);
-				console.error("Error details:", error.details);
-				console.error("Error hint:", error.hint);
-				throw error;
+		const idx = workouts.findIndex(w => w.id === editingWorkoutId);
+		if (idx >= 0) {
+			workouts[idx] = payload;
+		} else {
+			workouts.push(payload);
 		}
 	} else {
-			// Insert new workout
-			// Don't specify id - let Supabase generate UUID automatically
-			const { data, error } = await supabaseClient
-				.from('workouts')
-				.insert({
-					user_id: user.id,
-					date: workoutDate,
-					name: currentWorkout.name,
-					exercises: currentWorkout.exercises, // Keep exercises JSONB for backward compatibility
-					duration: duration,
-					total_volume: totalVolume
-				})
-				.select()
-				.single();
-			
-			if (error) {
-				console.error("Supabase error inserting workout:", error);
-				console.error("Error code:", error.code);
-				console.error("Error message:", error.message);
-				console.error("Error details:", error.details);
-				console.error("Error hint:", error.hint);
-				throw error;
-			}
-			
-			// Update currentWorkout with the generated ID
-			if (data && data.id) {
-				currentWorkout.id = data.id;
-			}
-		}
+		workouts.push(payload);
+	}
+	localStorage.setItem('workouts', JSON.stringify(workouts));
 	
 	// Update streak only for new workouts (not edits)
 	if (!editingWorkoutId) {
 		updateStreak();
+		// Cancel daily reminder if workout was saved today
+		checkAndCancelDailyReminder();
 	}
 	
 	editingWorkoutId = null;
@@ -2543,53 +1996,14 @@ async function saveWorkout() {
 		}, 2000);
 	}
 	
-		loadWorkouts();
+	loadWorkouts(workouts);
+	// Always update settings stats when workouts change
+	loadSettingsStats();
 	switchTab('workouts');
-	} catch (error) {
-		console.error('Error saving workout:', error);
-		// Log full error details for debugging
-		if (error) {
-			console.error('Full error details:', JSON.stringify(error, null, 2));
-			console.error('Error message:', error.message);
-			console.error('Error code:', error.code);
-			console.error('Error details:', error.details);
-			console.error('Error hint:', error.hint);
-		}
-		alert('Failed to save workout. Please try again.');
-	}
 }
 
-async function loadWorkouts(prefetchedWorkouts = null) {
-	const user = await getCurrentUser();
-	if (!user) {
-		console.error('User not authenticated');
-		return;
-	}
-	
-	let workouts = [];
-	
-	if (prefetchedWorkouts) {
-		workouts = prefetchedWorkouts;
-	} else {
-		try {
-			const { data, error } = await supabaseClient
-				.from('workouts')
-				.select('*')
-				.eq('user_id', user.id)
-				.order('date', { ascending: false }); // Sort by date (most recent first)
-			
-			if (error) {
-				console.error("Supabase error loading workouts:", error);
-				workouts = [];
-			} else {
-				workouts = data || [];
-			}
-		} catch (error) {
-			console.error('Error loading workouts:', error);
-			workouts = [];
-		}
-	}
-	
+function loadWorkouts(prefetchedWorkouts = null) {
+	const workouts = prefetchedWorkouts ?? JSON.parse(localStorage.getItem('workouts') || '[]');
 	const workoutsList = document.getElementById('workouts-list');
 	const workoutsCount = document.getElementById('workouts-count');
 	
@@ -2606,35 +2020,11 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 			return;
 		}
 		
-		// Sort workouts by date (most recent first), then by id as fallback for same date
-		// This ensures most recently saved workouts appear first
-		// If multiple workouts on same date, newer ones (higher id) appear first
-		const sorted = [...workouts].sort((a, b) => {
-			// First sort by date (most recent first)
-			const dateA = typeof a.date === 'string' ? new Date(a.date) : new Date(a.date);
-			const dateB = typeof b.date === 'string' ? new Date(b.date) : new Date(b.date);
-			const dateDiff = dateB.getTime() - dateA.getTime();
-			
-			if (dateDiff !== 0) {
-				return dateDiff; // Different dates - sort by date (newest first)
-			}
-			
-			// Same date - try to use inserted_at if available, otherwise use id as fallback
-			if (a.inserted_at && b.inserted_at) {
-				const insertedA = new Date(a.inserted_at);
-				const insertedB = new Date(b.inserted_at);
-				return insertedB.getTime() - insertedA.getTime(); // Most recent inserted_at first
-			}
-			
-			// No inserted_at - just keep date order (already sorted by date descending)
-			return 0;
-		});
+		const sorted = [...workouts].sort((a, b) => new Date(b.date) - new Date(a.date));
 		
 		sorted.forEach(workout => {
 			const li = document.createElement('li');
-			// Handle date string (YYYY-MM-DD) or Date object
-			const dateStr = typeof workout.date === 'string' ? workout.date : workout.date.toISOString().split('T')[0];
-			const date = new Date(dateStr);
+			const date = new Date(workout.date);
 			const dateLabel = formatWorkoutDate(date);
 			const durationLabel = formatDurationForCard(workout.duration);
 			const volume = calculateWorkoutVolume(workout);
@@ -2732,14 +2122,24 @@ function buildWorkoutExercisesMarkup(workout) {
 		const sets = exercise.sets || [];
 		const isBodyweight = isBodyweightExercise(exercise);
 		
+		const currentUnit = getWeightUnit();
 		const setsMarkup = sets.length
-			? sets.map((set, idx) => `
+			? sets.map((set, idx) => {
+				// Convert weight to current unit (stored weights are in kg)
+				let displayWeight = set.weight ?? 0;
+				if (displayWeight && set.weight && !isBodyweight) {
+					const storedUnit = 'kg';
+					if (storedUnit !== currentUnit) {
+						displayWeight = convertWeight(set.weight, storedUnit, currentUnit);
+					}
+				}
+				return `
 				<div class="workout-edit-set-row view${(idx % 2) === 1 ? ' even' : ''}">
 					<div class="set-col">
 						<div class="workout-edit-set-number">${idx + 1}</div>
 				</div>
 					${isBodyweight ? '' : `<div class="weight-col">
-						<div class="workout-view-value">${set.weight ?? 0}</div>
+						<div class="workout-view-value">${displayWeight}</div>
 				</div>`}
 					<div class="reps-col">
 						<div class="workout-view-value">${set.reps ?? 0}</div>
@@ -2750,7 +2150,8 @@ function buildWorkoutExercisesMarkup(workout) {
 						</button>
 					</div>
 				</div>
-			`).join('')
+			`;
+			}).join('')
 			: `<div class="workout-set-line empty">No sets recorded</div>`;
 		
 		const infoButtonHtml = renderExerciseInfoButton(exercise);
@@ -2768,7 +2169,7 @@ function buildWorkoutExercisesMarkup(workout) {
 				<div class="workout-edit-sets view-mode ${isBodyweight ? 'bodyweight' : ''}">
 					<div class="workout-edit-set-row workout-edit-set-header">
 						<div class="set-col">Set</div>
-						${isBodyweight ? '' : '<div class="weight-col">Kg</div>'}
+						${isBodyweight ? '' : `<div class="weight-col">${getWeightUnit().toUpperCase()}</div>`}
 						<div class="reps-col">Reps</div>
 						<div class="action-col"></div>
 					</div>
@@ -2813,21 +2214,48 @@ function buildExerciseThumb(exercise, size = 'large') {
 }
 
 function getExerciseImageSource(exercise) {
+	if (!exercise) return null;
+	
+	// First, try to find local images (preferred for Capacitor)
 	const candidates = getExerciseImageCandidates(exercise);
-	return candidates.length ? candidates[0] : null;
+	if (candidates.length > 0) {
+		// Return the first local candidate
+		return candidates[0];
+	}
+	
+	// If no local images found, fall back to backend image URL
+	if (exercise.image) {
+		// Convert /images/ to static/images/ for Capacitor
+		if (exercise.image.startsWith('/images/')) {
+			return exercise.image.replace('/images/', 'static/images/');
+		}
+		// If it's already a full URL (from strengthlevel.com), use it as fallback
+		if (exercise.image.startsWith('http://') || exercise.image.startsWith('https://')) {
+			return exercise.image;
+		}
+		// Otherwise assume it's a relative path and use as is
+		return exercise.image;
+	}
+	
+	return null;
 }
 
 function getExerciseImageCandidates(exercise) {
 	if (!exercise) return [];
-	if (exercise.image) {
-		// Convert absolute paths to relative for Capacitor
-		if (exercise.image.startsWith('/images/')) {
-			return [`static/images/${exercise.image.replace('/images/', '')}`];
-		}
-		return [exercise.image];
-	}
+	
+	// Don't use backend image URL here - we want to prioritize local images
+	// The backend image will be used as fallback in getExerciseImageSource
+	
 	const candidates = [];
 	const seen = new Set();
+	
+	// Helper to get the correct image path
+	const getImagePath = (filename) => {
+		// In Capacitor, use static/images path
+		// For web, also use static/images (relative to root)
+		return `static/images/${filename}`;
+	};
+	
 	const addPath = (path) => {
 		if (path && !seen.has(path)) {
 			seen.add(path);
@@ -2836,29 +2264,21 @@ function getExerciseImageCandidates(exercise) {
 	};
 	const addBase = (base) => {
 		if (!base) return;
-		// Use relative paths for Capacitor
-		addPath(`static/images/${base}.jpg`);
-		addPath(`static/images/${base}.png`);
-		addPath(`static/images/${base}.jpeg`);
-		// Also try absolute paths for web compatibility
-		addPath(`/images/${base}.jpg`);
-		addPath(`/images/${base}.png`);
-		addPath(`/images/${base}.jpeg`);
+		addPath(getImagePath(`${base}.jpg`));
+		addPath(getImagePath(`${base}.png`));
+		addPath(getImagePath(`${base}.jpeg`));
 	};
 	
 	// Special case: use specific images for generic predictions
 	const label = (exercise.display || exercise.key || '').toString().toLowerCase().trim();
 	if (label === 'smith machine') {
-		addPath('static/images/smithmachine.jpg');
-		addPath('/images/smithmachine.jpg');
+		addPath(getImagePath('smithmachine.jpg'));
 	}
 	if (label === 'dumbbell') {
-		addPath('static/images/dumbbell.jpg');
-		addPath('/images/dumbbell.jpg');
+		addPath(getImagePath('dumbbell.jpg'));
 	}
 	if (label === 'chinning dipping' || label === 'leg raise tower') {
-		addPath('static/images/chinningdipping.jpg');
-		addPath('/images/chinningdipping.jpg');
+		addPath(getImagePath('chinningdipping.jpg'));
 	}
 	
 	const displaySlug = slugifyForImage(exercise.display);
@@ -3074,34 +2494,23 @@ function calculateWorkoutVolume(workout) {
 }
 
 function formatVolume(volumeKg) {
-	if (volumeKg === 0) return '0 kg';
-	return `${Math.round(volumeKg).toLocaleString()} kg`;
-}
-
-async function deleteWorkout(id) {
-	const user = await getCurrentUser();
-	if (!user) {
-		console.error('User not authenticated');
-		return;
+	const unit = getWeightUnit();
+	if (volumeKg === 0) return `0 ${unit}`;
+	
+	// Convert volume if needed (volume is always stored in kg)
+	let displayVolume = volumeKg;
+	if (unit === 'lbs') {
+		displayVolume = volumeKg * 2.20462;
 	}
 	
-	try {
-		const { error } = await supabaseClient
-			.from('workouts')
-			.delete()
-			.eq('id', id)
-			.eq('user_id', user.id);
-		
-		if (error) {
-			console.error("Supabase error deleting workout:", error);
-			throw error;
-		}
-		
+	return `${Math.round(displayVolume).toLocaleString()} ${unit}`;
+}
+
+function deleteWorkout(id) {
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	const filtered = workouts.filter(workout => workout.id !== id);
+	localStorage.setItem('workouts', JSON.stringify(filtered));
 	loadWorkouts();
-	} catch (error) {
-		console.error('Error deleting workout:', error);
-		alert('Failed to delete workout. Please try again.');
-	}
 }
 
 function editWorkout(workout) {
@@ -3171,97 +2580,43 @@ function initProgress() {
 		dateInput.value = `${year}-${month}-${day}`;
 	}
 	
+	// Update unit label
+	updateProgressUnitLabel();
+	
 	const progressForm = document.getElementById('progress-form');
 	if (progressForm) {
-		progressForm.addEventListener('submit', async (e) => {
+		progressForm.addEventListener('submit', (e) => {
 			e.preventDefault();
 			const weight = document.getElementById('progress-weight')?.value;
 			const dateInputValue = document.getElementById('progress-date')?.value;
 			if (weight && dateInputValue) {
-				const user = await getCurrentUser();
-				if (!user) {
-					console.error('User not authenticated');
-					return;
-				}
-				
+				const progress = JSON.parse(localStorage.getItem('progress') || '[]');
 				// Use the selected date so you can backfill specific days
 				const dayKey = dateInputValue; // YYYY-MM-DD from input[type=date]
 				const now = new Date(`${dayKey}T12:00:00`);
-				const value = parseFloat(weight);
-				
-				try {
-					// Use date only (YYYY-MM-DD) format for date column
-					const dateOnly = dayKey; // Already in YYYY-MM-DD format from input
-					
-					// Check if entry exists for this day and user
-					// Use .maybeSingle() instead of .single() to avoid errors when no entry exists
-					const { data: existing, error: checkError } = await supabaseClient
-						.from('weights')
-						.select('id')
-						.eq('user_id', user.id)
-						.eq('date', dateOnly)
-						.maybeSingle();
-					
-					// If exists, update; otherwise insert
-					// This ensures max 1 entry per day per user
-					if (existing && !checkError) {
-						console.log('Updating existing weight entry for date:', dateOnly);
-						const { error: updateError } = await supabaseClient
-							.from('weights')
-							.update({
-								weight: value,
-								date: dateOnly
-							})
-							.eq('id', existing.id)
-							.eq('user_id', user.id);
-						
-						if (updateError) {
-							console.error("Supabase error updating weight:", updateError);
-							throw updateError;
-						}
-					} else {
-						// Insert new weight log entry only if none exists for this date
-						console.log('Inserting new weight entry for date:', dateOnly);
-						const { error: insertError } = await supabaseClient
-							.from('weights')
-							.insert({
-								user_id: user.id,
-								date: dateOnly,
+				const inputUnit = getWeightUnit();
+				let value = parseFloat(weight);
+				// Convert to kg for storage (we always store in kg)
+				if (inputUnit === 'lbs') {
+					value = parseFloat(convertWeight(weight, 'lbs', 'kg'));
+				}
+				// Remove any existing entries for this day (to prevent duplicates)
+				const filteredProgress = progress.filter(p => {
+					const pDayKey = p.dayKey || (p.date ? p.date.slice(0, 10) : '');
+					return pDayKey !== dayKey;
+				});
+				// Add the new entry with both date and dayKey for consistency
+				filteredProgress.push({
+					date: now.toISOString(),
+					dayKey: dayKey, // Ensure dayKey is always set
 					weight: value
 				});
-						
-						if (insertError) {
-							console.error("Supabase error inserting weight:", insertError);
-							// If insert fails due to duplicate, try update instead
-							if (insertError.code === '23505' || insertError.message.includes('duplicate')) {
-								console.log('Duplicate detected, attempting update instead');
-								// Try to find and update existing entry
-								const { data: existingEntry } = await supabaseClient
-									.from('weights')
-									.select('id')
-									.eq('user_id', user.id)
-									.eq('date', dateOnly)
-									.maybeSingle();
-								
-								if (existingEntry) {
-									const { error: updateError } = await supabaseClient
-										.from('weights')
-										.update({ weight: value })
-										.eq('id', existingEntry.id)
-										.eq('user_id', user.id);
-									
-									if (updateError) {
-										throw updateError;
-									}
-								} else {
-									throw insertError;
-								}
-							} else {
-								throw insertError;
-							}
-						}
-					}
-					
+				// Ensure all existing entries also have dayKey
+				const normalizedProgress = filteredProgress.map(p => ({
+					...p,
+					dayKey: p.dayKey || (p.date ? p.date.slice(0, 10) : '')
+				}));
+				localStorage.setItem('progress', JSON.stringify(normalizedProgress));
 				// Reset weight input
 				const weightInput = document.getElementById('progress-weight');
 				if (weightInput) weightInput.value = '';
@@ -3277,10 +2632,6 @@ function initProgress() {
 					dateEl.value = today.toISOString().slice(0, 10);
 				}
 				loadProgress();
-				} catch (error) {
-					console.error('Error saving progress:', error);
-					alert('Failed to save weight. Please try again.');
-				}
 			}
 		});
 	}
@@ -3314,63 +2665,14 @@ function initProgress() {
 }
 
 async function loadProgress() {
-	const user = await getCurrentUser();
-	if (!user) {
-		console.error('User not authenticated');
-		return;
-	}
-	
-	try {
-		// Load weight logs (progress)
-		const { data: progressData, error: progressError } = await supabaseClient
-			.from('weights')
-			.select('*')
-			.eq('user_id', user.id)
-			.order('date', { ascending: true });
-		
-		if (progressError) {
-			console.error("Supabase error loading weights:", progressError);
-			throw progressError;
-		}
-		
-		// Normalize progress data
-		// Date is already in YYYY-MM-DD format from database
-		const progress = (progressData || []).map(p => {
-			const dateStr = p.date ? (typeof p.date === 'string' ? p.date : p.date.toISOString().split('T')[0]) : '';
-			return {
-				date: dateStr,
-				dayKey: dateStr,
-				weight: p.weight
-			};
-		});
-		
-		// Load workouts
-		const { data: workoutsData, error: workoutsError } = await supabaseClient
-			.from('workouts')
-			.select('*')
-			.eq('user_id', user.id)
-			.order('date', { ascending: false });
-		
-		if (workoutsError) {
-			console.error("Supabase error loading workouts for progress:", workoutsError);
-			throw workoutsError;
-		}
-		const workouts = workoutsData || [];
-		
+	const progress = JSON.parse(localStorage.getItem('progress') || '[]');
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	updateProgressUnitLabel(); // Update unit label before rendering
 	renderWeightChart(progress);
 	await renderMuscleFocus(workouts);
 	updateExerciseInsightsOptions(workouts);
 	renderPRTimeline(workouts);
 	renderProgressiveOverloadTracker(workouts);
-	} catch (error) {
-		console.error('Error loading progress:', error);
-		// Fallback to empty data
-		renderWeightChart([]);
-		await renderMuscleFocus([]);
-		updateExerciseInsightsOptions([]);
-		renderPRTimeline([]);
-		renderProgressiveOverloadTracker([]);
-	}
 }
 
 function renderWeightChart(progress) {
@@ -3403,7 +2705,10 @@ function renderWeightChart(progress) {
 		return aKey.localeCompare(bKey);
 	});
 	
-	// Keep all data points - each date should be a separate entry
+	// Remove the first data point if there are multiple points
+	if (sorted.length > 1) {
+		sorted.shift(); // Remove first element
+	}
 	const points = sorted.map((p, idx) => ({
 		x: idx,
 		y: p.weight,
@@ -3485,51 +2790,16 @@ function renderWeightChart(progress) {
 		ctx.stroke();
 	});
 
-	// Smooth curved line using bezier curves for natural flow
+	// Line
 	ctx.strokeStyle = '#7c5cff';
-	ctx.lineWidth = 2.5;
-	ctx.lineCap = 'round';
-	ctx.lineJoin = 'round';
+	ctx.lineWidth = 2;
 	ctx.beginPath();
-	
-	if (points.length === 1) {
-		// Single point - just draw a dot
-		const x = padX + (scaleX * 0);
-		const y = valueToY(points[0].y);
-		ctx.moveTo(x, y);
-		ctx.lineTo(x, y);
-	} else if (points.length === 2) {
-		// Two points - simple line
-		const x1 = padX + (scaleX * 0);
-		const y1 = valueToY(points[0].y);
-		const x2 = padX + (scaleX * 1);
-		const y2 = valueToY(points[1].y);
-		ctx.moveTo(x1, y1);
-		ctx.lineTo(x2, y2);
-	} else {
-		// Multiple points - use smooth bezier curves
 	points.forEach((p, i) => {
 		const x = padX + (scaleX * i);
 		const y = valueToY(p.y);
-			
-			if (i === 0) {
-				ctx.moveTo(x, y);
-			} else {
-				const prevX = padX + (scaleX * (i - 1));
-				const prevY = valueToY(points[i - 1].y);
-				
-				// Calculate smooth control points for bezier curve
-				// Use the midpoint as control point, but adjust for smoother curves
-				const cpX1 = prevX + (x - prevX) * 0.5;
-				const cpY1 = prevY;
-				const cpX2 = prevX + (x - prevX) * 0.5;
-				const cpY2 = y;
-				
-				// Use bezier curve for smooth transitions
-				ctx.bezierCurveTo(cpX1, cpY1, cpX2, cpY2, x, y);
-			}
-		});
-	}
+		if (i === 0) ctx.moveTo(x, y);
+		else ctx.lineTo(x, y);
+	});
 	ctx.stroke();
 
 	// Points
@@ -3551,11 +2821,17 @@ function renderWeightChart(progress) {
 	// Hide tooltip initially
 	if (tooltip) tooltip.style.display = 'none';
 	
-	// Set placeholder to last weight entry
+	// Set placeholder to last weight entry (convert to current unit)
 	const weightInput = document.getElementById('progress-weight');
 	if (weightInput && sorted.length > 0) {
 		const lastEntry = sorted[sorted.length - 1];
-		weightInput.placeholder = `${lastEntry.weight}`;
+		const currentUnit = getWeightUnit();
+		// Progress weights are stored in kg, convert if needed
+		let displayWeight = lastEntry.weight;
+		if (currentUnit === 'lbs') {
+			displayWeight = convertWeight(lastEntry.weight, 'kg', 'lbs');
+		}
+		weightInput.placeholder = `${displayWeight}`;
 	} else if (weightInput) {
 		weightInput.placeholder = '';
 	}
@@ -3599,15 +2875,11 @@ function renderWeightChart(progress) {
 			xLabelsEl.appendChild(label);
 		});
 	}
-	// Store hover points and chart dimensions on canvas for interactive tooltip
+	// Store hover points on the canvas for interactive tooltip
 	canvas.__weightPoints = hoverPoints;
-	canvas.__progressData = progress;
-	canvas.__chartDimensions = { padX, padY, w, h };
 
 	// Attach hover listeners once
 	if (!canvas.__hoverBound) {
-		let hoveredPoint = null;
-		
 		canvas.addEventListener('mousemove', (e) => {
 			if (!canvas.__weightPoints || !tooltip) return;
 			const rect = canvas.getBoundingClientRect();
@@ -3626,100 +2898,26 @@ function renderWeightChart(progress) {
 			});
 			const maxRadius = 48; // squared distance threshold ~7px
 			if (!nearest || minDistSq > maxRadius) {
-				if (hoveredPoint) {
-					// Redraw chart without hover line
-					hoveredPoint = null;
-					if (canvas.__progressData) {
-						renderWeightChart(canvas.__progressData);
-					}
-				}
 				tooltip.style.display = 'none';
 				return;
 			}
-			
-			// Only redraw if hovering a different point
-			if (!hoveredPoint || hoveredPoint.cx !== nearest.cx) {
-				hoveredPoint = nearest;
-				
-				// Redraw chart with hover line
-				if (canvas.__progressData) {
-					renderWeightChart(canvas.__progressData);
-					
-					// Draw hover effects on top
-					const ctx = canvas.getContext('2d');
-					const dims = canvas.__chartDimensions;
-					const hoverX = nearest.cx;
-					
-					// Draw vertical dashed line from top to bottom
-					ctx.strokeStyle = 'rgba(124, 92, 255, 0.5)';
-					ctx.lineWidth = 1.5;
-					ctx.setLineDash([4, 4]);
-					ctx.beginPath();
-					ctx.moveTo(hoverX, dims.padY);
-					ctx.lineTo(hoverX, dims.padY + dims.h);
-					ctx.stroke();
-					ctx.setLineDash([]);
-					
-					// Draw highlighted point with white center and purple border
-					ctx.fillStyle = '#fff';
-					ctx.beginPath();
-					ctx.arc(nearest.cx, nearest.cy, 5, 0, Math.PI * 2);
-					ctx.fill();
-					
-					ctx.strokeStyle = '#7c5cff';
-					ctx.lineWidth = 2.5;
-					ctx.beginPath();
-					ctx.arc(nearest.cx, nearest.cy, 5, 0, Math.PI * 2);
-					ctx.stroke();
-					
-					// Draw small circle at intersection with x-axis
-					ctx.fillStyle = 'rgba(124, 92, 255, 0.7)';
-					ctx.beginPath();
-					ctx.arc(hoverX, dims.padY + dims.h, 3, 0, Math.PI * 2);
-					ctx.fill();
-				}
+			const labelDate = nearest.date.toLocaleDateString(undefined, {
+				day: '2-digit',
+				month: 'short'
+			});
+			const unit = getWeightUnit();
+			// Convert weight if needed (stored in kg)
+			let displayWeight = nearest.weight;
+			if (unit === 'lbs') {
+				displayWeight = convertWeight(nearest.weight, 'kg', 'lbs');
 			}
-			
-			const dateStr = nearest.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-			tooltip.innerHTML = `<div style="font-size: 12px; opacity: 0.9;">${dateStr}</div><div style="color: #fff; font-weight: 600; margin-top: 4px; font-size: 14px;">${nearest.weight} kg</div>`;
+			tooltip.textContent = `${labelDate} • ${displayWeight} ${unit}`;
+			tooltip.style.left = `${nearest.cx}px`;
+			tooltip.style.top = `${nearest.cy}px`;
 			tooltip.style.display = 'block';
-			
-			// Position tooltip above the chart, always visible
-			const canvasRect = canvas.getBoundingClientRect();
-			const wrapper = canvas.parentElement; // progress-chart-wrapper
-			const wrapperRect = wrapper ? wrapper.getBoundingClientRect() : canvasRect;
-			
-			// Force tooltip to render to get accurate dimensions
-			tooltip.style.visibility = 'hidden';
-			tooltip.style.display = 'block';
-			const tooltipRect = tooltip.getBoundingClientRect();
-			tooltip.style.visibility = 'visible';
-			
-			// Center horizontally on the hovered point (relative to wrapper)
-			let left = nearest.cx - (tooltipRect.width / 2);
-			
-			// Keep tooltip within wrapper bounds with padding
-			const padding = 8;
-			if (left < padding) left = padding;
-			if (left + tooltipRect.width > wrapperRect.width - padding) {
-				left = wrapperRect.width - tooltipRect.width - padding;
-			}
-			
-			// Always position at top of chart area (above the chart)
-			const top = 8;
-			
-			tooltip.style.left = `${left}px`;
-			tooltip.style.top = `${top}px`;
-			tooltip.style.transform = 'none'; // Remove any transform from CSS
 		});
 		canvas.addEventListener('mouseleave', () => {
 			if (tooltip) tooltip.style.display = 'none';
-			if (hoveredPoint) {
-				hoveredPoint = null;
-				if (canvas.__progressData) {
-					renderWeightChart(canvas.__progressData);
-				}
-			}
 		});
 		canvas.__hoverBound = true;
 	}
@@ -3819,35 +3017,16 @@ async function renderMuscleFocus(workouts) {
 			const data = await res.json();
 			if (data.muscles && data.muscles.length > 0) {
 				exercise.muscles = data.muscles;
-				// Update in Supabase
-				const user = await getCurrentUser();
-				if (user) {
-					const { data: workoutData, error: fetchError } = await supabaseClient
-						.from('workouts')
-						.select('exercises')
-						.eq('id', workout.id)
-						.eq('user_id', user.id)
-						.single();
-					
-					if (fetchError) {
-						console.error("Supabase error fetching workout for muscle update:", fetchError);
-					} else if (workoutData) {
-						const exercises = workoutData.exercises || [];
-						const exIndex = exercises.findIndex(e => 
+				// Update in localStorage
+				const allWorkouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+				const workoutIndex = allWorkouts.findIndex(w => w.id === workout.id);
+				if (workoutIndex >= 0) {
+					const exIndex = allWorkouts[workoutIndex].exercises.findIndex(e => 
 						(e.key || e.display) === (exercise.key || exercise.display)
 					);
 					if (exIndex >= 0) {
-							exercises[exIndex].muscles = data.muscles;
-							const { error: updateError } = await supabaseClient
-								.from('workouts')
-								.update({ exercises })
-								.eq('id', workout.id)
-								.eq('user_id', user.id);
-							
-							if (updateError) {
-								console.error("Supabase error updating exercise muscles:", updateError);
-							}
-						}
+						allWorkouts[workoutIndex].exercises[exIndex].muscles = data.muscles;
+						localStorage.setItem('workouts', JSON.stringify(allWorkouts));
 					}
 				}
 			}
@@ -4056,19 +3235,30 @@ function handleExerciseInsightsForName(name) {
 			}
 		});
 
+		const unit = getWeightUnit();
+		// Convert weights to current unit (stored in kg)
+		let displayBestWeight = bestWeightSet.weight;
+		let displayBestVolumeWeight = bestVolumeSet.weight;
+		let displayBestVolume = bestVolumeSet.volume;
+		if (unit === 'lbs') {
+			displayBestWeight = convertWeight(bestWeightSet.weight, 'kg', 'lbs');
+			displayBestVolumeWeight = convertWeight(bestVolumeSet.weight, 'kg', 'lbs');
+			displayBestVolume = bestVolumeSet.volume * 2.20462; // Volume conversion
+		}
+
 		results.innerHTML = `
 			<div class="progress-pr-result">
 				<div class="progress-pr-result-title">Top weight set</div>
 				<div class="progress-pr-result-meta">
 					<span><strong>${entry.name}</strong></span>
-					<span>${bestWeightSet.weight} kg × ${bestWeightSet.reps}</span>
+					<span>${displayBestWeight} ${unit} × ${bestWeightSet.reps}</span>
 				</div>
 			</div>
 			<div class="progress-pr-result">
 				<div class="progress-pr-result-title">Top volume set</div>
 				<div class="progress-pr-result-meta">
 					<span><strong>${entry.name}</strong></span>
-					<span>${bestVolumeSet.weight} kg × ${bestVolumeSet.reps} (${bestVolumeSet.volume} kg)</span>
+					<span>${displayBestVolumeWeight} ${unit} × ${bestVolumeSet.reps} (${Math.round(displayBestVolume)} ${unit})</span>
 				</div>
 			</div>
 		`;
@@ -4085,9 +3275,7 @@ function renderPRTimeline(workouts) {
 	const allSets = [];
 	workouts.forEach(workout => {
 		if (!workout.exercises || !workout.date) return;
-		// Handle date string (YYYY-MM-DD) or Date object
-		const dateStr = typeof workout.date === 'string' ? workout.date : workout.date.toISOString().split('T')[0];
-		const workoutDate = new Date(dateStr);
+		const workoutDate = new Date(workout.date);
 		workout.exercises.forEach(exercise => {
 			if (!exercise.sets || !exercise.key) return;
 			exercise.sets.forEach(set => {
@@ -4156,14 +3344,20 @@ function renderPRTimeline(workouts) {
 		return;
 	}
 	
+	const unit = getWeightUnit();
 	container.innerHTML = prs.map(pr => {
 		const dateStr = pr.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+		// Convert weight to current unit (stored in kg)
+		let displayWeight = pr.bestWeight;
+		if (unit === 'lbs') {
+			displayWeight = convertWeight(pr.bestWeight, 'kg', 'lbs');
+		}
 		return `
 			<div class="progress-pr-timeline-item">
 				<div class="progress-pr-timeline-date">${dateStr}</div>
 				<div class="progress-pr-timeline-content">
 					<div class="progress-pr-timeline-exercise">${pr.display}</div>
-					<div class="progress-pr-timeline-value">${pr.bestWeight} kg × ${pr.bestReps} reps</div>
+					<div class="progress-pr-timeline-value">${displayWeight} ${unit} × ${pr.bestReps} reps</div>
 				</div>
 			</div>
 		`;
@@ -4178,9 +3372,7 @@ function renderProgressiveOverloadTracker(workouts) {
 	const exerciseData = {};
 	workouts.forEach(workout => {
 		if (!workout.exercises || !workout.date) return;
-		// Handle date string (YYYY-MM-DD) or Date object
-		const dateStr = typeof workout.date === 'string' ? workout.date : workout.date.toISOString().split('T')[0];
-		const workoutDate = new Date(dateStr);
+		const workoutDate = new Date(workout.date);
 		workout.exercises.forEach(exercise => {
 			if (!exercise.sets || !exercise.key) return;
 			const key = exercise.key;
@@ -4267,6 +3459,15 @@ function renderProgressiveOverloadTracker(workouts) {
 			statusText = 'Declining';
 		}
 		
+		const unit = getWeightUnit();
+		// Convert weights to current unit (stored in kg)
+		let displayRecentWeight = recentBestSet.weight;
+		let displayOldWeight = oldBestSet.weight;
+		if (unit === 'lbs') {
+			displayRecentWeight = convertWeight(recentBestSet.weight, 'kg', 'lbs');
+			displayOldWeight = convertWeight(oldBestSet.weight, 'kg', 'lbs');
+		}
+		
 		return {
 			key: ex.key,
 			display: ex.display,
@@ -4274,8 +3475,8 @@ function renderProgressiveOverloadTracker(workouts) {
 			statusClass,
 			statusText,
 			changePercent: Math.abs(changePercent).toFixed(1),
-			recentBest: `${recentBestSet.weight}kg × ${recentBestSet.reps}`,
-			oldBest: `${oldBestSet.weight}kg × ${oldBestSet.reps}`,
+			recentBest: `${displayRecentWeight}${unit} × ${recentBestSet.reps}`,
+			oldBest: `${displayOldWeight}${unit} × ${oldBestSet.reps}`,
 			workoutCount: workoutCount
 		};
 	});
@@ -4319,131 +3520,238 @@ function initLogout() {
 		});
 	}
 
-// 🗑️ DELETE ACCOUNT
-async function deleteAccount() {
-	if (!supabaseClient) {
-		await initSupabase();
-	}
-	if (!supabaseClient) {
-		alert('Error: Cannot connect to authentication service.');
-		return;
-	}
+// ========== SETTINGS ==========
+// ========== REST TIMER ==========
+let restTimerCheckTimeout = null;
+
+function checkAndShowRestTimer(set) {
+	// Check if rest timer is enabled
+	const restTimerEnabled = localStorage.getItem('restTimerEnabled') === 'true';
+	if (!restTimerEnabled) return;
 	
-	// Get current session
-	const { data: { session } } = await supabaseClient.auth.getSession();
-	if (!session) {
-		alert('Error: You must be logged in to delete your account.');
-		return;
+	// Clear any existing timeout
+	if (restTimerCheckTimeout) {
+		clearTimeout(restTimerCheckTimeout);
+		restTimerCheckTimeout = null;
 	}
 	
-	// Double confirmation
-	const confirm1 = confirm('⚠️ WARNING: This will permanently delete your account and all your data.\n\nThis action cannot be undone.\n\nAre you sure you want to continue?');
-	if (!confirm1) return;
+	// Check if set is complete (has both weight and reps)
+	const weight = parseFloat(set.weight) || 0;
+	const reps = parseFloat(set.reps) || 0;
 	
-	const confirm2 = confirm('⚠️ FINAL WARNING: All your workouts, progress, and data will be permanently deleted.\n\nType "DELETE" in the next prompt to confirm.');
-	if (!confirm2) return;
-	
-	const confirmText = prompt('Type "DELETE" to confirm account deletion:');
-	if (confirmText !== 'DELETE') {
-		alert('Account deletion cancelled.');
-		return;
-	}
-	
-	try {
-		// Get access token
-		const access_token = session.access_token;
-		
-		if (!access_token) {
-			alert('Error: No access token found. Please log out and log back in, then try again.');
-			return;
-		}
-		
-		console.log('🗑️ Starting account deletion...');
-		console.log('🗑️ Backend URL:', getApiUrl('/delete-account'));
-		
-		// Show loading indicator
-		const deleteBtn = document.getElementById('delete-account-btn');
-		if (deleteBtn) {
-			deleteBtn.disabled = true;
-			deleteBtn.textContent = 'Deleting...';
-		}
-		
-		// Call backend to delete account
-		const response = await fetch(getApiUrl('/delete-account'), {
-			method: 'POST',
-			headers: {
-				'Authorization': `Bearer ${access_token}`,
-				'Content-Type': 'application/json'
+	if (weight > 0 && reps > 0) {
+		// Small delay to avoid showing timer immediately while typing
+		restTimerCheckTimeout = setTimeout(() => {
+			// Double check that set is still complete
+			const currentWeight = parseFloat(set.weight) || 0;
+			const currentReps = parseFloat(set.reps) || 0;
+			if (currentWeight > 0 && currentReps > 0) {
+				showRestTimer();
 			}
-		});
-		
-		console.log('🗑️ Response status:', response.status);
-		
-		let data;
-		try {
-			data = await response.json();
-			console.log('🗑️ Response data:', data);
-		} catch (jsonError) {
-			const text = await response.text();
-			console.error('🗑️ Failed to parse JSON:', text);
-			alert('Error: Server returned invalid response. Status: ' + response.status + '\n\nResponse: ' + text.substring(0, 200));
-			if (deleteBtn) {
-				deleteBtn.disabled = false;
-				deleteBtn.textContent = 'Delete Account';
-			}
-			return;
-		}
-		
-		if (response.ok && data.success) {
-			alert('✅ Your account has been deleted successfully.');
-			// Clear local storage
-			localStorage.clear();
-			// Sign out and redirect to login
-			await supabaseClient.auth.signOut();
-			showScreen('login');
+		}, 800);
+	}
+}
+
+function showRestTimer() {
+	const overlay = document.getElementById('rest-timer-overlay');
+	if (!overlay) {
+		console.error('Rest timer overlay not found');
+		return;
+	}
+	
+	// Get default rest time from settings (default 60 seconds)
+	const defaultRestTime = parseInt(localStorage.getItem('restTimerDefaultTime') || '60');
+	restTimerSeconds = defaultRestTime;
+	
+	// Reset timer state
+	stopRestTimer();
+	
+	overlay.classList.remove('hidden');
+	updateRestTimerDisplay();
+	updateStartButtonText();
+	
+	console.log('Rest timer shown', { restTimerSeconds, defaultRestTime });
+}
+
+function hideRestTimer() {
+	const overlay = document.getElementById('rest-timer-overlay');
+	if (overlay) overlay.classList.add('hidden');
+	stopRestTimer();
+}
+
+function startRestTimer() {
+	if (restTimerRunning) return;
+	
+	restTimerRunning = true;
+	updateStartButtonText();
+	
+	// Schedule notification for when timer reaches 00:00 (now + restTimerSeconds)
+	const notificationsEnabled = localStorage.getItem('notificationsEnabled') === 'true';
+	if (notificationsEnabled && restTimerSeconds > 0) {
+		scheduleRestTimerNotification(restTimerSeconds);
+	}
+	
+	restTimerInterval = setInterval(() => {
+		if (restTimerSeconds > 0) {
+			restTimerSeconds--;
+			updateRestTimerDisplay();
 		} else {
-			// If service role key is not configured, show contact info
-			if (data.contact_email) {
-				alert(`Account deletion requires server configuration.\n\nPlease contact support at:\n${data.contact_email}\n\nWe will delete your account within 48 hours.`);
-			} else {
-				const errorMsg = data.error || 'Unknown error';
-				console.error('🗑️ Delete account error:', errorMsg);
-				alert('Error deleting account: ' + errorMsg + '\n\nStatus: ' + response.status + '\n\nPlease try again or contact support.');
-			}
-			if (deleteBtn) {
-				deleteBtn.disabled = false;
-				deleteBtn.textContent = 'Delete Account';
-			}
+			stopRestTimer();
+			updateStartButtonText();
+			// Optional: play sound or haptic feedback when timer ends
+		}
+	}, 1000);
+}
+
+async function stopRestTimer() {
+	restTimerRunning = false;
+	if (restTimerInterval) {
+		clearInterval(restTimerInterval);
+		restTimerInterval = null;
+	}
+	updateStartButtonText();
+	
+	// Cancel rest timer notification if timer was stopped
+	try {
+		if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
+			const LocalNotifications = Capacitor.Plugins.LocalNotifications;
+			await LocalNotifications.cancel({ notifications: [{ id: 300 }] });
 		}
 	} catch (e) {
-		console.error('🗑️ Delete account failed:', e);
-		console.error('🗑️ Error details:', {
-			name: e.name,
-			message: e.message,
-			stack: e.stack
-		});
-		alert('Error deleting account: ' + (e.message || 'Network error') + '\n\nPlease check the console for details or contact support at info.gymvisionai@gmail.com');
-		const deleteBtn = document.getElementById('delete-account-btn');
-		if (deleteBtn) {
-			deleteBtn.disabled = false;
-			deleteBtn.textContent = 'Delete Account';
+		// Ignore errors
+	}
+}
+
+async function addMinuteToTimer() {
+	// Add 60 seconds to the current timer
+	restTimerSeconds += 60;
+	updateRestTimerDisplay();
+	
+	// Reschedule notification with new time if timer is running
+	if (restTimerRunning) {
+		const notificationsEnabled = localStorage.getItem('notificationsEnabled') === 'true';
+		if (notificationsEnabled) {
+			await scheduleRestTimerNotification(restTimerSeconds);
 		}
 	}
 }
 
-function initDeleteAccount() {
-	const btn = document.getElementById('delete-account-btn');
-	if (!btn) return;
+function updateRestTimerDisplay() {
+	const timeEl = document.getElementById('rest-timer-time');
+	if (!timeEl) return;
 	
-	btn.addEventListener('click', async () => {
-		await deleteAccount();
-	});
+	const minutes = Math.floor(restTimerSeconds / 60);
+	const seconds = restTimerSeconds % 60;
+	timeEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-// ========== SETTINGS ==========
-function initSettings() {
+function updateStartButtonText() {
+	const startBtn = document.getElementById('rest-timer-start');
+	if (!startBtn) return;
+	
+	startBtn.textContent = restTimerRunning ? 'Pause' : 'Start';
+}
+
+function initRestTimer() {
+	const overlay = document.getElementById('rest-timer-overlay');
+	if (!overlay) return;
+	
+	const closeBtn = document.getElementById('rest-timer-close');
+	const startBtn = document.getElementById('rest-timer-start');
+	const addMinuteBtn = document.getElementById('rest-timer-add-minute');
+	
+	if (closeBtn) {
+		closeBtn.addEventListener('click', () => {
+			hideRestTimer();
+		});
+	}
+	
+	if (startBtn) {
+		startBtn.addEventListener('click', () => {
+			if (restTimerRunning) {
+				stopRestTimer();
+			} else {
+				startRestTimer();
+			}
+			updateStartButtonText();
+		});
+	}
+	
+	if (addMinuteBtn) {
+		addMinuteBtn.addEventListener('click', () => {
+			addMinuteToTimer();
+		});
+	}
+	
+	// Listen for notification actions (when user taps notification)
+	if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
+		const LocalNotifications = Capacitor.Plugins.LocalNotifications;
+		LocalNotifications.addListener('localNotificationActionPerformed', (notification) => {
+			// If rest timer notification was tapped, show the rest timer overlay
+			if (notification.notification && notification.notification.id === 300) {
+				showRestTimer();
+			}
+		});
+	}
+}
+
+async function initSettings() {
 	initLogout(); // Initialize logout button
-	initDeleteAccount(); // Initialize delete account button
+	initRestTimer(); // Initialize rest timer
+	
+	// Initialize notifications toggle
+	const notificationsToggle = document.getElementById('settings-notifications-toggle');
+	if (notificationsToggle) {
+		const savedNotifications = localStorage.getItem('notificationsEnabled') === 'true';
+		notificationsToggle.checked = savedNotifications;
+		notificationsToggle.addEventListener('change', async (e) => {
+			const enabled = e.target.checked;
+			localStorage.setItem('notificationsEnabled', enabled.toString());
+			if (enabled) {
+				await requestNotificationPermission();
+				await scheduleAllNotifications();
+			} else {
+				await cancelAllNotifications();
+			}
+		});
+		
+		// Initialize notifications if already enabled
+		if (savedNotifications) {
+			await requestNotificationPermission();
+			await scheduleAllNotifications();
+		}
+	}
+	
+	// Initialize unit toggle (kg/lbs)
+	const unitToggle = document.getElementById('settings-unit-toggle');
+	if (unitToggle) {
+		// Load saved unit preference (default to kg)
+		// Toggle checked (ON/right) = lbs, Toggle unchecked (OFF/left) = kg
+		const savedUnit = localStorage.getItem('weightUnit') || 'kg';
+		const isLbs = savedUnit === 'lbs';
+		unitToggle.checked = isLbs;
+		
+		unitToggle.addEventListener('change', (e) => {
+			const oldUnit = localStorage.getItem('weightUnit') || 'kg';
+			// Toggle checked (ON/right) = lbs, Toggle unchecked (OFF/left) = kg
+			const newUnit = e.target.checked ? 'lbs' : 'kg';
+			localStorage.setItem('weightUnit', newUnit);
+			// Update all weight displays in the app
+			updateWeightDisplays(newUnit);
+		});
+	}
+	
+	// Initialize rest timer toggle
+	const restTimerToggle = document.getElementById('settings-rest-timer-toggle');
+	if (restTimerToggle) {
+		const savedRestTimer = localStorage.getItem('restTimerEnabled') === 'true';
+		restTimerToggle.checked = savedRestTimer;
+		
+		restTimerToggle.addEventListener('change', (e) => {
+			localStorage.setItem('restTimerEnabled', e.target.checked.toString());
+		});
+	}
+	
 }
 
 async function loadSettings() {
@@ -4451,71 +3759,122 @@ async function loadSettings() {
 	try {
 		const user = await getUser();
 		if (user) {
-				const usernameEl = document.getElementById('settings-username');
-				const emailEl = document.getElementById('settings-email');
-			if (usernameEl) usernameEl.textContent = user.user_metadata?.username || user.email?.split('@')[0] || '—';
+			const usernameEl = document.getElementById('settings-username');
+			const emailEl = document.getElementById('settings-email');
+			
+			const username = user.user_metadata?.username || user.email?.split('@')[0] || '—';
+			if (usernameEl) usernameEl.textContent = username;
 			if (emailEl) emailEl.textContent = user.email || '—';
-			}
+		}
 		
-		// Load statistics
-		await loadSettingsStats();
+		// Load stats
+		loadSettingsStats();
 	} catch (e) {
 		console.error('Failed to load settings:', e);
 	}
 }
 
-async function loadSettingsStats() {
-	try {
-		const user = await getCurrentUser();
-		if (!user) return;
-		
-		// Load streak
-		const streak = await loadStreak();
-		const streakEl = document.getElementById('settings-stat-streak');
-		if (streakEl) streakEl.textContent = streak || '0';
-		
-		// Load workouts count
-		const { data: workouts, error: workoutsError } = await supabaseClient
-			.from('workouts')
-			.select('id')
-			.eq('user_id', user.id);
-		
-		const workoutsCount = workouts && !workoutsError ? workouts.length : 0;
-		const workoutsEl = document.getElementById('settings-stat-workouts');
-		if (workoutsEl) workoutsEl.textContent = workoutsCount.toString();
-		
-		// Calculate total workout hours
-		// Sum all workout durations and convert to hours (rounded to 1 decimal)
-		let totalHours = 0;
-		if (workouts && workouts.length > 0) {
-			const { data: allWorkouts, error: allWorkoutsError } = await supabaseClient
-				.from('workouts')
-				.select('duration')
-				.eq('user_id', user.id);
-			
-			if (!allWorkoutsError && allWorkouts) {
-				// Sum all durations (duration is stored in milliseconds in the database)
-				let totalMilliseconds = 0;
-				for (const workout of allWorkouts) {
-					if (workout.duration && typeof workout.duration === 'number') {
-						totalMilliseconds += workout.duration;
-					}
-				}
-				
-				// Convert milliseconds to hours and round to 1 decimal place
-				// Example: 20 min (1200000 ms) + 70 min (4200000 ms) = 5400000 ms = 1.5 hours
-				const totalMinutes = totalMilliseconds / (1000 * 60); // Convert ms to minutes
-				totalHours = Math.round((totalMinutes / 60) * 10) / 10; // Convert to hours, round to 1 decimal
-			}
+function loadSettingsStats() {
+	// Load streak
+	const streak = parseInt(localStorage.getItem('streak') || '0');
+	const streakEl = document.getElementById('settings-stat-streak');
+	if (streakEl) streakEl.textContent = streak;
+	
+	// Load workouts and calculate stats
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	const workoutsCount = workouts.length;
+	const workoutsEl = document.getElementById('settings-stat-workouts');
+	if (workoutsEl) workoutsEl.textContent = workoutsCount;
+	
+	// Calculate total hours
+	let totalMs = 0;
+	workouts.forEach(workout => {
+		if (workout.duration && workout.duration > 0) {
+			totalMs += workout.duration;
 		}
-		
-		const hoursEl = document.getElementById('settings-stat-hours');
-		if (hoursEl) hoursEl.textContent = totalHours.toString();
-		
-	} catch (e) {
-		console.error('Failed to load settings stats:', e);
+	});
+	const totalHours = totalMs / (1000 * 60 * 60);
+	const hoursEl = document.getElementById('settings-stat-hours');
+	if (hoursEl) hoursEl.textContent = totalHours.toFixed(1);
+}
+
+// Helper function to get current weight unit
+function getWeightUnit() {
+	return localStorage.getItem('weightUnit') || 'kg';
+}
+
+// Helper function to convert weight between kg and lbs
+function convertWeight(value, fromUnit, toUnit) {
+	if (!value || value === '') return '';
+	const numValue = parseFloat(value);
+	if (isNaN(numValue)) return value;
+	
+	if (fromUnit === toUnit) return numValue;
+	
+	if (fromUnit === 'kg' && toUnit === 'lbs') {
+		return (numValue * 2.20462).toFixed(1);
+	} else if (fromUnit === 'lbs' && toUnit === 'kg') {
+		return (numValue / 2.20462).toFixed(1);
+	}
+	return numValue;
+}
+
+// Helper function to format weight with unit
+function formatWeight(weight, unit = null) {
+	if (!weight || weight === '') return '0';
+	const unitToUse = unit || getWeightUnit();
+	const numWeight = parseFloat(weight);
+	if (isNaN(numWeight)) return '0';
+	return `${numWeight.toFixed(numWeight % 1 === 0 ? 0 : 1)} ${unitToUse}`;
+}
+
+// Update progress unit label
+function updateProgressUnitLabel() {
+	const unitLabel = document.getElementById('progress-unit-label');
+	if (unitLabel) {
+		unitLabel.textContent = getWeightUnit();
+	}
+	// Update progress chart wrapper unit attribute
+	const chartWrapper = document.querySelector('.progress-chart-wrapper');
+	if (chartWrapper) {
+		chartWrapper.setAttribute('data-unit', getWeightUnit());
 	}
 }
+
+// Update all weight displays in the app when unit changes
+function updateWeightDisplays(newUnit) {
+	// Update placeholder text in workout inputs
+	const weightInputs = document.querySelectorAll('.workout-edit-set-input.weight');
+	weightInputs.forEach(input => {
+		const currentValue = input.value;
+		if (currentValue) {
+			const oldUnit = localStorage.getItem('weightUnit') || 'kg';
+			// We store weights in kg, so convert from kg to new unit
+			const storedUnit = 'kg';
+			const converted = convertWeight(currentValue, storedUnit, newUnit);
+			input.value = converted;
+		}
+		input.setAttribute('aria-label', `Set weight (${newUnit})`);
+	});
+	
+	// Update progress unit label
+	updateProgressUnitLabel();
+	
+	// Reload progress chart if visible
+	if (currentTab === 'progress') {
+		loadProgress();
+	}
+	
+	// Reload workouts to update displays
+	if (currentTab === 'workouts') {
+		loadWorkouts();
+	}
+	
+	console.log(`Weight unit changed to ${newUnit}`);
+}
+
+
+// Delete account function removed - was causing issues
 
 // ========== VISION CHAT ==========
 function initVision() {
@@ -4583,274 +3942,123 @@ function initVision() {
 						// Remove loading message and show instant workout
 						if (loadingElement) loadingElement.remove();
 						applyWorkoutFromVision(quickWorkout);
-						switchTab('workouts');
-						setTimeout(() => {
-							showScreen('workout-builder');
-						}, 100);
+						switchTab('workout-builder');
 						addChatMessage(`✓ Created "${quickWorkout.name}" with ${quickWorkout.exercises.length} exercises!`, 'bot');
 						
 						sendBtn.disabled = false;
 						return;
 					}
 					
-					// If muscle group mentioned but no quick workout, try to generate one
-					if (hasMuscleGroup && !quickWorkout) {
-						// Try to create a quick workout based on muscle group
-						let fallbackWorkout = null;
-						if (msgLower.includes('chest') || msgLower.includes('borst')) {
-							fallbackWorkout = {
-								name: 'Chest Workout',
-								exercises: [
-									{ key: 'bench_press', display: 'Bench Press' },
-									{ key: 'incline_bench_press', display: 'Incline Bench Press' },
-									{ key: 'dumbbell_fly', display: 'Dumbbell Fly' },
-									{ key: 'cable_crossover', display: 'Cable Crossover' },
-									{ key: 'pec_deck_machine', display: 'Pec Deck Machine' }
-								]
-							};
-						} else if (msgLower.includes('shoulder')) {
-							fallbackWorkout = {
-								name: 'Shoulders Workout',
-								exercises: [
-									{ key: 'shoulder_press_machine', display: 'Shoulder Press Machine' },
-									{ key: 'lateral_raise_machine', display: 'Lateral Raise Machine' },
-									{ key: 'front_raise', display: 'Front Raise' },
-									{ key: 'rear_delt_fly', display: 'Rear Delt Fly' },
-									{ key: 'cable_face_pull', display: 'Cable Face Pull' }
-								]
-							};
-						} else if (msgLower.includes('back')) {
-							fallbackWorkout = {
-								name: 'Back Workout',
-								exercises: [
-									{ key: 'lat_pulldown', display: 'Lat Pulldown' },
-									{ key: 'seated_row', display: 'Seated Row' },
-									{ key: 'one_arm_dumbbell_row', display: 'One Arm Dumbbell Row' },
-									{ key: 'bent_over_row', display: 'Bent Over Row' },
-									{ key: 'deadlift', display: 'Deadlift' }
-								]
-							};
-						} else if (msgLower.includes('bicep')) {
-							fallbackWorkout = {
-								name: 'Biceps Workout',
-								exercises: [
-									{ key: 'barbell_curl', display: 'Barbell Curl' },
-									{ key: 'dumbbell_curl', display: 'Dumbbell Curl' },
-									{ key: 'hammer_curl', display: 'Hammer Curl' },
-									{ key: 'preacher_curl', display: 'Preacher Curl' },
-									{ key: 'cable_curl', display: 'Cable Curl' }
-								]
-							};
-						} else if (msgLower.includes('tricep')) {
-							fallbackWorkout = {
-								name: 'Triceps Workout',
-								exercises: [
-									{ key: 'tricep_pushdown', display: 'Tricep Pushdown' },
-									{ key: 'overhead_tricep_extension', display: 'Overhead Tricep Extension' },
-									{ key: 'dips', display: 'Dips' }
-								]
-							};
-						} else if (msgLower.includes('leg') || msgLower.includes('quad') || msgLower.includes('hamstring') || msgLower.includes('glute') || msgLower.includes('calf')) {
-							fallbackWorkout = {
-								name: 'Legs Workout',
-								exercises: [
-									{ key: 'leg_press', display: 'Leg Press' },
-									{ key: 'leg_extension', display: 'Leg Extension' },
-									{ key: 'lying_leg_curl', display: 'Lying Leg Curl' },
-									{ key: 'hip_thrust', display: 'Hip Thrust' },
-									{ key: 'standing_calf_raise', display: 'Standing Calf Raise' }
-								]
-							};
-						}
-						
-						if (fallbackWorkout) {
-							if (loadingElement) loadingElement.remove();
-							applyWorkoutFromVision(fallbackWorkout);
-							switchTab('workouts');
-							setTimeout(() => {
-								showScreen('workout-builder');
-							}, 100);
-							addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
-							sendBtn.disabled = false;
-							return;
-						}
-					}
-					
-					// Fallback: Use the new vision-workout endpoint
-					try {
-						const apiUrl = getApiUrl('api/vision-workout');
-						console.log('Calling vision-workout API:', apiUrl);
-						console.log('BACKEND_URL:', BACKEND_URL);
-						console.log('Request payload:', { message, workoutContext });
-						
-						if (!BACKEND_URL) {
-							throw new Error('BACKEND_URL is not configured. Please set it in index.html');
-						}
-						
-						// Create abort controller for timeout (60 seconds for Render cold start)
-						const controller = new AbortController();
-						const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
-						
-						// Start request immediately without blocking - update message while waiting - instant feedback
-						let dotCount = 0;
-						const updateInterval = setInterval(() => {
-							if (loadingElement) {
-								const contentEl = loadingElement.querySelector('.vision-message-content');
-								if (contentEl) {
-									dotCount = (dotCount % 3) + 1;
-									contentEl.textContent = 'I\'m generating your workout' + '.'.repeat(dotCount);
-								}
-							}
-						}, 300);
-						
-						const res = await fetch(apiUrl, {
+					// Fallback: Start request if quick workout not available
+					const apiUrl = getApiUrl('/api/vision-workout');
+					const requestPromise = fetch(apiUrl, {
 					method: 'POST',
-							headers: { 
-								'Content-Type': 'application/json',
-								'Accept': 'application/json'
-							},
+					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ 
 						message,
 						workoutContext: workoutContext
-							}),
-							mode: 'cors', // Explicitly enable CORS
-							credentials: 'omit', // Don't send cookies
-							signal: controller.signal
+					})
 				});
-						
-						clearInterval(updateInterval);
-						clearTimeout(timeoutId);
-						
-						console.log('Response status:', res.status, res.statusText);
 					
-					// Remove loading message
-					if (loadingElement) {
-						loadingElement.remove();
-					}
+					// Update message while waiting (non-blocking) - instant feedback
+					let dotCount = 0;
+					const updateInterval = setInterval(() => {
+						if (loadingElement) {
+							const contentEl = loadingElement.querySelector('.vision-message-content');
+							if (contentEl) {
+								dotCount = (dotCount % 3) + 1;
+								contentEl.textContent = 'I\'m generating your workout' + '.'.repeat(dotCount);
+							}
+						}
+					}, 300);
+					
+					try {
+					const res = await requestPromise;
+					clearInterval(updateInterval);
 					
 					if (!res.ok) {
-							const errorText = await res.text();
-							console.error('API error response:', errorText);
-							let errorData;
-							try {
-								errorData = JSON.parse(errorText);
-							} catch {
-								errorData = { error: `Server error (${res.status}): ${errorText.substring(0, 100)}` };
-							}
-							// If muscle group was mentioned, try fallback workout
-							if (hasMuscleGroup) {
-								const fallbackWorkout = generateQuickWorkout(message);
-								if (fallbackWorkout) {
-									applyWorkoutFromVision(fallbackWorkout);
-									switchTab('workouts');
-									setTimeout(() => {
-										showScreen('workout-builder');
-									}, 100);
-									addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
-									sendBtn.disabled = false;
-									return;
-								}
-							}
-						addChatMessage(`Error: ${errorData.error || 'Failed to generate workout'}`, 'bot');
-							sendBtn.disabled = false;
-						return;
-					}
-				
-				const data = await res.json();
-						console.log('Workout data received:', data);
+						const errorData = await res.json().catch(() => ({ error: 'Failed to generate workout' }));
+						if (loadingElement) loadingElement.remove();
 						
-				if (data.error) {
-					// If muscle group was mentioned, try fallback workout
-					if (hasMuscleGroup) {
-						const fallbackWorkout = generateQuickWorkout(message);
-						if (fallbackWorkout) {
-							applyWorkoutFromVision(fallbackWorkout);
-							switchTab('workouts');
-							setTimeout(() => {
-								showScreen('workout-builder');
-							}, 100);
-							addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
-							sendBtn.disabled = false;
-							return;
-						}
-					}
-					addChatMessage(`Error: ${data.error}`, 'bot');
-							sendBtn.disabled = false;
-							return;
-					} else if (data.workout && data.workout.exercises && data.workout.exercises.length > 0) {
-						// Successfully generated workout - apply it and switch to workout builder
-							console.log('Applying workout from Vision:', data.workout);
-							applyWorkoutFromVision(data.workout);
-							
-							// Show success message
-						addChatMessage(`✓ Created "${data.workout.name}" with ${data.workout.exercises.length} exercises!`, 'bot');
-							
-							// Switch to workouts tab first, then navigate to workout builder
-							switchTab('workouts');
-							
-							// Small delay to ensure tab switch completes, then show workout builder
-							setTimeout(() => {
-								showScreen('workout-builder');
-								// Update navbar to show workouts as active (since workout-builder is a sub-screen)
-								document.querySelectorAll('.nav-btn').forEach(btn => {
-									btn.classList.remove('active');
-								});
-								const workoutsBtn = document.querySelector('.nav-btn[data-tab="workouts"]');
-								if (workoutsBtn) workoutsBtn.classList.add('active');
-							}, 150);
-						} else {
-						// If muscle group was mentioned, try fallback workout
-						if (hasMuscleGroup) {
+						// Always try fallback workout on error (don't check hasMuscleGroup, just try)
 							const fallbackWorkout = generateQuickWorkout(message);
 							if (fallbackWorkout) {
 								applyWorkoutFromVision(fallbackWorkout);
-								switchTab('workouts');
-								setTimeout(() => {
-									showScreen('workout-builder');
-								}, 100);
+								switchTab('workout-builder');
 								addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
 								sendBtn.disabled = false;
 								return;
 							}
-						}
-						addChatMessage('No workout was generated. Please try again with a clearer request.', 'bot');
-							sendBtn.disabled = false;
-						}
-						// Re-enable send button after successful workout generation
-						if (data.workout && data.workout.exercises && data.workout.exercises.length > 0) {
-							sendBtn.disabled = false;
-						}
-					} catch (apiError) {
-						// Remove loading message
-						if (loadingElement) {
-							loadingElement.remove();
-						}
-						console.error('Vision workout API error:', apiError);
-						console.error('Error name:', apiError?.name);
-						console.error('Error message:', apiError?.message);
-						console.error('Error stack:', apiError?.stack);
 						
-						let errorMsg = 'Failed to get response. Please try again.';
-						if (!BACKEND_URL) {
-							errorMsg = 'Backend server not configured. Please set BACKEND_URL in index.html to your deployed Flask backend URL (e.g., https://your-app.onrender.com).';
-						} else if (apiError?.name === 'AbortError' || apiError?.message?.includes('timeout')) {
-							errorMsg = `Request timed out. The backend server may be starting up (this can take up to 50 seconds on free tier). Please try again in a moment.`;
-						} else if (apiError?.name === 'TypeError') {
-							if (apiError?.message?.includes('Load failed') || apiError?.message?.includes('fetch') || apiError?.message?.includes('Failed to fetch')) {
-								errorMsg = `Cannot connect to backend server. The server may be starting up (free tier takes ~50 seconds). Please wait a moment and try again.`;
-							} else {
-								errorMsg = `Network error: ${apiError?.message || 'Unknown error'}`;
-							}
-						} else if (apiError?.message) {
-							errorMsg = `Error: ${apiError.message}`;
+						addChatMessage(`Error: ${errorData.error || 'Failed to generate workout'}`, 'bot');
+						sendBtn.disabled = false;
+						return;
+					}
+				
+				const data = await res.json();
+				if (data.error) {
+					if (loadingElement) loadingElement.remove();
+						
+						// Always try fallback workout on error (don't check hasMuscleGroup, just try)
+						const fallbackWorkout = generateQuickWorkout(message);
+						if (fallbackWorkout) {
+							applyWorkoutFromVision(fallbackWorkout);
+							switchTab('workout-builder');
+							addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
+							sendBtn.disabled = false;
+							return;
 						}
-						addChatMessage(errorMsg, 'bot');
+						
+					addChatMessage(`Error: ${data.error}`, 'bot');
+						sendBtn.disabled = false;
+						return;
+					}
+					
+					if (data.workout && data.workout.exercises && data.workout.exercises.length > 0) {
+					// Successfully generated workout - apply it and switch to workout builder
+						if (loadingElement) loadingElement.remove();
+						applyWorkoutFromVision(data.workout);
+						switchTab('workout-builder');
+						addChatMessage(`✓ Created "${data.workout.name}" with ${data.workout.exercises.length} exercises!`, 'bot');
+						} else {
+						if (loadingElement) loadingElement.remove();
+						
+						// Always try fallback workout if no workout generated
+							const fallbackWorkout = generateQuickWorkout(message);
+							if (fallbackWorkout) {
+								applyWorkoutFromVision(fallbackWorkout);
+								switchTab('workout-builder');
+								addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
+								sendBtn.disabled = false;
+								return;
+							}
+						
+						addChatMessage('No workout was generated. Please try again with a clearer request.', 'bot');
+					}
+					sendBtn.disabled = false;
+					} catch (fetchError) {
+						clearInterval(updateInterval);
+								if (loadingElement) loadingElement.remove();
+						console.error('Workout request failed:', fetchError);
+						
+						// Always try fallback workout on error (don't check hasMuscleGroup, just try)
+						const fallbackWorkout = generateQuickWorkout(message);
+						if (fallbackWorkout) {
+							applyWorkoutFromVision(fallbackWorkout);
+								switchTab('workout-builder');
+							addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
+								sendBtn.disabled = false;
+								return;
+					}
+					
+						addChatMessage(`Error: ${fetchError.message || 'Failed to generate workout. Please try again.'}`, 'bot');
 						sendBtn.disabled = false;
 						return;
 					}
 				} else {
-					// Regular chat message - use the chat endpoint
-					const res = await fetch(getApiUrl('chat'), {
+					// Regular chat message - use the chat endpoint (only for non-workout questions)
+					try {
+					const res = await fetch('/chat', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({ 
@@ -4863,12 +4071,32 @@ function initVision() {
 					if (loadingElement) {
 						loadingElement.remove();
 					}
+						
+						if (!res.ok) {
+							const errorData = await res.json().catch(() => ({ error: 'Failed to get response' }));
+							addChatMessage(`Error: ${errorData.error || 'Failed to get response'}`, 'bot');
+							sendBtn.disabled = false;
+							return;
+					}
 					
 					const data = await res.json();
 					if (data.error) {
 						addChatMessage(`Error: ${data.error}`, 'bot');
+					} else if (data.workout) {
+						// Chat endpoint returned a workout - use it!
+						applyWorkoutFromVision(data.workout);
+						switchTab('workout-builder');
+						addChatMessage(`✓ Created "${data.workout.name}" with ${data.workout.exercises.length} exercises!`, 'bot');
 					} else {
-						addChatMessage(data.reply, 'bot');
+							addChatMessage(data.reply || 'I didn\'t understand that. Please try asking for a workout or a question.', 'bot');
+					}
+					sendBtn.disabled = false;
+					} catch (chatError) {
+						if (loadingElement) loadingElement.remove();
+						console.error('Chat request failed:', chatError);
+						addChatMessage(`Error: ${chatError.message || 'Failed to get response. Please try again.'}`, 'bot');
+						sendBtn.disabled = false;
+						return;
 					}
 				}
 			} catch (e) {
@@ -4877,14 +4105,7 @@ function initVision() {
 				if (loadingElement) {
 					loadingElement.remove();
 				}
-				// Show more helpful error message
-				let errorMsg = 'Failed to get response. Please try again.';
-				if (!BACKEND_URL) {
-					errorMsg = 'Backend server not configured. Please set BACKEND_URL in index.html to your deployed Flask backend URL (e.g., https://your-app.onrender.com).';
-				} else if (e.message && (e.message.includes('Failed to fetch') || e.message.includes('NetworkError'))) {
-					errorMsg = `Cannot connect to backend server at ${BACKEND_URL}. Please check if the server is running and accessible.`;
-				}
-				addChatMessage(errorMsg, 'bot');
+				addChatMessage('Failed to get response. Please try again.', 'bot');
 			} finally {
 				sendBtn.disabled = false;
 			}
@@ -4922,101 +4143,78 @@ function initExerciseVideoModal() {
 		e.preventDefault();
 		e.stopPropagation();
 		
-		// Get video URL from button data attribute
-		let videoUrl = btn.dataset.video;
+		// Find the exercise card container
+		const exerciseCard = btn.closest('.workout-exercise, .workout-edit-exercise');
+		if (!exerciseCard) return;
 		
-		// If no video URL, try to get it from hardcoded exercises first, then backend
-		if (!videoUrl) {
-			const exerciseKey = btn.dataset.exercise;
-			if (!exerciseKey) {
-				alert('Exercise information not available.');
+		// Ensure workout details are expanded in "Your Workouts" view
+		const workoutDetails = exerciseCard.closest('.workout-details');
+		if (workoutDetails && !workoutDetails.classList.contains('expanded')) {
+			workoutDetails.classList.add('expanded');
+		}
+		
+		// Check if video is already showing
+		const existingVideo = exerciseCard.querySelector('.exercise-video-inline');
+		if (existingVideo) {
+			existingVideo.remove();
 			return;
 		}
 		
-			// First, check hardcoded exercises (for Capacitor)
-			const hardcodedExercise = HARDCODED_EXERCISES.find(ex => {
-				const key = normalizeExerciseKey(ex.key);
-				const targetKey = normalizeExerciseKey(exerciseKey);
-				return key === targetKey;
-			});
-			
-			if (hardcodedExercise?.video) {
-				videoUrl = hardcodedExercise.video;
-				btn.dataset.video = videoUrl; // Cache for next time
-			} else if (BACKEND_URL) {
-				// Only try backend if BACKEND_URL is configured
+		let videoUrl = btn.dataset.video;
+		if (!videoUrl) {
+			const exerciseKey = btn.dataset.exercise;
+			if (!exerciseKey) return;
 			btn.disabled = true;
 			try {
 				const data = await fetchExerciseInfoByKey(exerciseKey);
 				if (data?.video) {
 					videoUrl = data.video;
-						btn.dataset.video = videoUrl; // Cache for next time
+					btn.dataset.video = videoUrl;
 				} else {
 					alert('No video available for this exercise yet.');
-						btn.disabled = false;
 					return;
 				}
 			} catch (error) {
 				console.error('Failed to load exercise video:', error);
 				alert('Could not load the exercise video. Please try again.');
-					btn.disabled = false;
 				return;
 			} finally {
 				btn.disabled = false;
-				}
-			} else {
-				alert('No video available for this exercise yet.');
-				return;
 			}
 		}
 		
-		// Extract video ID and create watch URL
-		let watchUrl = null;
+		// Create inline video container
+		const videoContainer = document.createElement('div');
+		videoContainer.className = 'exercise-video-inline';
+		videoContainer.innerHTML = `
+			<button class="exercise-video-inline-close" type="button" aria-label="Close video">✕</button>
+			<div class="exercise-video-inline-frame">
+				<iframe src="${escapeHtmlAttr(videoUrl)}" title="Exercise video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+			</div>
+		`;
 		
-		if (videoUrl) {
-			if (videoUrl.includes('youtube.com/embed/')) {
-				// Extract video ID from embed URL
-				const match = videoUrl.match(/embed\/([^"&?\/\s]+)/);
-				if (match && match[1]) {
-					watchUrl = `https://www.youtube.com/watch?v=${match[1]}`;
-				}
-			} else if (videoUrl.includes('youtube.com/watch')) {
-				// Already a watch URL
-				watchUrl = videoUrl;
-			} else if (videoUrl.includes('youtu.be/')) {
-				// Short YouTube URL
-				const match = videoUrl.match(/youtu\.be\/([^"&?\/\s]+)/);
-				if (match && match[1]) {
-					watchUrl = `https://www.youtube.com/watch?v=${match[1]}`;
-				}
+		// Insert after the header, before sets
+		const setsContainer = exerciseCard.querySelector('.workout-edit-sets, .workout-view-sets');
+		if (setsContainer) {
+			exerciseCard.insertBefore(videoContainer, setsContainer);
 		} else {
-				// Try to extract video ID from various YouTube URL formats
-				const youtubeRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
-				const match = videoUrl.match(youtubeRegex);
-				if (match && match[1]) {
-					watchUrl = `https://www.youtube.com/watch?v=${match[1]}`;
-				}
-			}
+			exerciseCard.appendChild(videoContainer);
 		}
 		
-		// Open directly in YouTube app/browser
-		if (watchUrl) {
-			// Try to open in YouTube app first, then fallback to browser
-			if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser) {
-				window.Capacitor.Plugins.Browser.open({ url: watchUrl });
-			} else {
-				window.open(watchUrl, '_blank');
-			}
-		} else {
-			alert('No video available for this exercise.');
+		// Close button handler
+		const closeBtn = videoContainer.querySelector('.exercise-video-inline-close');
+		if (closeBtn) {
+			closeBtn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				videoContainer.remove();
+			});
 		}
 	});
 }
 
 async function fetchExerciseInfoByKey(exerciseKey) {
-	const apiUrl = getApiUrl('/exercise-info');
 	const body = JSON.stringify({ exercise: exerciseKey });
-	const res = await fetch(apiUrl, {
+	const res = await fetch('/exercise-info', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body
@@ -5080,194 +4278,131 @@ function initExerciseCard() {
 }
 
 // ========== UTILITY FUNCTIONS ==========
-// Hardcoded exercises list for Capacitor (when Flask server is not available)
-const HARDCODED_EXERCISES = [
-	// Chest
-	{"key": "bench_press", "display": "Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/benchpress.jpg", "video": "https://www.youtube.com/embed/ejI1Nlsul9k"},
-	{"key": "incline_bench_press", "display": "Incline Bench Press", "muscles": ["Chest", "Shoulders", "Triceps"], "image": "static/images/inclinebenchpress.jpg", "video": "https://www.youtube.com/embed/lJ2o89kcnxY"},
-	{"key": "decline_bench_press", "display": "Decline Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/declinebenchpress.jpg", "video": "https://www.youtube.com/embed/iVh4B5bJ5OI"},
-	{"key": "dumbbell_bench_press", "display": "Dumbbell Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/dumbbellbenchpress.png", "video": "https://www.youtube.com/embed/YQ2s_Y7g5Qk"},
-	{"key": "dumbbell_fly", "display": "Dumbbell Fly", "muscles": ["Chest", "Shoulders"], "image": "static/images/dumbbellfly.jpg", "video": "https://www.youtube.com/embed/JFm8KbhjibM"},
-	{"key": "cable_crossover", "display": "Cable Crossover", "muscles": ["Chest", "Shoulders", "Biceps"], "image": "static/images/cablecrossover.jpg", "video": "https://www.youtube.com/embed/hhruLxo9yZU"},
-	{"key": "pec_deck_machine", "display": "Pec Deck Machine", "muscles": ["Chest", "Shoulders"], "image": "static/images/pecdeckmachine.jpg", "video": "https://www.youtube.com/embed/FDay9wFe5uE"},
-	{"key": "chest_press_machine", "display": "Chest Press Machine", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/chestpressmachine.jpg", "video": "https://www.youtube.com/embed/65npK4Ijz1c"},
-	{"key": "push_up", "display": "Push-Up", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/pushup.jpg", "video": "https://www.youtube.com/embed/WDIpL0pjun0"},
-	{"key": "incline_dumbbell_press", "display": "Incline Dumbbell Press", "muscles": ["Chest", "Shoulders", "Triceps"], "image": "static/images/inclinedumbbellpress.jpg", "video": "https://www.youtube.com/embed/jMQA3XtJSgo"},
-	{"key": "decline_dumbbell_press", "display": "Decline Dumbbell Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/declinedumbbellpress.jpg", "video": "https://www.youtube.com/embed/2B6WxyLaIrE"},
-	// Back
-	{"key": "pull_up", "display": "Pull-Up", "muscles": ["Back", "Biceps", "Shoulders"], "image": "static/images/pullup.jpg", "video": "https://www.youtube.com/embed/eGo4IYlbE5g"},
-	{"key": "chin_up", "display": "Chin-Up", "muscles": ["Biceps", "Back", "Shoulders"], "image": "static/images/chinup.jpg", "video": "https://www.youtube.com/embed/8mryJ3w2S78"},
-	{"key": "lat_pulldown", "display": "Lat Pulldown", "muscles": ["Back", "Biceps", "Shoulders"], "image": "static/images/latpulldown.jpg", "video": "https://www.youtube.com/embed/JGeRYIZdojU"},
-	{"key": "wide_grip_pulldown", "display": "Wide Grip Pulldown", "muscles": ["Back", "Biceps", "Shoulders"], "image": "static/images/widegrippulldown.jpg", "video": "https://www.youtube.com/embed/YCKPD4BSD2E"},
-	{"key": "close_grip_pulldown", "display": "Close Grip Pulldown", "muscles": ["Back", "Biceps", "Shoulders"], "image": "static/images/closegrippulldown.jpg", "video": "https://www.youtube.com/embed/IjoFCmLX7z0"},
-	{"key": "straight_arm_pulldown", "display": "Straight Arm Pulldown", "muscles": ["Back", "Shoulders"], "image": "static/images/straightarmpulldown.jpg", "video": "https://www.youtube.com/embed/G9uNaXGTJ4w"},
-	{"key": "seated_row", "display": "Seated Row", "muscles": ["Back", "Biceps"], "image": "static/images/seatedrow.jpg", "video": "https://www.youtube.com/embed/UCXxvVItLoM"},
-	{"key": "t_bar_row", "display": "T-Bar Row", "muscles": ["Back", "Biceps"], "image": "static/images/tbarrow.jpg", "video": "https://www.youtube.com/embed/yPis7nlbqdY"},
-	{"key": "bent_over_row", "display": "Bent Over Row", "muscles": ["Back", "Biceps"], "image": "static/images/bentoverrow.jpg", "video": "https://www.youtube.com/embed/6FZHJGzMFEc"},
-	{"key": "one_arm_dumbbell_row", "display": "One Arm Dumbbell Row", "muscles": ["Back", "Biceps"], "image": "static/images/onearmdumbbellrow.jpg", "video": "https://www.youtube.com/embed/DMo3HJoawrU"},
-	{"key": "chest_supported_row", "display": "Chest Supported Row", "muscles": ["Back", "Biceps"], "image": "static/images/chestsupportedrow.jpg", "video": "https://www.youtube.com/embed/tZUYS7X50so"},
-	{"key": "lat_pullover_machine", "display": "Lat Pullover Machine", "muscles": ["Back", "Chest"], "image": "static/images/latpullovermachine.jpg", "video": "https://www.youtube.com/embed/oxpAl14EYyc"},
-	{"key": "deadlift", "display": "Deadlift", "muscles": ["Back", "Glutes", "Hamstrings"], "image": "static/images/deadlift.jpg", "video": "https://www.youtube.com/embed/AweC3UaM14o"},
-	{"key": "romanian_deadlift", "display": "Romanian Deadlift", "muscles": ["Hamstrings", "Glutes", "Back"], "image": "static/images/romaniandeadlift.jpg", "video": "https://www.youtube.com/embed/bT5OOBgY4bc"},
-	{"key": "sumo_deadlift", "display": "Sumo Deadlift", "muscles": ["Glutes", "Hamstrings", "Back"], "image": "static/images/sumodeadlift.jpg", "video": "https://www.youtube.com/embed/pfSMst14EFk"},
-	// Shoulders
-	{"key": "shoulder_press_machine", "display": "Shoulder Press Machine", "muscles": ["Shoulders", "Triceps"], "image": "static/images/shoulderpressmachine.jpg", "video": "https://www.youtube.com/embed/WvLMauqrnK8"},
-	{"key": "overhead_press", "display": "Overhead Press", "muscles": ["Shoulders", "Triceps"], "image": "static/images/overheadpress.jpg", "video": "https://www.youtube.com/embed/G2qpTG1Eh40"},
-	{"key": "arnold_press", "display": "Arnold Press", "muscles": ["Shoulders", "Triceps"], "image": "static/images/arnoldpress.jpg", "video": "https://www.youtube.com/embed/jeJttN2EWCo"},
-	{"key": "dumbbell_shoulder_press", "display": "Dumbbell Shoulder Press", "muscles": ["Shoulders", "Triceps"], "image": "static/images/dumbbellshoulderpress.jpg", "video": "https://www.youtube.com/embed/HzIiNhHhhtA"},
-	{"key": "front_raise", "display": "Front Raise", "muscles": ["Shoulders"], "image": "static/images/frontraise.jpg", "video": "https://www.youtube.com/embed/hRJ6tR5-if0"},
-	{"key": "lateral_raise", "display": "Lateral Raise", "muscles": ["Shoulders"], "image": "static/images/lateralraise.jpg", "video": "https://www.youtube.com/embed/OuG1smZTsQQ"},
-	{"key": "lateral_raise_machine", "display": "Lateral Raise Machine", "muscles": ["Shoulders"], "image": "static/images/lateralraisemachine.jpg", "video": "https://www.youtube.com/embed/xMEs3zEzS8s"},
-	{"key": "rear_delt_fly", "display": "Rear Delt Fly", "muscles": ["Shoulders", "Back"], "image": "static/images/reardeltfly.jpg", "video": "https://www.youtube.com/embed/nlkF7_2O_Lw"},
-	{"key": "reverse_pec_deck", "display": "Reverse Pec Deck", "muscles": ["Shoulders", "Back"], "image": "static/images/reversepecdeck.jpg", "video": "https://www.youtube.com/embed/jw7oFFBnwCU"},
-	{"key": "upright_row", "display": "Upright Row", "muscles": ["Shoulders", "Triceps"], "image": "static/images/uprightrow.jpg", "video": "https://www.youtube.com/embed/um3VVzqunPU"},
-	{"key": "cable_face_pull", "display": "Cable Face Pull", "muscles": ["Shoulders", "Back"], "image": "static/images/cablefacepull.jpg", "video": "https://www.youtube.com/embed/0Po47vvj9g4"},
-	// Biceps
-	{"key": "barbell_curl", "display": "Barbell Curl", "muscles": ["Biceps"], "image": "static/images/barbellcurl.jpg", "video": "https://www.youtube.com/embed/N5x5M1x1Gd0"},
-	{"key": "dumbbell_curl", "display": "Dumbbell Curl", "muscles": ["Biceps"], "image": "static/images/dumbbellcurl.jpg", "video": "https://www.youtube.com/embed/6DeLZ6cbgWQ"},
-	{"key": "alternating_dumbbell_curl", "display": "Alternating Dumbbell Curl", "muscles": ["Biceps"], "image": "static/images/alternatingdumbbellcurl.jpg", "video": "https://www.youtube.com/embed/o2Tma5Cek48"},
-	{"key": "hammer_curl", "display": "Hammer Curl", "muscles": ["Biceps"], "image": "static/images/hammercurl.jpg", "video": "https://www.youtube.com/embed/fM0TQLoesLs"},
-	{"key": "preacher_curl", "display": "Preacher Curl", "muscles": ["Biceps"], "image": "static/images/preachercurl.jpg", "video": "https://www.youtube.com/embed/Ja6ZlIDONac"},
-	{"key": "cable_curl", "display": "Cable Curl", "muscles": ["Biceps"], "image": "static/images/cablecurl.jpg", "video": "https://www.youtube.com/embed/F3Y03RnVY8Y"},
-	{"key": "incline_dumbbell_curl", "display": "Incline Dumbbell Curl", "muscles": ["Biceps"], "image": "static/images/inclinedumbbellcurl.jpg", "video": "https://www.youtube.com/embed/aG7CXiKxepw"},
-	{"key": "ez_bar_curl", "display": "EZ Bar Curl", "muscles": ["Biceps"], "image": "static/images/ezbarcurl.jpg", "video": "https://www.youtube.com/embed/-gSM-kqNlUw"},
-	{"key": "reverse_curl", "display": "Reverse Curl", "muscles": ["Biceps"], "image": "static/images/reversecurl.jpg", "video": "https://www.youtube.com/embed/hUA-fIpM7nA"},
-	{"key": "spider_curl", "display": "Spider Curl", "muscles": ["Biceps"], "image": "static/images/spidercurl.jpg", "video": "https://www.youtube.com/embed/ke2shAeQ0O8"},
-	// Triceps
-	{"key": "tricep_pushdown", "display": "Tricep Pushdown", "muscles": ["Triceps", "Shoulders"], "image": "static/images/triceppushdown.jpg", "video": "https://www.youtube.com/embed/6Fzep104f0s"},
-	{"key": "overhead_tricep_extension", "display": "Overhead Tricep Extension", "muscles": ["Triceps", "Shoulders"], "image": "static/images/overheadtricepextension.jpg", "video": "https://www.youtube.com/embed/a9oPnZReIRE"},
-	{"key": "cable_overhead_extension", "display": "Cable Overhead Extension", "muscles": ["Triceps", "Shoulders"], "image": "static/images/cableoverheadextension.jpg", "video": "https://www.youtube.com/embed/ns-RGsbzqok"},
-	{"key": "close_grip_bench_press", "display": "Close Grip Bench Press", "muscles": ["Triceps", "Chest"], "image": "static/images/closegripbenchpress.jpg", "video": "https://www.youtube.com/embed/FiQUzPtS90E"},
-	{"key": "dips", "display": "Dips", "muscles": ["Triceps", "Chest", "Shoulders"], "image": "static/images/dips.jpg", "video": "https://www.youtube.com/embed/oA8Sxv2WeOs"},
-	{"key": "seated_dip_machine", "display": "Seated Dip Machine", "muscles": ["Triceps", "Chest"], "image": "static/images/seateddipmachine.jpg", "video": "https://www.youtube.com/embed/Zg0tT27iYuY"},
-	{"key": "skull_crusher", "display": "Skull Crusher", "muscles": ["Triceps", "Shoulders"], "image": "static/images/skullcrusher.jpg", "video": "https://www.youtube.com/embed/l3rHYPtMUo8"},
-	{"key": "rope_pushdown", "display": "Rope Pushdown", "muscles": ["Triceps", "Shoulders"], "image": "static/images/ropepushdown.jpg", "video": "https://www.youtube.com/embed/-xa-6cQaZKY"},
-	{"key": "single_arm_cable_pushdown", "display": "Single Arm Cable Pushdown", "muscles": ["Triceps"], "image": "static/images/singlearmcablepushdown.jpg", "video": "https://www.youtube.com/embed/Cp_bShvMY4c"},
-	{"key": "diamond_push_up", "display": "Diamond Push-Up", "muscles": ["Triceps", "Chest", "Shoulders"], "image": "static/images/diamondpushup.jpg", "video": "https://www.youtube.com/embed/K8bKxVcwjrk"},
-	// Quads
-	{"key": "squat", "display": "Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/squat.jpg", "video": "https://www.youtube.com/embed/rrJIyZGlK8c"},
-	{"key": "hack_squat", "display": "Hack Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/hacksquat.jpg", "video": "https://www.youtube.com/embed/rYgNArpwE7E"},
-	{"key": "leg_press", "display": "Leg Press", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/legpress.jpg", "video": "https://www.youtube.com/embed/yZmx_Ac3880"},
-	{"key": "leg_extension", "display": "Leg Extension", "muscles": ["Quads"], "image": "static/images/legextension.jpg", "video": "https://www.youtube.com/embed/m0FOpMEgero"},
-	{"key": "bulgarian_split_squat", "display": "Bulgarian Split Squat", "muscles": ["Quads", "Glutes"], "image": "static/images/bulgariansplitsquat.jpg", "video": "https://www.youtube.com/embed/vgn7bSXkgkA"},
-	{"key": "smith_machine_squat", "display": "Smith Machine Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/smithmachinesquat.jpg", "video": "https://www.youtube.com/embed/-eO_VydErV0"},
-	{"key": "v_squat", "display": "V Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/vsquat.jpg", "video": "https://www.youtube.com/embed/u2n1vqVDYE4"},
-	{"key": "smith_machine_bench_press", "display": "Smith Machine Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/smithmachinebenchpress.jpg", "video": "https://www.youtube.com/embed/O5viuEPDXKY"},
-	{"key": "smith_machine_incline_bench_press", "display": "Smith Machine Incline Bench Press", "muscles": ["Chest", "Shoulders", "Triceps"], "image": "static/images/smithmachineinclinebenchpress.jpg", "video": "https://www.youtube.com/embed/8urE8Z8AMQ4"},
-	{"key": "smith_machine_decline_bench_press", "display": "Smith Machine Decline Bench Press", "muscles": ["Chest", "Triceps", "Shoulders"], "image": "static/images/smithmachinedeclinebenchpress.jpg", "video": "https://www.youtube.com/embed/R1Cwq8rJ_bI"},
-	{"key": "smith_machine_shoulder_press", "display": "Smith Machine Shoulder Press", "muscles": ["Shoulders", "Triceps"], "image": "static/images/smithmachineshoulderpress.jpg", "video": "https://www.youtube.com/embed/OLqZDUUD2b0"},
-	{"key": "goblet_squat", "display": "Goblet Squat", "muscles": ["Quads", "Glutes", "Hamstrings"], "image": "static/images/gobletsquat.jpg", "video": "https://www.youtube.com/embed/pEGfGwp6IEA"},
-	// Hamstrings
-	{"key": "lying_leg_curl", "display": "Lying Leg Curl", "muscles": ["Hamstrings", "Glutes"], "image": "static/images/lyinglegcurl.jpg", "video": "https://www.youtube.com/embed/SbSNUXPRkc8"},
-	{"key": "seated_leg_curl_machine", "display": "Seated Leg Curl Machine", "muscles": ["Hamstrings", "Glutes"], "image": "static/images/seatedlegcurlmachine.jpg", "video": "https://www.youtube.com/embed/Orxowest56U"},
-	{"key": "good_morning", "display": "Good Morning", "muscles": ["Hamstrings", "Glutes", "Back"], "image": "static/images/goodmorning.jpg", "video": "https://www.youtube.com/embed/dEJ0FTm-CEk"},
-	// Glutes
-	{"key": "hip_thrust", "display": "Hip Thrust", "muscles": ["Glutes", "Hamstrings"], "image": "static/images/hipthrust.jpg", "video": "https://www.youtube.com/embed/pUdIL5x0fWg"},
-	{"key": "cable_kickback", "display": "Cable Kickback", "muscles": ["Glutes", "Hamstrings"], "image": "static/images/cablekickback.jpg", "video": "https://www.youtube.com/embed/zjVK1sOqFdw"},
-	{"key": "abductor_machine", "display": "Abductor Machine", "muscles": ["Glutes"], "image": "static/images/abductormachine.jpg", "video": "https://www.youtube.com/embed/G_8LItOiZ0Q"},
-	{"key": "adductor_machine", "display": "Adductor Machine", "muscles": ["Glutes"], "image": "static/images/adductormachine.jpg", "video": "https://www.youtube.com/embed/CjAVezAggkI"},
-	// Calves
-	{"key": "standing_calf_raise", "display": "Standing Calf Raise", "muscles": ["Calves"], "image": "static/images/standingcalfraise.jpg", "video": "https://www.youtube.com/embed/g_E7_q1z2bo"},
-	{"key": "seated_calf_raise", "display": "Seated Calf Raise", "muscles": ["Calves"], "image": "static/images/seatedcalfraise.jpg", "video": "https://www.youtube.com/embed/2Q-HQ3mnePg"},
-	{"key": "leg_press_calf_raise", "display": "Leg Press Calf Raise", "muscles": ["Calves"], "image": "static/images/legpresscalfraise.jpg", "video": "https://www.youtube.com/embed/KxEYX_cuesM"},
-	{"key": "donkey_calf_raise", "display": "Donkey Calf Raise", "muscles": ["Calves"], "image": "static/images/donkeycalfraise.jpg", "video": "https://www.youtube.com/embed/r30EoMPSNns"},
-	// Abs
-	{"key": "crunch", "display": "Crunch", "muscles": ["Abs"], "image": "static/images/crunch.jpg", "video": "https://www.youtube.com/embed/NnVhqMQRvmM"},
-	{"key": "cable_crunch", "display": "Cable Crunch", "muscles": ["Abs"], "image": "static/images/cablecrunch.jpg", "video": "https://www.youtube.com/embed/b9FJ4hIK3pI"},
-	{"key": "decline_sit_up", "display": "Decline Sit-Up", "muscles": ["Abs"], "image": "static/images/declinesitup.jpg", "video": "https://www.youtube.com/embed/DAnTf16NcT0"},
-	{"key": "hanging_leg_raise", "display": "Hanging Leg Raise", "muscles": ["Abs"], "image": "static/images/hanginglegraise.jpg", "video": "https://www.youtube.com/embed/7FwGZ8qY5OU"},
-	{"key": "knee_raise", "display": "Knee Raise", "muscles": ["Abs"], "image": "static/images/kneeraise.jpg", "video": "https://www.youtube.com/embed/RD_A-Z15ER4"},
-	{"key": "russian_twist", "display": "Russian Twist", "muscles": ["Abs", "Back"], "image": "static/images/russiantwist.jpg", "video": "https://www.youtube.com/embed/99T1EfpMwPA"},
-	{"key": "rotary_torso_machine", "display": "Rotary Torso Machine", "muscles": ["Abs", "Back"], "image": "static/images/rotarytorsomachine.jpg", "video": "https://www.youtube.com/embed/h5naeryzGjE"}
-];
+// Helper function to get the correct API URL
+function getApiUrl(path) {
+	// Remove leading slash if present
+	const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+	
+	// If BACKEND_URL is set (for Capacitor), use it
+	if (window.BACKEND_URL) {
+		return `${window.BACKEND_URL}/${cleanPath}`;
+	}
+	
+	// Otherwise use relative path (for web)
+	return `/${cleanPath}`;
+}
+
+let exercisesLoading = false;
+let exercisesLoaded = false;
 
 async function loadExercises() {
-	try {
-		const res = await fetch('/exercises');
-		if (res.ok) {
-		const data = await res.json();
-		allExercises = data.exercises || [];
-		} else {
-			throw new Error('Server not available');
+	// Prevent multiple simultaneous loads
+	if (exercisesLoading) {
+		console.log('Exercises already loading, waiting...');
+		// Wait for existing load to complete
+		while (exercisesLoading) {
+			await new Promise(resolve => setTimeout(resolve, 100));
 		}
-	} catch (e) {
-		// In Capacitor, Flask server is not available - use hardcoded exercises
-		console.log('Using hardcoded exercises (Capacitor mode)');
-		allExercises = HARDCODED_EXERCISES;
+		return;
 	}
 	
-	// If exercise selector is open, refresh the display
-	const selector = document.getElementById('exercise-selector');
-	if (selector && !selector.classList.contains('hidden')) {
-		const searchInput = document.getElementById('exercise-selector-search');
-		const selectedMuscle = document.querySelector('#exercise-selector-muscles button.active')?.textContent || null;
-		if (window.filterExercisesForSelector) {
-			window.filterExercisesForSelector(searchInput?.value || '', selectedMuscle === 'All' ? null : selectedMuscle);
-		}
+	// If already loaded, don't reload
+	if (exercisesLoaded && allExercises.length > 0) {
+		console.log('Exercises already loaded');
+		return;
 	}
-}
-
-async function loadStreak() {
-	const user = await getCurrentUser();
-	if (!user) {
-	document.querySelectorAll('.streak-count').forEach(el => {
-			if (el) el.textContent = '0';
+	
+	exercisesLoading = true;
+	
+	try {
+		const url = getApiUrl('/exercises');
+		console.log('Loading exercises from:', url);
+		console.log('BACKEND_URL:', window.BACKEND_URL);
+		
+		const res = await fetch(url, {
+			method: 'GET',
+			headers: {
+				'Content-Type': 'application/json',
+			}
 		});
-		return 0;
-	}
-	
-	try {
-		// Get streak from workouts - count consecutive days with workouts
-		const { data: workouts, error } = await supabaseClient
-			.from('workouts')
-			.select('date')
-			.eq('user_id', user.id)
-			.order('date', { ascending: false });
 		
-		if (error) {
-			console.error("Supabase error loading workouts for streak:", error);
-			throw error;
+		console.log('Response status:', res.status, res.statusText);
+		
+		if (!res.ok) {
+			const errorText = await res.text();
+			console.error('Error response:', errorText);
+			throw new Error(`Failed to fetch exercises: ${res.status} ${res.statusText} - ${errorText}`);
 		}
 		
-		// Calculate streak from workout dates
-		let streak = 0;
-		if (workouts && workouts.length > 0) {
-	const today = new Date();
-			today.setHours(0, 0, 0, 0);
-			let checkDate = new Date(today);
-			
-			for (const workout of workouts) {
-				// Handle date string (YYYY-MM-DD) or Date object
-				const dateStr = typeof workout.date === 'string' ? workout.date : workout.date.toISOString().split('T')[0];
-				const workoutDate = new Date(dateStr);
-				workoutDate.setHours(0, 0, 0, 0);
-				
-				if (workoutDate.getTime() === checkDate.getTime()) {
-					streak++;
-					checkDate.setDate(checkDate.getDate() - 1);
-				} else if (workoutDate.getTime() < checkDate.getTime()) {
-					break;
-				}
+		const data = await res.json();
+		console.log('Response data:', data);
+		
+		allExercises = data.exercises || [];
+		exercisesLoaded = true;
+		console.log(`Successfully loaded ${allExercises.length} exercises`);
+		
+		// If no exercises loaded, try to show a user-friendly message
+		if (allExercises.length === 0) {
+			console.warn('No exercises found in response');
+		}
+		
+		// If exercise selector is open, refresh it
+		const selector = document.getElementById('exercise-selector');
+		if (selector && !selector.classList.contains('hidden')) {
+			const filterFn = window.filterExercisesForSelector;
+			if (typeof filterFn === 'function') {
+				const searchInput = document.getElementById('exercise-selector-search');
+				const query = searchInput?.value || '';
+				filterFn(query, null);
 			}
 		}
-		
-		document.querySelectorAll('.streak-count').forEach(el => {
-			if (el) el.textContent = streak;
+	} catch (e) {
+		console.error('Failed to load exercises:', e);
+		console.error('Error details:', {
+			message: e.message,
+			stack: e.stack,
+			url: getApiUrl('/exercises'),
+			backendUrl: window.BACKEND_URL
 		});
+		// Set empty array to prevent further errors
+		allExercises = [];
+		exercisesLoaded = false;
 		
-		return streak;
-	} catch (error) {
-		console.error('Error loading streak:', error);
-		document.querySelectorAll('.streak-count').forEach(el => {
-			if (el) el.textContent = '0';
-		});
-		return 0;
+		// Try to show error to user if possible
+		if (typeof alert !== 'undefined') {
+			// Only in development/debug mode
+			if (window.location.href.includes('localhost') || window.location.href.includes('capacitor://')) {
+				alert(`Failed to load exercises: ${e.message}\n\nCheck console for details.`);
+			}
+		}
+	} finally {
+		exercisesLoading = false;
 	}
 }
 
-async function updateStreak() {
-	// Streak is automatically calculated from workouts, so just reload it
-	await loadStreak();
+function loadStreak() {
+	const streak = parseInt(localStorage.getItem('streak') || '0');
+	document.querySelectorAll('.streak-count').forEach(el => {
+		if (el) el.textContent = streak;
+	});
+}
+
+function updateStreak() {
+	const today = new Date();
+	const todayKey = today.toISOString().slice(0, 10); // YYYY-MM-DD
+	
+	const lastStreakDate = localStorage.getItem('lastStreakDate');
+	const currentStreak = parseInt(localStorage.getItem('streak') || '0');
+	
+	// If no previous date or it's a new day, increment streak
+	if (!lastStreakDate || lastStreakDate !== todayKey) {
+		const newStreak = currentStreak + 1;
+		localStorage.setItem('streak', newStreak.toString());
+		localStorage.setItem('lastStreakDate', todayKey);
+		loadStreak();
+		// Always update settings stats when streak changes
+		loadSettingsStats();
+	}
 }
 
 function saveRecentScan(data) {
@@ -5307,43 +4442,325 @@ function loadRecentScans() {
 	});
 }
 
-// AI Detect Error Modal
-function showAIDetectErrorModal(errorDetails) {
-	console.error('❌ Showing AI Detect Error Modal', errorDetails);
-	
-	const modal = document.getElementById('ai-detect-error-modal');
-	if (modal) {
-		// Update error message if provided
-		const errorMsg = modal.querySelector('.ai-detect-error-message');
-		if (errorMsg && errorDetails) {
-			errorMsg.textContent = errorDetails;
-		}
-		
-		modal.classList.remove('hidden');
-		
-		// Close on backdrop click
-		const backdrop = modal.querySelector('.ai-detect-error-backdrop');
-		if (backdrop) {
-			backdrop.onclick = () => {
-				modal.classList.add('hidden');
-			};
-		}
-		
-		// Close on button click
-		const tryAgainBtn = document.getElementById('ai-detect-error-try-again');
-		if (tryAgainBtn) {
-			tryAgainBtn.onclick = () => {
-				modal.classList.add('hidden');
-			};
-		}
-	} else {
-		console.error('❌ AI Detect Error Modal not found in DOM!');
-		// Fallback: show alert
-		alert('AI Detection Error: ' + (errorDetails || 'Could not detect an exercise from this photo.'));
-	}
-}
-
 // Make exercise selector accessible from workout builder
 window.openExerciseSelector = openExerciseSelector;
 window.addExerciseToWorkout = addExerciseToWorkout;
+
+// ========== NOTIFICATIONS ==========
+async function requestNotificationPermission() {
+	try {
+		if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
+			const LocalNotifications = Capacitor.Plugins.LocalNotifications;
+			const result = await LocalNotifications.requestPermissions();
+			if (result.display === 'granted') {
+				console.log('Notification permission granted');
+				return true;
+			} else {
+				console.log('Notification permission denied');
+				return false;
+			}
+		}
+		return false;
+	} catch (e) {
+		console.error('Error requesting notification permission:', e);
+		return false;
+	}
+}
+
+// Check if user has saved a workout today
+function hasWorkoutToday() {
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	const today = new Date();
+	const todayKey = today.toISOString().split('T')[0]; // YYYY-MM-DD
+	
+	return workouts.some(workout => {
+		if (!workout.date) return false;
+		const workoutDate = new Date(workout.date);
+		const workoutKey = workoutDate.toISOString().split('T')[0];
+		return workoutKey === todayKey;
+	});
+}
+
+// Get current streak
+function getCurrentStreak() {
+	return parseInt(localStorage.getItem('streak') || '0');
+}
+
+// Schedule daily workout reminder (18:00) - only shows if no workout today
+async function scheduleDailyWorkoutReminder() {
+	try {
+		if (typeof Capacitor === 'undefined' || !Capacitor.Plugins || !Capacitor.Plugins.LocalNotifications) {
+			return;
+		}
+		
+		const LocalNotifications = Capacitor.Plugins.LocalNotifications;
+		
+		// Cancel existing daily reminder
+		try {
+			await LocalNotifications.cancel({ notifications: [{ id: 100 }] });
+		} catch (e) {}
+		
+		// Schedule for 18:00 today (or tomorrow if already past)
+		const now = new Date();
+		const reminderTime = new Date();
+		reminderTime.setHours(18, 0, 0, 0);
+		
+		if (now >= reminderTime) {
+			reminderTime.setDate(reminderTime.getDate() + 1);
+		}
+		
+		// Get body text (will be checked when notification fires)
+		const bodyText = getDailyReminderBody();
+		
+		// Schedule repeating daily notification
+		// Note: We can't conditionally show notifications, but we can update the body
+		// The notification will always show, but the body will indicate if workout is needed
+		await LocalNotifications.schedule({
+			notifications: [
+				{
+					title: 'Time to work out!💪',
+					body: bodyText,
+					id: 100,
+					schedule: { 
+						at: reminderTime,
+						repeats: true,
+						every: 'day'
+					},
+					sound: 'default'
+				}
+			]
+		});
+		
+		console.log('Daily workout reminder scheduled for 18:00');
+	} catch (e) {
+		console.error('Error scheduling daily reminder:', e);
+	}
+}
+
+// Check and cancel daily reminder if workout already done today, then reschedule for tomorrow
+async function checkAndCancelDailyReminder() {
+	try {
+		if (typeof Capacitor === 'undefined' || !Capacitor.Plugins || !Capacitor.Plugins.LocalNotifications) {
+			return;
+		}
+		
+		const LocalNotifications = Capacitor.Plugins.LocalNotifications;
+		
+		if (hasWorkoutToday()) {
+			// Cancel today's reminder
+			await LocalNotifications.cancel({ notifications: [{ id: 100 }] });
+			console.log('Daily reminder cancelled - workout already done today');
+			
+			// Reschedule for tomorrow at 18:00
+			const tomorrow = new Date();
+			tomorrow.setDate(tomorrow.getDate() + 1);
+			tomorrow.setHours(18, 0, 0, 0);
+			
+			await LocalNotifications.schedule({
+				notifications: [
+					{
+						title: 'Time to work out!💪',
+						body: getDailyReminderBody(),
+						id: 100,
+						schedule: { 
+							at: tomorrow,
+							repeats: true,
+							every: 'day'
+						},
+						sound: 'default'
+					}
+				]
+			});
+			console.log('Daily reminder rescheduled for tomorrow 18:00');
+		} else {
+			// No workout today, ensure reminder is scheduled
+			await scheduleDailyWorkoutReminder();
+		}
+	} catch (e) {
+		console.error('Error checking daily reminder:', e);
+	}
+}
+
+// Get daily reminder body text
+function getDailyReminderBody() {
+	const streak = getCurrentStreak();
+	if (streak > 0) {
+		return `Don't break your ${streak} day streak!🔥`;
+	}
+	return 'Time to work out!💪';
+}
+
+// Schedule weekly progress summary (Sunday 20:00)
+async function scheduleWeeklyProgressSummary() {
+	try {
+		if (typeof Capacitor === 'undefined' || !Capacitor.Plugins || !Capacitor.Plugins.LocalNotifications) {
+			return;
+		}
+		
+		const LocalNotifications = Capacitor.Plugins.LocalNotifications;
+		
+		// Cancel existing weekly summary
+		try {
+			await LocalNotifications.cancel({ notifications: [{ id: 200 }] });
+		} catch (e) {}
+		
+		// Find next Sunday at 20:00
+		const now = new Date();
+		const nextSunday = new Date();
+		nextSunday.setHours(20, 0, 0, 0);
+		
+		// Get days until next Sunday (0 = Sunday, 1 = Monday, etc.)
+		const daysUntilSunday = (7 - nextSunday.getDay()) % 7;
+		if (daysUntilSunday === 0 && now >= nextSunday) {
+			// If it's already Sunday after 20:00, schedule for next week
+			nextSunday.setDate(nextSunday.getDate() + 7);
+		} else {
+			nextSunday.setDate(nextSunday.getDate() + daysUntilSunday);
+		}
+		
+		// Schedule repeating weekly notification
+		await LocalNotifications.schedule({
+			notifications: [
+				{
+					title: 'Weekly Progress Summary',
+					body: getWeeklySummaryBody(),
+					id: 200,
+					schedule: { 
+						at: nextSunday,
+						repeats: true,
+						every: 'week'
+					},
+					sound: 'default'
+				}
+			]
+		});
+		
+		console.log('Weekly progress summary scheduled for Sunday 20:00');
+	} catch (e) {
+		console.error('Error scheduling weekly summary:', e);
+	}
+}
+
+// Get weekly summary body text
+function getWeeklySummaryBody() {
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	const now = new Date();
+	const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+	
+	// Filter workouts from last 7 days
+	const recentWorkouts = workouts.filter(workout => {
+		if (!workout.date) return false;
+		const workoutDate = new Date(workout.date);
+		return workoutDate >= weekAgo;
+	});
+	
+	const workoutCount = recentWorkouts.length;
+	
+	// Calculate total hours
+	let totalMs = 0;
+	recentWorkouts.forEach(workout => {
+		if (workout.duration && workout.duration > 0) {
+			totalMs += workout.duration;
+		}
+	});
+	const totalHours = (totalMs / (1000 * 60 * 60)).toFixed(1);
+	
+	// Calculate total volume
+	const unit = getWeightUnit();
+	let totalVolume = 0;
+	recentWorkouts.forEach(workout => {
+		if (workout.exercises) {
+			workout.exercises.forEach(ex => {
+				if (ex.sets) {
+					ex.sets.forEach(set => {
+						const weight = parseFloat(set.weight) || 0;
+						const reps = parseInt(set.reps) || 0;
+						if (weight > 0 && reps > 0) {
+							// Volume is stored in kg, convert if needed
+							let displayWeight = weight;
+							if (unit === 'lbs') {
+								displayWeight = weight * 2.20462;
+							}
+							totalVolume += displayWeight * reps;
+						}
+					});
+				}
+			});
+		}
+	});
+	const volumeText = unit === 'lbs' ? `${Math.round(totalVolume)} ${unit}` : `${Math.round(totalVolume)} ${unit}`;
+	
+	return `This week: ${workoutCount} workouts, ${totalHours} hours, ${volumeText} volume`;
+}
+
+// Schedule rest timer notification
+async function scheduleRestTimerNotification(seconds) {
+	try {
+		if (typeof Capacitor === 'undefined' || !Capacitor.Plugins || !Capacitor.Plugins.LocalNotifications) {
+			return;
+		}
+		
+		const LocalNotifications = Capacitor.Plugins.LocalNotifications;
+		
+		// Cancel existing rest timer notification
+		try {
+			await LocalNotifications.cancel({ notifications: [{ id: 300 }] });
+		} catch (e) {}
+		
+		// Don't schedule if seconds is 0 or less
+		if (seconds <= 0) {
+			return;
+		}
+		
+		// Schedule notification for when timer reaches 00:00 (now + seconds)
+		const notificationTime = new Date(Date.now() + seconds * 1000);
+		
+		await LocalNotifications.schedule({
+			notifications: [
+				{
+					title: 'Rest time is up!',
+					body: 'Ready for your next set?',
+					id: 300,
+					schedule: { at: notificationTime },
+					sound: 'default',
+					actionTypeId: 'REST_TIMER_ACTION'
+				}
+			]
+		});
+		
+		console.log('Rest timer notification scheduled for', seconds, 'seconds from now');
+	} catch (e) {
+		console.error('Error scheduling rest timer notification:', e);
+	}
+}
+
+async function cancelAllNotifications() {
+	try {
+		if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
+			const LocalNotifications = Capacitor.Plugins.LocalNotifications;
+			await LocalNotifications.cancel({ notifications: [{ id: 100 }, { id: 200 }, { id: 300 }] });
+			console.log('All notifications cancelled');
+		}
+	} catch (e) {
+		console.error('Error cancelling notifications:', e);
+	}
+}
+
+// Schedule all notifications
+async function scheduleAllNotifications() {
+	await scheduleDailyWorkoutReminder();
+	await scheduleWeeklyProgressSummary();
+}
+
+async function cancelAllNotifications() {
+	try {
+		if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
+			const { LocalNotifications } = Capacitor.Plugins;
+			await LocalNotifications.cancel({ notifications: [{ id: 1 }] });
+			console.log('All notifications cancelled');
+		}
+	} catch (e) {
+		console.error('Error cancelling notifications:', e);
+	}
+}
 
