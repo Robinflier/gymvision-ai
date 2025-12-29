@@ -1238,41 +1238,8 @@ def vision_detect():
 
 	print(f"[DEBUG] Vision detect: Received image: {file.filename}, size: {file_size} bytes")
 
-	try:
-		# Load YOLO models
-		model, model1, model2, model3, model4 = get_models()
-	except Exception as model_error:
-		error_msg = str(model_error)
-		print(f"[ERROR] Failed to load YOLO models: {error_msg}")
-		import traceback
-		traceback.print_exc()
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		if "not available" in error_msg.lower() or "ultralytics" in error_msg.lower():
-			return jsonify({"success": False, "error": "YOLO models not available. Please install ultralytics package."}), 500
-		elif "not found" in error_msg.lower() or "file" in error_msg.lower():
-			return jsonify({"success": False, "error": "YOLO model files not found. Please ensure best.pt files are in the root directory."}), 500
-		else:
-			return jsonify({"success": False, "error": f"Failed to load models: {error_msg}"}), 500
-	
-	try:
-		# Check if models are loaded
-		models_loaded = sum(1 for m in [model, model1, model2, model3, model4] if m is not None)
-		print(f"[DEBUG] Vision detect: Models loaded: {models_loaded}/5")
-		
-		if models_loaded == 0:
-			try:
-				os.remove(str(tmp_path))
-			except Exception:
-				pass
-			return jsonify({"success": False, "error": "No YOLO models available"}), 500
-		
-		# Get predictions from all models (same logic as /predict)
-		predictions = []
-	
 	# Helper function to get top predictions from a model (same as in /predict)
+	# Define this BEFORE the try block so it's available inside
 	def get_model_predictions(model_obj, model_name, max_predictions=3):
 		model_preds = []
 		try:
@@ -1349,80 +1316,95 @@ def vision_detect():
 				traceback.print_exc()
 		return model_preds
 	
-	# Get predictions from all available models
-	if model:
-		predictions.extend(get_model_predictions(model, "best"))
-	if model1:
-		predictions.extend(get_model_predictions(model1, "best1"))
-	if model2:
-		predictions.extend(get_model_predictions(model2, "best2"))
-	if model3:
-		predictions.extend(get_model_predictions(model3, "best3"))
-	if model4:
-		predictions.extend(get_model_predictions(model4, "best4"))
-	
-	if not predictions:
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
-	
-	# Filter out unwanted predictions
-	excluded_keys = {normalize_label("Kettlebells"), normalize_label("Assisted Chin Up-Dip")}
-	predictions_before_filter = len(predictions)
-	predictions = [p for p in predictions if p.get("key") not in excluded_keys]
-	print(f"[DEBUG] After filtering excluded keys: {len(predictions)} predictions (removed {predictions_before_filter - len(predictions)})")
-	
-	if not predictions:
-		print("[ERROR] All predictions were filtered out by excluded_keys")
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		return jsonify({"success": False, "error": "NO_PREDICTION", "message": "No exercise detected. Please try a clearer photo with a visible exercise machine."}), 422
-	
-	# Group predictions by key and select best from each model group
-	grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-	for pred in predictions:
-		grouped[pred["key"]].append(pred)
-	
-	# For each unique key, select the best prediction based on model priority
-	label_candidates: List[Dict[str, Any]] = []
-	for key, preds_for_label in grouped.items():
-		sorted_preds = sorted(preds_for_label, key=lambda p: p["conf"], reverse=True)
-		top_conf = sorted_preds[0]["conf"]
-		priority = LABEL_MODEL_PRIORITY.get(key, DEFAULT_MODEL_PRIORITY)
-		chosen = None
-		for model_name in priority:
-			candidate = next((p for p in sorted_preds if p["source"] == model_name), None)
-			if candidate and candidate["conf"] >= top_conf - MODEL_PRIORITY_MARGIN:
-				chosen = candidate
-				break
-		if chosen is None:
-			chosen = sorted_preds[0]
-		label_candidates.append(chosen)
-	
-	# Get top 3 predictions sorted by confidence
-	sorted_predictions = sorted(label_candidates, key=lambda p: p["conf"], reverse=True)[:3]
-	
-	if not sorted_predictions:
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
-
-	# Get the top prediction
-	selected = sorted_predictions[0]
-	top_payloads = [_serialize_prediction_choice(pred) for pred in sorted_predictions]
-	primary_payload = top_payloads[0]
-	
-	# Return in same format as /predict
 	try:
-		os.remove(str(tmp_path))
-	except Exception:
-		pass
+		# Check if models are loaded
+		models_loaded = sum(1 for m in [model, model1, model2, model3, model4] if m is not None)
+		print(f"[DEBUG] Vision detect: Models loaded: {models_loaded}/5")
+		
+		if models_loaded == 0:
+			try:
+				os.remove(str(tmp_path))
+			except Exception:
+				pass
+			return jsonify({"success": False, "error": "No YOLO models available"}), 500
+		
+		# Get predictions from all models (same logic as /predict)
+		predictions = []
+		
+		# Get predictions from all available models
+		if model:
+			predictions.extend(get_model_predictions(model, "best"))
+		if model1:
+			predictions.extend(get_model_predictions(model1, "best1"))
+		if model2:
+			predictions.extend(get_model_predictions(model2, "best2"))
+		if model3:
+			predictions.extend(get_model_predictions(model3, "best3"))
+		if model4:
+			predictions.extend(get_model_predictions(model4, "best4"))
+		
+		if not predictions:
+			try:
+				os.remove(str(tmp_path))
+			except Exception:
+				pass
+			return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+		
+		# Filter out unwanted predictions
+		excluded_keys = {normalize_label("Kettlebells"), normalize_label("Assisted Chin Up-Dip")}
+		predictions_before_filter = len(predictions)
+		predictions = [p for p in predictions if p.get("key") not in excluded_keys]
+		print(f"[DEBUG] After filtering excluded keys: {len(predictions)} predictions (removed {predictions_before_filter - len(predictions)})")
+		
+		if not predictions:
+			print("[ERROR] All predictions were filtered out by excluded_keys")
+			try:
+				os.remove(str(tmp_path))
+			except Exception:
+				pass
+			return jsonify({"success": False, "error": "NO_PREDICTION", "message": "No exercise detected. Please try a clearer photo with a visible exercise machine."}), 422
+		
+		# Group predictions by key and select best from each model group
+		grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+		for pred in predictions:
+			grouped[pred["key"]].append(pred)
+		
+		# For each unique key, select the best prediction based on model priority
+		label_candidates: List[Dict[str, Any]] = []
+		for key, preds_for_label in grouped.items():
+			sorted_preds = sorted(preds_for_label, key=lambda p: p["conf"], reverse=True)
+			top_conf = sorted_preds[0]["conf"]
+			priority = LABEL_MODEL_PRIORITY.get(key, DEFAULT_MODEL_PRIORITY)
+			chosen = None
+			for model_name in priority:
+				candidate = next((p for p in sorted_preds if p["source"] == model_name), None)
+				if candidate and candidate["conf"] >= top_conf - MODEL_PRIORITY_MARGIN:
+					chosen = candidate
+					break
+			if chosen is None:
+				chosen = sorted_preds[0]
+			label_candidates.append(chosen)
+		
+		# Get top 3 predictions sorted by confidence
+		sorted_predictions = sorted(label_candidates, key=lambda p: p["conf"], reverse=True)[:3]
+		
+		if not sorted_predictions:
+			try:
+				os.remove(str(tmp_path))
+			except Exception:
+				pass
+			return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+
+		# Get the top prediction
+		selected = sorted_predictions[0]
+		top_payloads = [_serialize_prediction_choice(pred) for pred in sorted_predictions]
+		primary_payload = top_payloads[0]
+		
+		# Return in same format as /predict
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
 
 		return jsonify({
 			"success": True,
