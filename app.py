@@ -581,51 +581,92 @@ def load_user(user_id: str):
 
 
 # ========== ML MODELS ==========
+# Memory-efficient model loading: only load models when needed, unload when not in use
+# Max 2 models in memory at once to prevent memory issues on Render
 
-_model = None
-_model1 = None
-_model2 = None
-_model3 = None
-_model4 = None
+_model_cache = {}  # Dict to store loaded models: {"best": model_obj, ...}
+_model_paths = {
+	"best": MODEL_PATH,
+	"best1": MODEL_PATH_1,
+	"best2": MODEL_PATH_2,
+	"best3": MODEL_PATH_3,
+	"best4": MODEL_PATH_4
+}
+_MAX_MODELS_IN_MEMORY = 2  # Maximum number of models to keep in memory
 
 
-def get_models():
-	global _model, _model1, _model2, _model3, _model4
-	# Lazy load models only when needed (not at startup)
-	# This prevents timeout during deployment
+def _load_model(model_name: str):
+	"""Load a single model if it exists and isn't already loaded."""
 	if YOLO is None:
 		raise RuntimeError("Ultralytics not available. Install dependencies from requirements.txt")
 	
-	# Load models one by one, only if they exist and haven't been loaded
-	if _model is None and MODEL_PATH.exists():
-		print(f"[INFO] Loading model: {MODEL_PATH}")
-		_model = YOLO(str(MODEL_PATH))
-		print(f"[INFO] Model loaded: best.pt")
+	if model_name in _model_cache:
+		return _model_cache[model_name]
 	
-	if _model1 is None and MODEL_PATH_1.exists():
-		print(f"[INFO] Loading model: {MODEL_PATH_1}")
-		_model1 = YOLO(str(MODEL_PATH_1))
-		print(f"[INFO] Model loaded: best1.pt")
+	model_path = _model_paths.get(model_name)
+	if not model_path or not model_path.exists():
+		return None
 	
-	if _model2 is None and MODEL_PATH_2.exists():
-		print(f"[INFO] Loading model: {MODEL_PATH_2}")
-		_model2 = YOLO(str(MODEL_PATH_2))
-		print(f"[INFO] Model loaded: best2.pt")
+	# If we're at memory limit, unload least recently used model
+	if len(_model_cache) >= _MAX_MODELS_IN_MEMORY:
+		# Remove first model (FIFO - simple strategy)
+		oldest_key = next(iter(_model_cache))
+		print(f"[INFO] Unloading model {oldest_key} to free memory")
+		del _model_cache[oldest_key]
+		import gc
+		gc.collect()  # Force garbage collection
 	
-	if _model3 is None and MODEL_PATH_3.exists():
-		print(f"[INFO] Loading model: {MODEL_PATH_3}")
-		_model3 = YOLO(str(MODEL_PATH_3))
-		print(f"[INFO] Model loaded: best3.pt")
+	print(f"[INFO] Loading model: {model_name} ({model_path})")
+	_model_cache[model_name] = YOLO(str(model_path))
+	print(f"[INFO] Model loaded: {model_name}")
+	return _model_cache[model_name]
+
+
+def get_models():
+	"""Get all available models, loading them on-demand with memory management."""
+	# Load models on-demand (only when actually needed for prediction)
+	# Priority: best, best3 (most commonly used), then others
+	# Only load max 2 models at once to prevent memory issues
+	models = {}
 	
-	if _model4 is None and MODEL_PATH_4.exists():
-		print(f"[INFO] Loading model: {MODEL_PATH_4}")
-		_model4 = YOLO(str(MODEL_PATH_4))
-		print(f"[INFO] Model loaded: best4.pt")
+	# Load priority models first (best and best3 are most commonly used)
+	priority_models = ["best", "best3"]
+	for model_name in priority_models:
+		model = _load_model(model_name)
+		if model is not None:
+			models[model_name] = model
 	
-	if all(m is None for m in (_model, _model1, _model2, _model3, _model4)):
+	# Only load additional models if we have memory space
+	if len(models) < _MAX_MODELS_IN_MEMORY:
+		for model_name in ["best1", "best2", "best4"]:
+			if len(models) >= _MAX_MODELS_IN_MEMORY:
+				break
+			model = _load_model(model_name)
+			if model is not None:
+				models[model_name] = model
+	
+	if not models:
 		raise FileNotFoundError("No model files found. Check for best.pt, best1.pt, best2.pt, best3.pt or best4.pt")
 	
-	return _model, _model1, _model2, _model3, _model4
+	# Return in expected format for backward compatibility
+	return (
+		models.get("best"),
+		models.get("best1"),
+		models.get("best2"),
+		models.get("best3"),
+		models.get("best4")
+	)
+
+
+def unload_models():
+	"""Unload all models from memory to free up RAM."""
+	global _model_cache
+	if _model_cache:
+		print(f"[INFO] Unloading {len(_model_cache)} models from memory")
+		_model_cache.clear()
+		import gc
+		gc.collect()
+		print("[INFO] Models unloaded, memory freed")
 
 
 # ========== AUTHENTICATION ROUTES ==========
@@ -1133,6 +1174,281 @@ def _serialize_prediction_choice(pred: Dict[str, Any]) -> Dict[str, Any]:
 		"image": image_url_for_key(key, meta) or meta.get("image"),
 		"confidence": pred.get("conf", 0.0),
 	}
+
+
+@app.route("/api/check-models", methods=["GET"])
+def check_models():
+	"""Check if YOLO models are available on the server."""
+	models_status = {
+		"yolo_available": YOLO is not None,
+		"models": {},
+		"loaded_in_memory": len(_model_cache),
+		"max_models_in_memory": _MAX_MODELS_IN_MEMORY
+	}
+	
+	if YOLO is not None:
+		for name, path in [("best", MODEL_PATH), ("best1", MODEL_PATH_1), ("best2", MODEL_PATH_2), ("best3", MODEL_PATH_3), ("best4", MODEL_PATH_4)]:
+			exists = path.exists()
+			size = path.stat().st_size if exists else 0
+			models_status["models"][name] = {
+				"exists": exists,
+				"size_bytes": size,
+				"size_mb": round(size / (1024 * 1024), 2) if exists else 0,
+				"path": str(path),
+				"loaded": name in _model_cache
+			}
+	
+	return jsonify(models_status)
+
+@app.route("/api/vision-detect", methods=["POST"])
+def vision_detect():
+	"""AI exercise detection endpoint using YOLO models."""
+	# Check if YOLO is available
+	if YOLO is None:
+		return jsonify({"success": False, "error": "YOLO models not available. Please install ultralytics package."}), 500
+
+	file = request.files.get("image")
+	if not file:
+		return jsonify({"success": False, "error": "No image provided"}), 400
+
+	# Check if file has content
+	if file.content_length == 0:
+		return jsonify({"success": False, "error": "Image file is empty"}), 400
+
+	# Check filename
+	if not file.filename:
+		return jsonify({"success": False, "error": "No filename provided"}), 400
+
+	tmp_dir = APP_ROOT / "tmp"
+	tmp_dir.mkdir(exist_ok=True)
+	tmp_path = tmp_dir / "upload.jpg"  # Use same filename as /predict endpoint
+
+	try:
+		file.save(str(tmp_path))
+	except Exception as e:
+		return jsonify({"success": False, "error": f"Failed to save image: {str(e)}"}), 500
+
+	# Verify file was saved and is not empty
+	if not tmp_path.exists():
+		return jsonify({"success": False, "error": "Failed to save image file"}), 500
+
+	file_size = tmp_path.stat().st_size
+	if file_size == 0:
+		return jsonify({"success": False, "error": "Saved image file is empty (0 bytes)"}), 400
+
+	print(f"[DEBUG] Vision detect: Received image: {file.filename}, size: {file_size} bytes")
+
+	try:
+		# Load YOLO models
+		model, model1, model2, model3, model4 = get_models()
+	except Exception as model_error:
+		error_msg = str(model_error)
+		print(f"[ERROR] Failed to load YOLO models: {error_msg}")
+		import traceback
+		traceback.print_exc()
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		if "not available" in error_msg.lower() or "ultralytics" in error_msg.lower():
+			return jsonify({"success": False, "error": "YOLO models not available. Please install ultralytics package."}), 500
+		elif "not found" in error_msg.lower() or "file" in error_msg.lower():
+			return jsonify({"success": False, "error": "YOLO model files not found. Please ensure best.pt files are in the root directory."}), 500
+		else:
+			return jsonify({"success": False, "error": f"Failed to load models: {error_msg}"}), 500
+	
+	try:
+		# Check if models are loaded
+		models_loaded = sum(1 for m in [model, model1, model2, model3, model4] if m is not None)
+		print(f"[DEBUG] Vision detect: Models loaded: {models_loaded}/5")
+		
+		if models_loaded == 0:
+			try:
+				os.remove(str(tmp_path))
+			except Exception:
+				pass
+			return jsonify({"success": False, "error": "No YOLO models available"}), 500
+		
+		# Get predictions from all models (same logic as /predict)
+		predictions = []
+	
+	# Helper function to get top predictions from a model (same as in /predict)
+	def get_model_predictions(model_obj, model_name, max_predictions=3):
+		model_preds = []
+		try:
+			# Verify file still exists and is readable
+			if not tmp_path.exists():
+				print(f"[ERROR] Model {model_name}: Image file does not exist at {tmp_path}")
+				return model_preds
+			
+			file_size = tmp_path.stat().st_size
+			if file_size == 0:
+				print(f"[ERROR] Model {model_name}: Image file is empty (0 bytes)")
+				return model_preds
+			
+			results = model_obj.predict(source=str(tmp_path), verbose=False)
+			if not results or len(results) == 0:
+				print(f"[ERROR] Model {model_name}: No results returned from prediction")
+				return model_preds
+			
+			best = results[0]
+			
+			if hasattr(best, "probs") and best.probs is not None:
+				# Classification model - get top predictions
+				probs = best.probs.data
+				top_indices = probs.topk(min(max_predictions, len(best.names))).indices.tolist()
+				top_confs = probs.topk(min(max_predictions, len(best.names))).values.tolist()
+				
+				print(f"[DEBUG] Model {model_name} (classification): Found {len(top_indices)} predictions")
+				for idx, conf in zip(top_indices, top_confs):
+					label = best.names[int(idx)]
+					norm = normalize_label(label)
+					key = ALIASES.get(norm, norm)
+					conf_float = float(conf)
+					print(f"[DEBUG] Model {model_name}: {label} (key: {key}) - confidence: {conf_float:.4f}")
+					model_preds.append({"label": label, "conf": conf_float, "key": key, "source": model_name})
+			elif hasattr(best, "boxes") and len(best.boxes) > 0:  # type: ignore[attr-defined]
+				# Detection model - get top predictions by confidence
+				confidences = best.boxes.conf.tolist()  # type: ignore[attr-defined]
+				classes = best.boxes.cls.tolist()  # type: ignore[attr-defined]
+				
+				print(f"[DEBUG] Model {model_name} (detection): Found {len(confidences)} boxes")
+				
+				# Combine and sort by confidence
+				box_predictions = []
+				for i, (conf, cls_idx) in enumerate(zip(confidences, classes)):
+					label = best.names[int(cls_idx)]
+					norm = normalize_label(label)
+					key = ALIASES.get(norm, norm)
+					conf_float = float(conf)
+					print(f"[DEBUG] Model {model_name}: Box {i} - {label} (key: {key}) - confidence: {conf_float:.4f}")
+					box_predictions.append({"label": label, "conf": conf_float, "key": key, "source": model_name, "index": i})
+				
+				# Sort by confidence and get top unique keys
+				box_predictions.sort(key=lambda x: x["conf"], reverse=True)
+				seen_keys = set()
+				for pred in box_predictions:
+					if pred["key"] not in seen_keys:
+						model_preds.append(pred)
+						seen_keys.add(pred["key"])
+						if len(model_preds) >= max_predictions:
+							break
+			else:
+				print(f"[DEBUG] Model {model_name}: No predictions found (no probs, no boxes)")
+		except Exception as e:
+			error_msg = str(e)
+			print(f"[ERROR] Model {model_name} prediction failed: {error_msg}")
+			
+			# Check for specific OpenCV errors
+			if "buf.empty()" in error_msg or "imdecode" in error_msg:
+				print(f"[ERROR] Model {model_name}: Image file is corrupted or empty. File size: {tmp_path.stat().st_size if tmp_path.exists() else 0} bytes")
+			elif "No such file" in error_msg:
+				print(f"[ERROR] Model {model_name}: Image file not found at {tmp_path}")
+			else:
+				import traceback
+				traceback.print_exc()
+		return model_preds
+	
+	# Get predictions from all available models
+	if model:
+		predictions.extend(get_model_predictions(model, "best"))
+	if model1:
+		predictions.extend(get_model_predictions(model1, "best1"))
+	if model2:
+		predictions.extend(get_model_predictions(model2, "best2"))
+	if model3:
+		predictions.extend(get_model_predictions(model3, "best3"))
+	if model4:
+		predictions.extend(get_model_predictions(model4, "best4"))
+	
+	if not predictions:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+	
+	# Filter out unwanted predictions
+	excluded_keys = {normalize_label("Kettlebells"), normalize_label("Assisted Chin Up-Dip")}
+	predictions_before_filter = len(predictions)
+	predictions = [p for p in predictions if p.get("key") not in excluded_keys]
+	print(f"[DEBUG] After filtering excluded keys: {len(predictions)} predictions (removed {predictions_before_filter - len(predictions)})")
+	
+	if not predictions:
+		print("[ERROR] All predictions were filtered out by excluded_keys")
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"success": False, "error": "NO_PREDICTION", "message": "No exercise detected. Please try a clearer photo with a visible exercise machine."}), 422
+	
+	# Group predictions by key and select best from each model group
+	grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+	for pred in predictions:
+		grouped[pred["key"]].append(pred)
+	
+	# For each unique key, select the best prediction based on model priority
+	label_candidates: List[Dict[str, Any]] = []
+	for key, preds_for_label in grouped.items():
+		sorted_preds = sorted(preds_for_label, key=lambda p: p["conf"], reverse=True)
+		top_conf = sorted_preds[0]["conf"]
+		priority = LABEL_MODEL_PRIORITY.get(key, DEFAULT_MODEL_PRIORITY)
+		chosen = None
+		for model_name in priority:
+			candidate = next((p for p in sorted_preds if p["source"] == model_name), None)
+			if candidate and candidate["conf"] >= top_conf - MODEL_PRIORITY_MARGIN:
+				chosen = candidate
+				break
+		if chosen is None:
+			chosen = sorted_preds[0]
+		label_candidates.append(chosen)
+	
+	# Get top 3 predictions sorted by confidence
+	sorted_predictions = sorted(label_candidates, key=lambda p: p["conf"], reverse=True)[:3]
+	
+	if not sorted_predictions:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+
+	# Get the top prediction
+	selected = sorted_predictions[0]
+	top_payloads = [_serialize_prediction_choice(pred) for pred in sorted_predictions]
+	primary_payload = top_payloads[0]
+	
+	# Return in same format as /predict
+	try:
+		os.remove(str(tmp_path))
+	except Exception:
+		pass
+
+		return jsonify({
+			"success": True,
+			**primary_payload,
+			"top_predictions": top_payloads
+		})
+	except Exception as e:
+		error_msg = str(e)
+		print(f"[ERROR] Vision detect failed: {error_msg}")
+		import traceback
+		traceback.print_exc()
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		# Return more detailed error message
+		error_detail = f"Error: {error_msg}"
+		if "yolo" in error_msg.lower() or "ultralytics" in error_msg.lower():
+			error_detail = "YOLO model error. Models may not be loaded. Please check server logs."
+		elif "no model" in error_msg.lower() or "model file" in error_msg.lower():
+			error_detail = "YOLO model files not found. Please ensure best.pt files are available."
+		elif "api_key" in error_msg.lower() or "authentication" in error_msg.lower():
+			error_detail = "API key error. Please check configuration."
+		elif "model" in error_msg.lower():
+			error_detail = f"Model error: {error_msg}"
+		return jsonify({"success": False, "error": error_detail}), 500
 
 
 @app.route("/predict", methods=["POST"])
