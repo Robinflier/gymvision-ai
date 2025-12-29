@@ -1241,22 +1241,37 @@ def vision_detect():
 
 	tmp_dir = APP_ROOT / "tmp"
 	tmp_dir.mkdir(exist_ok=True)
-	tmp_path = tmp_dir / "upload.jpg"  # Use same filename as /predict endpoint
+	
+	# Use the filename from the file, or default to upload.jpg
+	safe_filename = file.filename or "upload.jpg"
+	# Sanitize filename to prevent path traversal
+	safe_filename = safe_filename.split("/")[-1].split("\\")[-1]
+	tmp_path = tmp_dir / safe_filename
 
 	try:
 		file.save(str(tmp_path))
+		print(f"[DEBUG] Saved file to: {tmp_path}")
 	except Exception as e:
+		print(f"[ERROR] Failed to save file: {str(e)}")
+		import traceback
+		traceback.print_exc()
 		return jsonify({"success": False, "error": f"Failed to save image: {str(e)}"}), 500
 
 	# Verify file was saved and is not empty
 	if not tmp_path.exists():
+		print(f"[ERROR] File does not exist after save: {tmp_path}")
 		return jsonify({"success": False, "error": "Failed to save image file"}), 500
 
 	file_size = tmp_path.stat().st_size
 	if file_size == 0:
+		print(f"[ERROR] Saved file is empty (0 bytes): {tmp_path}")
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
 		return jsonify({"success": False, "error": "Saved image file is empty (0 bytes)"}), 400
 
-	print(f"[DEBUG] Vision detect: Received image: {file.filename}, size: {file_size} bytes")
+	print(f"[DEBUG] Vision detect: Received image: {file.filename}, size: {file_size} bytes, saved to: {tmp_path}")
 
 	# Helper function to get top predictions from a model (same as in /predict)
 	# Define this BEFORE the try block so it's available inside
