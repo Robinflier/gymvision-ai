@@ -1321,6 +1321,9 @@ def vision_detect():
 		return model_preds
 	
 	try:
+		# Load models using memory-efficient loading
+		model, model1, model2, model3, model4 = get_models()
+		
 		# Check if models are loaded
 		models_loaded = sum(1 for m in [model, model1, model2, model3, model4] if m is not None)
 		print(f"[DEBUG] Vision detect: Models loaded: {models_loaded}/5")
