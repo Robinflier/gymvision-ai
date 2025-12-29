@@ -1,3 +1,57 @@
+// ======================
+// 🔥 API URL HELPER
+// ======================
+// Helper function to get the correct API URL for backend calls
+// In Capacitor (iOS/Android), we need to use the full backend URL
+// In web browser, we can use relative URLs
+function getApiUrl(path) {
+	// Check if we're in Capacitor (mobile app)
+	if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+		// Use the backend URL from environment or default to Render URL
+		const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
+		return `${backendUrl}${path}`;
+	}
+	// In web browser, use relative URL
+	return path;
+}
+
+// ======================
+// 🔥 SUPABASE INIT
+// ======================
+// Supabase config is injected from backend via window.SUPABASE_URL and window.SUPABASE_ANON_KEY
+// These are loaded from environment variables on the server side
+let supabaseClient = null;
+
+async function initSupabase() {
+	if (!supabaseClient) {
+		if (typeof window.createClient === 'undefined') {
+			// Wait for Supabase library to load
+			await new Promise(resolve => setTimeout(resolve, 100));
+			if (typeof window.createClient === 'undefined') {
+				console.error('Supabase createClient not loaded');
+				return null;
+			}
+		}
+		
+		// Get config from window (injected by backend from environment variables)
+		const SUPABASE_URL = window.SUPABASE_URL;
+		const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY;
+		
+		if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+			console.error('Supabase configuration not found. Make sure SUPABASE_URL and SUPABASE_ANON_KEY are set in environment variables.');
+			return null;
+		}
+		
+		supabaseClient = window.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+			auth: {
+				persistSession: true,
+				autoRefreshToken: true,
+			}
+		});
+	}
+	return supabaseClient;
+}
+
 // ========== STATE MANAGEMENT ==========
 // Default to workouts as the "home" screen
 let currentTab = 'workouts';
@@ -62,8 +116,84 @@ function isBodyweightExercise(exercise) {
 	       display.includes('leg raise') || display.includes('knee raise');
 }
 
-// ========== INITIALIZATION ==========
-document.addEventListener('DOMContentLoaded', () => {
+// Helper function to fetch user from backend with Authorization header
+async function fetchUser() {
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) return null;
+	
+	const { data: { session } } = await supabaseClient.auth.getSession();
+	if (!session?.access_token) return null;
+	
+	try {
+		const response = await fetch('/user', {
+			headers: {
+				'Authorization': `Bearer ${session.access_token}`
+			}
+		});
+		
+		if (response.ok) {
+			const userData = await response.json();
+			return userData;
+		}
+		return null;
+	} catch (e) {
+		console.error('Fetch user failed:', e);
+		return null;
+	}
+}
+
+// ======================
+// 🧠 MAIN APP ENTRY
+// ======================
+document.addEventListener('DOMContentLoaded', async () => {
+	await initSupabase();
+	
+	// Cancel all existing notifications to prevent spam
+	// This fixes the issue where notifications keep repeating every 5 minutes
+	try {
+		if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
+			const LocalNotifications = Capacitor.Plugins.LocalNotifications;
+			// Get all pending notifications and cancel them
+			const pending = await LocalNotifications.getPending();
+			if (pending && pending.notifications && pending.notifications.length > 0) {
+				const idsToCancel = pending.notifications.map(n => ({ id: n.id }));
+				await LocalNotifications.cancel({ notifications: idsToCancel });
+				console.log(`[INFO] Cancelled ${idsToCancel.length} existing notifications`);
+			}
+			// Also cancel known notification IDs (in case getPending doesn't return them)
+			await LocalNotifications.cancel({ notifications: [{ id: 100 }, { id: 200 }, { id: 300 }] });
+		}
+	} catch (e) {
+		console.log('[INFO] Could not cancel notifications (may not be available):', e);
+	}
+	
+	// PUBLIC PAGES MUST NOT REQUIRE AUTH
+	if (isPublicPage()) {
+		initLoginForm();
+		initRegisterForm();
+		
+		// Check if already logged in on public pages - redirect to home
+		// Wait a bit for session to be restored
+		await new Promise(resolve => setTimeout(resolve, 100));
+		if (supabaseClient) {
+			const { data: { session } } = await supabaseClient.auth.getSession();
+			if (session) {
+				// Already logged in, redirect to home
+				window.location.href = '/';
+				return;
+			}
+		}
+		return;
+	}
+	
+	// PRIVATE PAGES - Wait for auth check to complete
+	const ok = await requireLogin();
+	if (!ok) return;
+	
+	// Init app features (SAFE now - user is authenticated)
+	initLogout(); // Initialize logout button
 	initNavigation();
 	initTabs();
 	initFileUpload();
@@ -79,20 +209,296 @@ document.addEventListener('DOMContentLoaded', () => {
 	loadRecentScans();
 	loadExercises();
 	loadWorkouts();
-	checkAuth();
-	updateWorkoutStartButton(); // Initial check on page load
+	updateWorkoutStartButton();
 });
 
-// ========== AUTHENTICATION ==========
-async function checkAuth() {
-	try {
-		const res = await fetch('/check-auth');
-		const data = await res.json();
-		if (!data.authenticated) {
-			window.location.href = '/login';
+// ======================
+// 🔑 LOGIN LOGIC
+// ======================
+function initLoginForm() {
+	const form = document.getElementById('login-form');
+	if (!form) return;
+	
+	const errorEl = document.getElementById('error-message');
+	const submitBtn = document.getElementById('submit-btn');
+	
+	form.addEventListener('submit', async (e) => {
+		e.preventDefault();
+		
+		if (submitBtn) {
+			submitBtn.disabled = true;
+			submitBtn.textContent = 'Signing in...';
 		}
+		if (errorEl) errorEl.classList.remove('show');
+		
+		const email = document.getElementById('email')?.value;
+		const password = document.getElementById('password')?.value;
+		
+		if (!email || !password) {
+			if (errorEl) {
+				errorEl.textContent = 'Please fill in all fields';
+				errorEl.classList.add('show');
+			} else {
+				alert('Please fill in all fields');
+			}
+			if (submitBtn) {
+				submitBtn.disabled = false;
+				submitBtn.textContent = 'Sign In';
+			}
+			return;
+		}
+		
+		if (!supabaseClient) {
+			await initSupabase();
+		}
+		if (!supabaseClient) {
+			if (errorEl) {
+				errorEl.textContent = 'Supabase not initialized. Please refresh the page.';
+				errorEl.classList.add('show');
+			} else {
+				alert('Supabase not initialized. Please refresh the page.');
+			}
+			if (submitBtn) {
+				submitBtn.disabled = false;
+				submitBtn.textContent = 'Sign In';
+			}
+			return;
+		}
+		
+		const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+		
+		if (error) {
+			let errorMessage = error.message;
+			if (error.message.includes('Invalid login credentials')) {
+				errorMessage = 'Invalid email or password';
+			}
+			
+			if (errorEl) {
+				errorEl.textContent = errorMessage;
+				errorEl.classList.add('show');
+			} else {
+				alert(errorMessage);
+			}
+			if (submitBtn) {
+				submitBtn.disabled = false;
+				submitBtn.textContent = 'Sign In';
+			}
+			return;
+		}
+		
+		// Login successful - wait a moment for session to be set
+		await new Promise(resolve => setTimeout(resolve, 300));
+		
+		// Reset auth state
+		authLoading = false;
+		authCheckComplete = true;
+		
+		// Verify session exists
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (session) {
+			// Redirect to next parameter if exists, otherwise go to home
+			const nextPage = new URLSearchParams(window.location.search).get('next');
+			const redirectTo = nextPage ? decodeURIComponent(nextPage) : '/';
+			window.location.href = redirectTo;
+		} else {
+			// Session not ready yet, but redirect anyway
+			const nextPage = new URLSearchParams(window.location.search).get('next');
+			const redirectTo = nextPage ? decodeURIComponent(nextPage) : '/';
+			window.location.href = redirectTo;
+		}
+	});
+}
+
+// ======================
+// 🆕 REGISTER LOGIC
+// ======================
+function initRegisterForm() {
+	const form = document.getElementById('register-form');
+	if (!form) return;
+	
+	const errorEl = document.getElementById('error-message');
+	const submitBtn = document.getElementById('submit-btn');
+	
+	form.addEventListener('submit', async (e) => {
+		e.preventDefault();
+		
+		if (submitBtn) {
+			submitBtn.disabled = true;
+			submitBtn.textContent = 'Creating account...';
+		}
+		if (errorEl) errorEl.classList.remove('show');
+		
+		const email = document.getElementById('email')?.value;
+		const password = document.getElementById('password')?.value;
+		const username = document.getElementById('username')?.value; // Optional
+		
+		if (!email || !password) {
+			if (errorEl) {
+				errorEl.textContent = 'Please fill in all required fields';
+				errorEl.classList.add('show');
+			} else {
+				alert('Please fill in all required fields');
+			}
+			if (submitBtn) {
+				submitBtn.disabled = false;
+				submitBtn.textContent = 'Sign Up';
+			}
+			return;
+		}
+		
+		if (!supabaseClient) {
+			await initSupabase();
+		}
+		if (!supabaseClient) {
+			if (errorEl) {
+				errorEl.textContent = 'Supabase not initialized. Please refresh the page.';
+				errorEl.classList.add('show');
+			} else {
+				alert('Supabase not initialized. Please refresh the page.');
+			}
+			if (submitBtn) {
+				submitBtn.disabled = false;
+				submitBtn.textContent = 'Sign Up';
+			}
+			return;
+		}
+		
+		const { error } = await supabaseClient.auth.signUp({
+			email,
+			password,
+			options: {
+				data: {
+					username: username || email.split('@')[0]
+				}
+			}
+		});
+		
+		if (error) {
+			let errorMessage = error.message;
+			if (error.message.includes('already registered') || error.message.includes('already exists')) {
+				errorMessage = 'This email is already registered. Please sign in instead.';
+			} else if (error.message.includes('Password')) {
+				errorMessage = 'Password must be at least 6 characters';
+			}
+			
+			if (errorEl) {
+				errorEl.textContent = errorMessage;
+				errorEl.classList.add('show');
+			} else {
+				alert(errorMessage);
+			}
+			if (submitBtn) {
+				submitBtn.disabled = false;
+				submitBtn.textContent = 'Sign Up';
+			}
+			return;
+		}
+		
+		// Registration successful
+		alert('Account created! Please log in.');
+		window.location.href = '/login';
+	});
+}
+
+// ======================
+// 🔒 PUBLIC ROUTES
+// ======================
+function isPublicPage() {
+	const path = window.location.pathname;
+	return path.includes('login') || path.includes('register') || path.includes('verify');
+}
+
+// ======================
+// ✔️ SESSION CHECK
+// ======================
+let authLoading = false;
+let authCheckComplete = false;
+
+async function getSession() {
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) return null;
+	
+	try {
+		const { data: { session }, error } = await supabaseClient.auth.getSession();
+		if (error) {
+			console.error('Get session error:', error);
+			return null;
+		}
+		return session || null;
 	} catch (e) {
-		console.error('Auth check failed:', e);
+		console.error('Get session failed:', e);
+		return null;
+	}
+}
+
+async function requireLogin() {
+	// Prevent multiple simultaneous checks
+	if (authLoading) {
+		// Wait for existing check to complete
+		while (authLoading) {
+			await new Promise(resolve => setTimeout(resolve, 50));
+		}
+		return authCheckComplete;
+	}
+	
+	authLoading = true;
+	
+	try {
+		if (!supabaseClient) {
+			await initSupabase();
+		}
+		if (!supabaseClient) {
+			authCheckComplete = false;
+			window.location.href = '/login';
+			return false;
+		}
+		
+		const { data: { session }, error } = await supabaseClient.auth.getSession();
+		
+		if (error) {
+			console.error('Session check error:', error);
+			authCheckComplete = false;
+			window.location.href = '/login';
+			return false;
+		}
+		
+		if (!session) {
+			// Not logged in, redirect to login with next parameter
+			const currentPath = window.location.pathname;
+			authCheckComplete = false;
+			window.location.href = `/login?next=${encodeURIComponent(currentPath)}`;
+			return false;
+		}
+		
+		authCheckComplete = true;
+		return true;
+	} finally {
+		authLoading = false;
+	}
+}
+
+// Helper: Get current user (for backwards compatibility)
+async function getUser() {
+	const session = await getSession();
+	return session?.user || null;
+}
+
+// Helper: Logout function
+async function logout() {
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) return;
+	
+	try {
+		await supabaseClient.auth.signOut();
+		localStorage.removeItem('workouts'); // Optional: clear workouts on logout
+		window.location.href = '/login';
+	} catch (e) {
+		console.error('Logout failed:', e);
+		window.location.href = '/login';
 	}
 }
 
@@ -158,7 +564,8 @@ function initTabs() {
 // ========== FILE UPLOAD & CLASSIFICATION ==========
 function initFileUpload() {
 	const fileInput = document.getElementById('fileInput');
-	const classifyBtn = document.getElementById('classify');
+	// AI Detect button removed from home page - now only in exercise selector
+	const classifyBtn = null; // document.getElementById('classify');
 	const camera = document.getElementById('camera');
 	const snapshot = document.getElementById('snapshot');
 	const manualPreview = document.getElementById('manual-preview');
@@ -184,7 +591,7 @@ function initFileUpload() {
 						}
 						if (camera) camera.classList.add('hidden');
 						if (snapshot) snapshot.classList.add('hidden');
-						classifyBtn.disabled = false;
+						if (classifyBtn) classifyBtn.disabled = false;
 					};
 					img.src = event.target.result;
 				};
@@ -205,15 +612,19 @@ function initFileUpload() {
 				const formData = new FormData();
 				formData.append('image', file);
 				
-				const res = await fetch('/predict', {
+				const apiUrl = getApiUrl('/api/vision-detect');
+				const res = await fetch(apiUrl, {
 					method: 'POST',
 					body: formData
 				});
 				
 				const data = await res.json();
 				
-				if (data.error) {
-					alert(data.error);
+				// Check for NO_PREDICTION error
+				if (data.success === false && data.error === "NO_PREDICTION") {
+					showAIDetectErrorModal();
+				} else if (data.error) {
+					showAIDetectErrorModal();
 				} else {
 					// Attach preview image of the uploaded photo for the dotted box
 					if (window.lastUploadPreview) {
@@ -224,7 +635,7 @@ function initFileUpload() {
 				}
 			} catch (e) {
 				console.error('Classification failed:', e);
-				alert('Failed to classify image');
+				showAIDetectErrorModal();
 			} finally {
 				classifyBtn.disabled = false;
 				classifyBtn.textContent = 'AI Detect';
@@ -317,7 +728,13 @@ function maybeShowRefinements(data) {
 	const refineList = document.getElementById('prediction-refine-list');
 	if (!refineSection || !refineList) return;
 
-	// Mapping from generic detection label to more specific exercise choices
+	// Use refinements from API response if available, otherwise fall back to hardcoded list
+	let options = null;
+	if (data.refinements && Array.isArray(data.refinements) && data.refinements.length > 0) {
+		// Use refinements from backend API
+		options = data.refinements.map(ref => ref.display || ref.label || ref.key);
+	} else {
+		// Fallback to hardcoded mapping
 	const refinements = {
 		'smith machine': [
 			'Smith Machine Bench Press',
@@ -363,11 +780,11 @@ function maybeShowRefinements(data) {
 	// Only show refinements for *generic* detections, not for the specific
 	// variants we select afterwards. So we match on exact label, not "includes".
 	const label = (data.display || data.key || '').toString().toLowerCase().trim();
-	let options = null;
 	for (const key in refinements) {
 		if (label === key) {
 			options = refinements[key];
 			break;
+			}
 		}
 	}
 
@@ -501,17 +918,10 @@ function initExerciseSelector() {
 		});
 	}
 
-	// AI detect inside selector
-	if (aiDetectBtn && fileInput) {
+	// AI detect inside selector - open chat modal
+	if (aiDetectBtn) {
 		aiDetectBtn.addEventListener('click', () => {
-			fileInput.click();
-		});
-		fileInput.addEventListener('change', async (e) => {
-			const file = e.target.files[0];
-			if (!file) return;
-			await classifyForExerciseSelector(file, predictionsContainer, selector);
-			// reset value so the same file can be chosen again if needed
-			fileInput.value = '';
+			openAIDetectChat();
 		});
 	}
 	
@@ -775,13 +1185,18 @@ async function classifyForExerciseSelector(file, predictionsContainer, selectorE
 	try {
 		const formData = new FormData();
 		formData.append('image', file);
-		const res = await fetch('/predict', {
+		const apiUrl = getApiUrl('/api/vision-detect');
+		const res = await fetch(apiUrl, {
 			method: 'POST',
 			body: formData
 		});
 		const data = await res.json();
-		if (data.error) {
-			alert(data.error);
+		// Check for NO_PREDICTION error
+		if (data.success === false && data.error === "NO_PREDICTION") {
+			showAIDetectErrorModal();
+			return;
+		} else if (data.error) {
+			showAIDetectErrorModal();
 			return;
 		}
 		const top = (data.top_predictions && data.top_predictions.length)
@@ -902,7 +1317,7 @@ async function classifyForExerciseSelector(file, predictionsContainer, selectorE
 		predictionsContainer.style.display = top.length ? 'flex' : 'none';
 	} catch (e) {
 		console.error('Failed to classify image in selector:', e);
-		alert('Failed to classify image');
+		showAIDetectErrorModal();
 		if (predictionsContainer) {
 			predictionsContainer.innerHTML = '';
 			predictionsContainer.style.display = 'none';
@@ -911,14 +1326,41 @@ async function classifyForExerciseSelector(file, predictionsContainer, selectorE
 }
 
 function openExerciseSelector() {
+	console.log('[DEBUG] openExerciseSelector called');
 	const selector = document.getElementById('exercise-selector');
+	console.log('[DEBUG] selector element:', selector);
 	if (selector) {
 		selector.classList.remove('hidden');
 		document.body.classList.add('selector-open');
+		console.log('[DEBUG] Selector opened, hidden class removed');
+		
+		// Force visibility of "or" and "AI-detect" elements
+		const orDiv = selector.querySelector('.exercise-selector-or');
+		const aiDetectDiv = selector.querySelector('.exercise-selector-ai-detect');
+		console.log('[DEBUG] orDiv:', orDiv);
+		console.log('[DEBUG] aiDetectDiv:', aiDetectDiv);
+		if (orDiv) {
+			orDiv.style.display = 'block';
+			orDiv.style.visibility = 'visible';
+			orDiv.style.opacity = '1';
+			console.log('[DEBUG] orDiv forced visible');
+		}
+		if (aiDetectDiv) {
+			aiDetectDiv.style.display = 'flex';
+			aiDetectDiv.style.visibility = 'visible';
+			aiDetectDiv.style.opacity = '1';
+			console.log('[DEBUG] aiDetectDiv forced visible');
+		}
+		
 		const searchInput = document.getElementById('exercise-selector-search');
 		if (searchInput) {
 			searchInput.value = '';
 			// Don't auto-focus - let user click to type
+		}
+		
+		// Show all exercises when opening selector
+		if (window.filterExercisesForSelector) {
+			window.filterExercisesForSelector('', null);
 		}
 		// clear any previous AI predictions
 		const preds = document.getElementById('exercise-selector-predictions');
@@ -930,6 +1372,8 @@ function openExerciseSelector() {
 		if (typeof filterFn === 'function') {
 			filterFn('', null);
 		}
+	} else {
+		console.error('[ERROR] exercise-selector element not found!');
 	}
 }
 
@@ -1036,6 +1480,165 @@ function startNewWorkout(workoutData = null) {
 	switchTab('workout-builder');
 }
 
+// Quick workout generator - instant response based on keywords
+function generateQuickWorkout(message) {
+	const msg = message.toLowerCase().trim();
+	
+	// Check for specific exercises first (most specific)
+	if (msg.includes('pushup') || msg.includes('push-up') || msg.includes('push up')) {
+		return {
+			name: 'Push-Up Workout',
+			exercises: [
+				{ key: 'push_up', display: 'Push-Up' }
+			]
+		};
+	}
+	
+	// Check for specific exercise combinations
+	if (msg.includes('dip')) {
+		const exercises = [];
+		if (msg.includes('pushup') || msg.includes('push-up') || msg.includes('push up')) {
+			exercises.push({ key: 'push_up', display: 'Push-Up' });
+		}
+		if (msg.includes('dip')) {
+			exercises.push({ key: 'dips', display: 'Dips' });
+		}
+		if (exercises.length > 0) {
+			return {
+				name: 'Workout',
+				exercises: exercises
+			};
+		}
+	}
+	
+	// Shoulders workout (check for "shoulder" or "shoulders" - with or without "workout")
+	if (msg.includes('shoulder')) {
+		return {
+			name: 'Shoulders Workout',
+			exercises: [
+				{ key: 'shoulder_press_machine', display: 'Shoulder Press Machine' },
+				{ key: 'lateral_raise_machine', display: 'Lateral Raise Machine' },
+				{ key: 'front_raise', display: 'Front Raise' },
+				{ key: 'rear_delt_fly', display: 'Rear Delt Fly' },
+				{ key: 'cable_face_pull', display: 'Cable Face Pull' }
+			]
+		};
+	}
+	
+	// Chest workout (check for "chest" - handles "only chest", "chest workout", etc.)
+	if (msg.includes('chest') || msg.includes('borst')) {
+		return {
+			name: 'Chest Workout',
+			exercises: [
+				{ key: 'bench_press', display: 'Bench Press' },
+				{ key: 'incline_bench_press', display: 'Incline Bench Press' },
+				{ key: 'dumbbell_fly', display: 'Dumbbell Fly' },
+				{ key: 'cable_crossover', display: 'Cable Crossover' },
+				{ key: 'pec_deck_machine', display: 'Pec Deck Machine' }
+			]
+		};
+	}
+	
+	// Back workout
+	if (msg.includes('back')) {
+		return {
+			name: 'Back Workout',
+			exercises: [
+				{ key: 'lat_pulldown', display: 'Lat Pulldown' },
+				{ key: 'seated_row', display: 'Seated Row' },
+				{ key: 'one_arm_dumbbell_row', display: 'One Arm Dumbbell Row' },
+				{ key: 'bent_over_row', display: 'Bent Over Row' },
+				{ key: 'deadlift', display: 'Deadlift' }
+			]
+		};
+	}
+	
+	// Biceps workout
+	if (msg.includes('bicep')) {
+		return {
+			name: 'Biceps Workout',
+			exercises: [
+				{ key: 'barbell_curl', display: 'Barbell Curl' },
+				{ key: 'dumbbell_curl', display: 'Dumbbell Curl' },
+				{ key: 'hammer_curl', display: 'Hammer Curl' },
+				{ key: 'preacher_curl', display: 'Preacher Curl' },
+				{ key: 'cable_curl', display: 'Cable Curl' }
+			]
+		};
+	}
+	
+	// Triceps workout
+	if (msg.includes('tricep')) {
+		return {
+			name: 'Triceps Workout',
+			exercises: [
+				{ key: 'tricep_pushdown', display: 'Tricep Pushdown' },
+				{ key: 'overhead_tricep_extension', display: 'Overhead Tricep Extension' },
+				{ key: 'dips', display: 'Dips' }
+			]
+		};
+	}
+	
+	// Legs workout (check for leg, quad, hamstring, glute, calf)
+	if (msg.includes('leg') || msg.includes('quad') || msg.includes('hamstring') || msg.includes('glute') || msg.includes('calf')) {
+		return {
+			name: 'Legs Workout',
+			exercises: [
+				{ key: 'leg_press', display: 'Leg Press' },
+				{ key: 'leg_extension', display: 'Leg Extension' },
+				{ key: 'lying_leg_curl', display: 'Lying Leg Curl' },
+				{ key: 'hip_thrust', display: 'Hip Thrust' },
+				{ key: 'standing_calf_raise', display: 'Standing Calf Raise' }
+			]
+		};
+	}
+	
+	// Full body (check before generic push/pull/legs)
+	if (msg.includes('full body') || msg.includes('fullbody') || msg.includes('full-body')) {
+		return {
+			name: 'Full Body Workout',
+			exercises: [
+				{ key: 'bench_press', display: 'Bench Press' },
+				{ key: 'lat_pulldown', display: 'Lat Pulldown' },
+				{ key: 'leg_press', display: 'Leg Press' },
+				{ key: 'shoulder_press_machine', display: 'Shoulder Press Machine' },
+				{ key: 'barbell_curl', display: 'Barbell Curl' },
+				{ key: 'tricep_pushdown', display: 'Tricep Pushdown' }
+			]
+		};
+	}
+	
+	// Push workout - only if it's explicitly "push workout" or "push day", not just "push" in other words
+	if ((msg.match(/\bpush\b/) && (msg.includes('workout') || msg.includes('day') || msg.includes('train')))) {
+		return {
+			name: 'Push Workout',
+			exercises: [
+				{ key: 'bench_press', display: 'Bench Press' },
+				{ key: 'incline_bench_press', display: 'Incline Bench Press' },
+				{ key: 'shoulder_press_machine', display: 'Shoulder Press Machine' },
+				{ key: 'lateral_raise_machine', display: 'Lateral Raise Machine' },
+				{ key: 'tricep_pushdown', display: 'Tricep Pushdown' }
+			]
+		};
+	}
+	
+	// Pull workout
+	if ((msg.match(/\bpull\b/) && (msg.includes('workout') || msg.includes('day') || msg.includes('train')))) {
+		return {
+			name: 'Pull Workout',
+			exercises: [
+				{ key: 'lat_pulldown', display: 'Lat Pulldown' },
+				{ key: 'seated_row', display: 'Seated Row' },
+				{ key: 'one_arm_dumbbell_row', display: 'One Arm Dumbbell Row' },
+				{ key: 'barbell_curl', display: 'Barbell Curl' },
+				{ key: 'dumbbell_curl', display: 'Dumbbell Curl' }
+			]
+		};
+	}
+	
+	return null; // No quick match, use AI
+}
+
 function applyWorkoutFromVision(workoutData) {
 	// Convert workout data to proper format
 	const exercises = workoutData.exercises.map(hydrateExerciseFromMetadata);
@@ -1076,7 +1679,7 @@ function renderExerciseInfoButton(exercise) {
 	const hasVideoAttr = videoUrl ? 'data-has-video="true"' : 'data-has-video="false"';
 	const exerciseIdAttr = escapeHtmlAttr(exercise.key || exercise.display || '');
 	return `<button type="button" class="exercise-info-btn" data-video="${videoAttr}" data-exercise="${exerciseIdAttr}" ${hasVideoAttr} title="Watch exercise video" aria-label="Watch exercise video">
-		<img src="/static/question.png" alt="" draggable="false">
+		<img src="static/question.png" alt="" draggable="false">
 	</button>`;
 }
 
@@ -1184,12 +1787,12 @@ function renderWorkoutList() {
 			<div class="workout-edit-exercise-header">
 				<div class="workout-edit-exercise-title">
 					${buildExerciseThumb(ex, 'small')}
-						<div class="workout-exercise-name">${ex.display || ex.key}</div>
+					<div class="workout-exercise-name">${ex.display || ex.key}</div>
 				</div>
 				<div class="workout-exercise-actions">
 					${infoButtonHtml}
 					<button class="workout-edit-exercise-delete" aria-label="Remove exercise">
-						<img src="/static/close.png" alt="" />
+						<img src="static/close.png" alt="" />
 					</button>
 				</div>
 			</div>
@@ -1248,7 +1851,7 @@ function renderWorkoutList() {
 				</div>
 				<div class="action-col">
 					<button type="button" class="workout-edit-set-delete" aria-label="Delete set">
-						<img src="/static/close.png" alt="">
+						<img src="static/close.png" alt="">
 					</button>
 				</div>
 			`;
@@ -1259,8 +1862,8 @@ function renderWorkoutList() {
 			
 			if (weightInput) {
 				weightInput.addEventListener('input', (e) => {
-				ex.sets[setIdx].weight = e.target.value ? Number(e.target.value) : '';
-				saveWorkoutDraft();
+					ex.sets[setIdx].weight = e.target.value ? Number(e.target.value) : '';
+					saveWorkoutDraft();
 				});
 			}
 			
@@ -1303,16 +1906,44 @@ function renderWorkoutList() {
 		workoutList.appendChild(li);
 	});
 	
-	// Add exercise button
-	const addBtn = document.createElement('button');
-	addBtn.className = 'btn workout-add-exercise-btn';
-	addBtn.textContent = '+ Add Exercise';
-	addBtn.onclick = () => {
-		openExerciseSelector();
-	};
-	workoutList.appendChild(addBtn);
-
 	saveWorkoutDraft();
+	
+	// Add exercise button and cancel button (outside the ul, in the parent section)
+	const workoutSection = document.getElementById('workout');
+	if (workoutSection && workoutList) {
+		// Remove existing buttons if they exist (to avoid duplicates)
+		const existingAddBtn = workoutSection.querySelector('.workout-add-exercise-btn');
+		const existingCancelBtn = workoutSection.querySelector('.workout-cancel-btn');
+		if (existingAddBtn) existingAddBtn.remove();
+		if (existingCancelBtn) existingCancelBtn.remove();
+		
+		// Add exercise button (insert after the ul)
+		const addBtn = document.createElement('button');
+		addBtn.className = 'btn workout-add-exercise-btn';
+		addBtn.textContent = '+ Add Exercise';
+		addBtn.onclick = (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			console.log('[DEBUG] Add Exercise button clicked');
+			openExerciseSelector();
+		};
+		addBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			console.log('[DEBUG] Add Exercise button clicked (addEventListener)');
+			openExerciseSelector();
+		});
+		workoutList.insertAdjacentElement('afterend', addBtn);
+
+		// Cancel workout button (insert after the add exercise button)
+		const cancelBtn = document.createElement('button');
+		cancelBtn.className = 'btn workout-cancel-btn';
+		cancelBtn.textContent = 'Cancel workout';
+		cancelBtn.onclick = () => {
+			cancelWorkout();
+		};
+		addBtn.insertAdjacentElement('afterend', cancelBtn);
+	}
 }
 
 function capitalizeFirstLetter(str) {
@@ -1428,13 +2059,13 @@ function loadWorkouts(prefetchedWorkouts = null) {
 						<div class="workout-summary">${workout.name || 'Workout'}</div>
 						<div class="workout-actions">
 							<button class="workout-reuse-btn" title="Reuse workout">
-								<img src="/static/refresh-button.png" alt="Reuse" />
+								<img src="static/refresh-button.png" alt="Reuse" />
 						</button>
 							<button class="workout-edit-btn" title="Inline edit">
-								<img src="/static/pencil.png" alt="Details" />
+								<img src="static/pencil.png" alt="Details" />
 						</button>
 							<button class="workout-delete-btn" title="Delete workout">
-								<img src="/static/close.png" alt="Delete" />
+								<img src="static/close.png" alt="Delete" />
 						</button>
 					</div>
 				</div>
@@ -1520,7 +2151,7 @@ function buildWorkoutExercisesMarkup(workout) {
 			</div>
 					<div class="action-col">
 						<button type="button" class="workout-edit-set-delete" aria-label="Set actions" disabled>
-							<img src="/static/close.png" alt="">
+							<img src="static/close.png" alt="">
 						</button>
 					</div>
 				</div>
@@ -1531,13 +2162,13 @@ function buildWorkoutExercisesMarkup(workout) {
 		return `
 			<div class="workout-exercise workout-view-exercise">
 				<div class="workout-view-header">
-				<div class="workout-exercise-main">
-					${buildExerciseThumb(exercise)}
+					<div class="workout-exercise-main">
+						${buildExerciseThumb(exercise)}
 						<div class="workout-exercise-name">${exercise.display || exercise.key || 'Exercise'}</div>
 					</div>
 					<div class="workout-view-actions">
 						${infoButtonHtml}
-				</div>
+					</div>
 				</div>
 				<div class="workout-edit-sets view-mode ${isBodyweight ? 'bodyweight' : ''}">
 					<div class="workout-edit-set-row workout-edit-set-header">
@@ -1682,6 +2313,25 @@ function clearWorkoutDraft() {
 	updateWorkoutStartButton();
 }
 
+function cancelWorkout() {
+	// Stop the workout timer
+	if (workoutTimer) {
+		clearInterval(workoutTimer);
+		workoutTimer = null;
+	}
+	
+	// Clear workout data
+	currentWorkout = null;
+	workoutStartTime = null;
+	editingWorkoutId = null;
+	
+	// Clear the draft
+	clearWorkoutDraft();
+	
+	// Switch back to workouts tab
+	switchTab('workouts');
+}
+
 function updateWorkoutStartButton() {
 	const continueBtn = document.getElementById('continue-workout-btn');
 	const startButtons = document.getElementById('start-workout-buttons');
@@ -1744,8 +2394,8 @@ function resumeWorkoutDraft() {
 		setWorkoutTimerDisplay(currentWorkout.duration || 0);
 	} else {
 		// New workout - start the timer
-	workoutStartTime = draftStartTime || Date.now();
-	startWorkoutTimer();
+		workoutStartTime = draftStartTime || Date.now();
+		startWorkoutTimer();
 	}
 	
 	const workoutName = document.getElementById('workout-name');
@@ -1912,9 +2562,9 @@ function initProgress() {
 				});
 				// Add the new entry with both date and dayKey for consistency
 				filteredProgress.push({
-						date: now.toISOString(),
+					date: now.toISOString(),
 					dayKey: dayKey, // Ensure dayKey is always set
-						weight: value
+					weight: value
 				});
 				// Ensure all existing entries also have dayKey
 				const normalizedProgress = filteredProgress.map(p => ({
@@ -2171,8 +2821,8 @@ function renderWeightChart(progress) {
 				month: 'short'
 			});
 			xLabelsEl.appendChild(label);
-				});
-			}
+		});
+	}
 	// Store hover points on the canvas for interactive tooltip
 	canvas.__weightPoints = hoverPoints;
 
@@ -2269,17 +2919,17 @@ async function renderMuscleFocus(workouts) {
 		// Show all workouts regardless of date
 		filtered = workouts;
 	} else {
-	const now = new Date();
-	const msPerDay = 24 * 60 * 60 * 1000;
-	let days = 7;
-	if (range === 'month') days = 30;
-	else if (range === 'year') days = 365;
-	const cutoff = now.getTime() - days * msPerDay;
+		const now = new Date();
+		const msPerDay = 24 * 60 * 60 * 1000;
+		let days = 7;
+		if (range === 'month') days = 30;
+		else if (range === 'year') days = 365;
+		const cutoff = now.getTime() - days * msPerDay;
 
 		filtered = workouts.filter(w => {
-		const d = new Date(w.date || now);
-		return d.getTime() >= cutoff;
-	});
+			const d = new Date(w.date || now);
+			return d.getTime() >= cutoff;
+		});
 	}
 
 	if (!filtered.length) {
@@ -2515,34 +3165,34 @@ function handleExerciseInsightsForName(name) {
 		`;
 	} else {
 		// Find best sets for weighted exercises
-	let bestWeightSet = null;
-	let bestVolumeSet = null;
-	allSets.forEach(s => {
-		const volume = (s.weight || 0) * (s.reps || 0);
-		if (!bestWeightSet || s.weight > bestWeightSet.weight) {
-			bestWeightSet = { ...s, volume };
-		}
-		if (!bestVolumeSet || volume > bestVolumeSet.volume) {
-			bestVolumeSet = { ...s, volume };
-		}
-	});
+		let bestWeightSet = null;
+		let bestVolumeSet = null;
+		allSets.forEach(s => {
+			const volume = (s.weight || 0) * (s.reps || 0);
+			if (!bestWeightSet || s.weight > bestWeightSet.weight) {
+				bestWeightSet = { ...s, volume };
+			}
+			if (!bestVolumeSet || volume > bestVolumeSet.volume) {
+				bestVolumeSet = { ...s, volume };
+			}
+		});
 
-	results.innerHTML = `
-		<div class="progress-pr-result">
-			<div class="progress-pr-result-title">Top weight set</div>
-			<div class="progress-pr-result-meta">
-				<span><strong>${entry.name}</strong></span>
-				<span>${bestWeightSet.weight} kg × ${bestWeightSet.reps}</span>
+		results.innerHTML = `
+			<div class="progress-pr-result">
+				<div class="progress-pr-result-title">Top weight set</div>
+				<div class="progress-pr-result-meta">
+					<span><strong>${entry.name}</strong></span>
+					<span>${bestWeightSet.weight} kg × ${bestWeightSet.reps}</span>
+				</div>
 			</div>
-		</div>
-		<div class="progress-pr-result">
-			<div class="progress-pr-result-title">Top volume set</div>
-			<div class="progress-pr-result-meta">
-				<span><strong>${entry.name}</strong></span>
-				<span>${bestVolumeSet.weight} kg × ${bestVolumeSet.reps} (${bestVolumeSet.volume} kg)</span>
+			<div class="progress-pr-result">
+				<div class="progress-pr-result-title">Top volume set</div>
+				<div class="progress-pr-result-meta">
+					<span><strong>${entry.name}</strong></span>
+					<span>${bestVolumeSet.weight} kg × ${bestVolumeSet.reps} (${bestVolumeSet.volume} kg)</span>
+				</div>
 			</div>
-		</div>
-	`;
+		`;
 	}
 
 	// Chart removed for now – only cards shown
@@ -2772,36 +3422,38 @@ function renderProgressiveOverloadTracker(workouts) {
 	}).join('');
 }
 
-// ========== SETTINGS ==========
-function initSettings() {
-	const logoutBtn = document.getElementById('logout-btn');
-	if (logoutBtn) {
-		logoutBtn.addEventListener('click', async () => {
+// ======================
+// 🚪 LOGOUT
+// ======================
+function initLogout() {
+	const btn = document.getElementById('logout-btn');
+	if (!btn) return;
+	
+	btn.addEventListener('click', async () => {
 			if (confirm('Are you sure you want to log out?')) {
-				try {
-					await fetch('/logout', { method: 'POST' });
-					window.location.href = '/login';
-				} catch (e) {
-					console.error('Logout failed:', e);
-				}
+			await logout();
 			}
 		});
 	}
+
+// ========== SETTINGS ==========
+function initSettings() {
+	initLogout(); // Initialize logout button
 }
 
-function loadSettings() {
-	// Load user info
-	fetch('/check-auth')
-		.then(res => res.json())
-		.then(data => {
-			if (data.authenticated) {
+async function loadSettings() {
+	// Load user info from Supabase
+	try {
+		const user = await getUser();
+		if (user) {
 				const usernameEl = document.getElementById('settings-username');
 				const emailEl = document.getElementById('settings-email');
-				if (usernameEl) usernameEl.textContent = data.username || '—';
-				if (emailEl) emailEl.textContent = data.email || '—';
+			if (usernameEl) usernameEl.textContent = user.user_metadata?.username || user.email?.split('@')[0] || '—';
+			if (emailEl) emailEl.textContent = user.email || '—';
 			}
-		})
-		.catch(e => console.error('Failed to load settings:', e));
+	} catch (e) {
+		console.error('Failed to load settings:', e);
+	}
 }
 
 // ========== VISION CHAT ==========
@@ -2831,6 +3483,10 @@ function initVision() {
 			input.value = '';
 			sendBtn.disabled = true;
 			
+			// Show immediate acknowledgment - instant response
+			const loadingMessageId = addChatMessage('I\'m creating your workout...', 'bot', false);
+			const loadingElement = document.querySelector(`[data-message-id="${loadingMessageId}"]`);
+			
 			try {
 				// Include current workout context if in workout builder
 				const workoutContext = currentTab === 'workout-builder' && currentWorkout 
@@ -2843,50 +3499,109 @@ function initVision() {
 					}
 					: null;
 				
-				const res = await fetch('/chat', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ 
-						message,
-						workoutContext: workoutContext
-					})
-				});
+				// Simple check: is this a workout request? (only basic keywords, no muscle group matching)
+				const msgLower = message.toLowerCase();
+				const workoutKeywords = ["workout", "make", "create", "maak", "train", "oefeningen", "exercises"];
+				const isWorkoutRequest = workoutKeywords.some(keyword => msgLower.includes(keyword));
 				
-				const data = await res.json();
-				if (data.error) {
-					addChatMessage(`Error: ${data.error}`, 'bot');
-				} else {
-					// Check if a workout was generated
-					if (data.workout && data.workout.exercises && data.workout.exercises.length > 0) {
-						// In AI workout mode, directly apply the workout without showing message
-						if (isAIWorkoutMode) {
-							applyWorkoutFromVision(data.workout);
-							isAIWorkoutMode = false;
-							return; // Don't show the chat message, just go to workout
-						} else {
-							// Normal mode: show message and button
-					addChatMessage(data.reply, 'bot');
-							const applyBtn = document.createElement('button');
-							applyBtn.textContent = '✓ Apply Workout';
-							applyBtn.style.cssText = 'margin-top: 8px; padding: 8px 16px; background: var(--accent); color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 13px;';
-							applyBtn.onclick = () => {
-								applyWorkoutFromVision(data.workout);
-								applyBtn.disabled = true;
-								applyBtn.textContent = '✓ Applied';
-							};
-							
-							const lastMessage = messagesContainer.lastElementChild;
-							if (lastMessage && lastMessage.classList.contains('vision-message-bot')) {
-								lastMessage.querySelector('.vision-message-content').appendChild(applyBtn);
+				if (isWorkoutRequest) {
+					// Send to Groq API - let Groq determine the workout based on the prompt
+					const apiUrl = getApiUrl('/api/vision-workout');
+					const requestPromise = fetch(apiUrl, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ 
+							message,
+							workoutContext: workoutContext
+						})
+					});
+					
+					// Update message while waiting
+					let dotCount = 0;
+					const updateInterval = setInterval(() => {
+						if (loadingElement) {
+							const contentEl = loadingElement.querySelector('.vision-message-content');
+							if (contentEl) {
+								dotCount = (dotCount % 3) + 1;
+								contentEl.textContent = 'I\'m generating your workout' + '.'.repeat(dotCount);
 							}
 						}
+					}, 300);
+					
+					try {
+						const res = await requestPromise;
+						clearInterval(updateInterval);
+						
+						if (!res.ok) {
+							const errorData = await res.json().catch(() => ({ error: 'Failed to generate workout' }));
+							if (loadingElement) loadingElement.remove();
+							addChatMessage(`Error: ${errorData.error || 'Failed to generate workout'}`, 'bot');
+							sendBtn.disabled = false;
+							return;
+						}
+						
+						const data = await res.json();
+						if (data.error) {
+							if (loadingElement) loadingElement.remove();
+							addChatMessage(`Error: ${data.error}`, 'bot');
+							sendBtn.disabled = false;
+							return;
+						}
+						
+						if (data.workout && data.workout.exercises && data.workout.exercises.length > 0) {
+							// Successfully generated workout - apply it and switch to workout builder
+							if (loadingElement) loadingElement.remove();
+							applyWorkoutFromVision(data.workout);
+							switchTab('workout-builder');
+							addChatMessage(`✓ Created "${data.workout.name}" with ${data.workout.exercises.length} exercises!`, 'bot');
+						} else {
+							if (loadingElement) loadingElement.remove();
+							addChatMessage('No workout was generated. Please try again with a clearer request.', 'bot');
+						}
+						sendBtn.disabled = false;
+					} catch (fetchError) {
+						clearInterval(updateInterval);
+						if (loadingElement) loadingElement.remove();
+						console.error('Workout request failed:', fetchError);
+						addChatMessage(`Error: ${fetchError.message || 'Failed to generate workout. Please try again.'}`, 'bot');
+						sendBtn.disabled = false;
+					}
+				} else {
+					// Regular chat message - use the chat endpoint
+					const apiUrl = getApiUrl('/chat');
+					const res = await fetch(apiUrl, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ 
+							message,
+							workoutContext: workoutContext
+						})
+					});
+					
+					// Remove loading message
+					if (loadingElement) {
+						loadingElement.remove();
+					}
+					
+					const data = await res.json();
+					if (data.error) {
+						addChatMessage(`Error: ${data.error}`, 'bot');
+					} else if (data.workout) {
+						// Chat endpoint returned a workout - use it!
+						applyWorkoutFromVision(data.workout);
+						switchTab('workout-builder');
+						addChatMessage(`✓ Created "${data.workout.name}" with ${data.workout.exercises.length} exercises!`, 'bot');
 					} else {
-						// No workout generated, show normal reply
 						addChatMessage(data.reply, 'bot');
 					}
+					sendBtn.disabled = false;
 				}
 			} catch (e) {
-				console.error('Chat failed:', e);
+				console.error('Request failed:', e);
+				// Remove loading message
+				if (loadingElement) {
+					loadingElement.remove();
+				}
 				addChatMessage('Failed to get response. Please try again.', 'bot');
 			} finally {
 				sendBtn.disabled = false;
@@ -3007,14 +3722,22 @@ async function fetchExerciseInfoByKey(exerciseKey) {
 	return res.json();
 }
 
-function addChatMessage(text, role) {
+function addChatMessage(text, role, isLoading = false) {
 	const messagesContainer = document.getElementById('vision-chat-messages');
-	if (!messagesContainer) return;
+	if (!messagesContainer) return null;
 	
 	const messageDiv = document.createElement('div');
+	const messageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+	messageDiv.setAttribute('data-message-id', messageId);
 	messageDiv.className = `vision-message vision-message-${role}`;
 	
+	if (isLoading) {
+		messageDiv.classList.add('vision-message-loading');
+	}
+	
 	if (role === 'bot') {
+		// Strip any trailing dots/ellipsis from text when loading
+		const displayText = isLoading ? text.replace(/\.{1,3}\s*$/, '') : text;
 		messageDiv.innerHTML = `
 			<div class="vision-avatar">
 				<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -3023,7 +3746,7 @@ function addChatMessage(text, role) {
 					<path d="M2 12s3-4 10-4 10 4 10 4" stroke="var(--accent)" stroke-width="2" fill="none" stroke-linecap="round"/>
 				</svg>
 			</div>
-			<div class="vision-message-content">${text}</div>
+			<div class="vision-message-content">${displayText}${isLoading ? '<span class="loading-dots">...</span>' : ''}</div>
 		`;
 	} else {
 		messageDiv.innerHTML = `
@@ -3033,6 +3756,7 @@ function addChatMessage(text, role) {
 	
 	messagesContainer.appendChild(messageDiv);
 	messagesContainer.scrollTop = messagesContainer.scrollHeight;
+	return messageId;
 }
 
 // ========== EXERCISE CARD ==========
@@ -3119,6 +3843,198 @@ function loadRecentScans() {
 		};
 		list.appendChild(item);
 	});
+}
+
+// AI Detect Error Modal
+function showAIDetectErrorModal() {
+	const modal = document.getElementById('ai-detect-error-modal');
+	if (modal) {
+		modal.classList.remove('hidden');
+		const tryAgainBtn = document.getElementById('ai-detect-error-try-again');
+		const backdrop = modal.querySelector('.ai-detect-error-backdrop');
+		
+		const closeModal = () => {
+			modal.classList.add('hidden');
+		};
+		
+		if (tryAgainBtn) {
+			tryAgainBtn.onclick = closeModal;
+		}
+		if (backdrop) {
+			backdrop.onclick = closeModal;
+		}
+	}
+}
+
+// AI Detect Chat Modal
+function openAIDetectChat() {
+	const selector = document.getElementById('exercise-selector');
+	const modal = document.getElementById('ai-detect-chat-modal');
+	if (!modal) return;
+	
+	modal.classList.remove('hidden');
+	document.body.classList.add('ai-detect-chat-open');
+	
+	// Clear previous messages except the initial bot message
+	const messagesContainer = document.getElementById('ai-detect-chat-messages');
+	if (messagesContainer) {
+		messagesContainer.innerHTML = `
+			<div class="ai-detect-chat-message ai-detect-chat-message-bot">
+				<div class="ai-detect-chat-avatar">🤖</div>
+				<div class="ai-detect-chat-text">Upload a photo of the exercise machine or movement, and I'll identify it for you!</div>
+			</div>
+		`;
+	}
+	
+	// Setup file input
+	const fileInput = document.getElementById('ai-detect-chat-file');
+	if (fileInput) {
+		fileInput.onchange = async (e) => {
+			const file = e.target.files[0];
+			if (!file) return;
+			
+			// Show user message with image preview
+			addAIDetectChatMessage('user', null, file);
+			
+			// Show loading message
+			const loadingId = addAIDetectChatMessage('bot', 'Analyzing your photo...', null, true);
+			
+			try {
+				// Send to backend
+				const formData = new FormData();
+				formData.append('image', file, file.name || 'photo.jpg');
+				const apiUrl = getApiUrl('/api/vision-detect');
+				console.log('[DEBUG] Sending image to:', apiUrl, 'File:', file.name, 'Size:', file.size);
+				const res = await fetch(apiUrl, {
+					method: 'POST',
+					body: formData
+				});
+				
+				if (!res.ok) {
+					console.error('[ERROR] Vision detect failed:', res.status, res.statusText);
+					const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
+					throw new Error(errorData.error || `Server error: ${res.status}`);
+				}
+				
+				const data = await res.json();
+				
+				// Remove loading message
+				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
+				if (loadingEl) loadingEl.remove();
+				
+				if (data.success && data.key) {
+					// Success - show exercise name
+					const exerciseName = data.display || data.key;
+					const muscles = data.muscles || [];
+					const musclesText = muscles.length > 0 ? ` (${muscles.join(', ')})` : '';
+					addAIDetectChatMessage('bot', `I detected: **${exerciseName}**${musclesText}`, null);
+					
+					// Add button to select this exercise
+					setTimeout(() => {
+						const selectBtn = document.createElement('button');
+						selectBtn.className = 'ai-detect-chat-select-btn';
+						selectBtn.textContent = `Select "${exerciseName}"`;
+						selectBtn.onclick = () => {
+							// Close chat and exercise selector
+							closeAIDetectChat();
+							if (selector) selector.classList.add('hidden');
+							document.body.classList.remove('selector-open');
+							
+							// Add exercise to workout or select it
+							if (currentTab === 'workout-builder') {
+								const exercise = {
+									key: data.key,
+									display: exerciseName,
+									muscles: muscles,
+									sets: createDefaultSets(3)
+								};
+								addExerciseToWorkout(exercise);
+							} else {
+								selectExercise(data.key);
+							}
+						};
+						
+						const lastMessage = messagesContainer.lastElementChild;
+						if (lastMessage) {
+							lastMessage.appendChild(selectBtn);
+						}
+					}, 500);
+				} else {
+					// Error
+					addAIDetectChatMessage('bot', `Sorry, I couldn't identify the exercise from this photo. Please try a clearer picture.`, null);
+				}
+			} catch (e) {
+				// Remove loading message
+				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
+				if (loadingEl) loadingEl.remove();
+				
+				console.error('AI detect failed:', e);
+				addAIDetectChatMessage('bot', `Sorry, something went wrong. Please try again.`, null);
+			}
+			
+			// Reset file input
+			fileInput.value = '';
+		};
+	}
+	
+	// Setup close button
+	const closeBtn = document.getElementById('ai-detect-chat-close');
+	const backdrop = modal.querySelector('.ai-detect-chat-backdrop');
+	
+	const closeModal = () => {
+		closeAIDetectChat();
+	};
+	
+	if (closeBtn) {
+		closeBtn.onclick = closeModal;
+	}
+	if (backdrop) {
+		backdrop.onclick = closeModal;
+	}
+}
+
+function closeAIDetectChat() {
+	const modal = document.getElementById('ai-detect-chat-modal');
+	if (modal) {
+		modal.classList.add('hidden');
+		document.body.classList.remove('ai-detect-chat-open');
+	}
+}
+
+function addAIDetectChatMessage(role, text, file, isLoading = false) {
+	const messagesContainer = document.getElementById('ai-detect-chat-messages');
+	if (!messagesContainer) return null;
+	
+	const messageId = 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+	const messageDiv = document.createElement('div');
+	messageDiv.className = `ai-detect-chat-message ai-detect-chat-message-${role}`;
+	messageDiv.setAttribute('data-message-id', messageId);
+	
+	if (role === 'user' && file) {
+		// User message with image
+		const reader = new FileReader();
+		reader.onload = (e) => {
+			messageDiv.innerHTML = `
+				<div class="ai-detect-chat-avatar">👤</div>
+				<div class="ai-detect-chat-content">
+					<img src="${e.target.result}" alt="Uploaded photo" class="ai-detect-chat-image" />
+				</div>
+			`;
+		};
+		reader.readAsDataURL(file);
+	} else if (role === 'bot') {
+		// Bot message - convert markdown ** to bold
+		const formattedText = text ? text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') : '';
+		messageDiv.innerHTML = `
+			<div class="ai-detect-chat-avatar">🤖</div>
+			<div class="ai-detect-chat-text">${isLoading ? '<span class="ai-detect-chat-loading">' + formattedText + '</span>' : formattedText}</div>
+		`;
+	}
+	
+	messagesContainer.appendChild(messageDiv);
+	messagesContainer.scrollTop = messagesContainer.scrollHeight;
+	
+	return messageId;
 }
 
 // Make exercise selector accessible from workout builder

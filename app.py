@@ -1209,15 +1209,21 @@ def vision_detect():
 
 	file = request.files.get("image")
 	if not file:
+		print("[ERROR] Vision detect: No 'image' file in request")
+		print(f"[DEBUG] Available files in request: {list(request.files.keys())}")
 		return jsonify({"success": False, "error": "No image provided"}), 400
 
-	# Check if file has content
-	if file.content_length == 0:
-		return jsonify({"success": False, "error": "Image file is empty"}), 400
-
-	# Check filename
+	# Check filename (some browsers may not send filename, so make it optional)
 	if not file.filename:
-		return jsonify({"success": False, "error": "No filename provided"}), 400
+		print("[WARNING] Vision detect: No filename provided, using default")
+		file.filename = "upload.jpg"
+
+	# Check if file has content (content_length may not always be available)
+	if hasattr(file, 'content_length') and file.content_length == 0:
+		print("[ERROR] Vision detect: Image file is empty (content_length = 0)")
+		return jsonify({"success": False, "error": "Image file is empty"}), 400
+	
+	print(f"[DEBUG] Vision detect: Received file: {file.filename}, content_length: {getattr(file, 'content_length', 'unknown')}")
 
 	tmp_dir = APP_ROOT / "tmp"
 	tmp_dir.mkdir(exist_ok=True)
