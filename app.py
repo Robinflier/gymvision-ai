@@ -1211,8 +1211,14 @@ def vision_detect():
 	if YOLO is None:
 		return jsonify({"success": False, "error": "YOLO models not available. Please install ultralytics package."}), 500
 
+	# Debug: Log request info
+	print(f"[DEBUG] Vision detect request - Content-Type: {request.content_type}")
+	print(f"[DEBUG] Vision detect request - Files: {list(request.files.keys())}")
+	
 	file = request.files.get("image")
 	if not file:
+		print("[ERROR] No 'image' file in request.files")
+		print(f"[DEBUG] Available files: {list(request.files.keys())}")
 		return jsonify({"success": False, "error": "No image provided"}), 400
 
 	# Check filename (some clients may not provide filename, so make it optional)
