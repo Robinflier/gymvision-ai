@@ -1215,13 +1215,23 @@ def vision_detect():
 	if not file:
 		return jsonify({"success": False, "error": "No image provided"}), 400
 
-	# Check if file has content
-	if file.content_length == 0:
-		return jsonify({"success": False, "error": "Image file is empty"}), 400
-
-	# Check filename
+	# Check filename (some clients may not provide filename, so make it optional)
+	# We'll generate a default filename if needed
 	if not file.filename:
-		return jsonify({"success": False, "error": "No filename provided"}), 400
+		# Generate a default filename based on content type or use generic name
+		content_type = file.content_type or "image/jpeg"
+		ext = ".jpg"
+		if "png" in content_type:
+			ext = ".png"
+		elif "webp" in content_type:
+			ext = ".webp"
+		file.filename = f"upload{ext}"
+
+	# Check if file has content
+	# Note: content_length may be None in some cases (e.g., chunked uploads)
+	# So we'll save the file first and check its size
+	if file.content_length is not None and file.content_length == 0:
+		return jsonify({"success": False, "error": "Image file is empty"}), 400
 
 	tmp_dir = APP_ROOT / "tmp"
 	tmp_dir.mkdir(exist_ok=True)
