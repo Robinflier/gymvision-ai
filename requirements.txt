@@ -8,3 +8,6 @@ ultralytics>=8.0.0
 supabase>=2.0.0
 python-dotenv>=1.0.0
 gunicorn>=21.2.0
+openai>=1.0.0
+# Note: PyTorch will be installed as a dependency of ultralytics
+# This may take time during deployment

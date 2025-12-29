@@ -42,6 +42,12 @@ try:
 except Exception:
 	GROQ_AVAILABLE = False
 
+try:
+	from openai import OpenAI  # type: ignore
+	OPENAI_AVAILABLE = True
+except Exception:
+	OPENAI_AVAILABLE = False
+
 APP_ROOT = Path(__file__).resolve().parent
 MODEL_PATH = APP_ROOT / "best.pt"
 MODEL_PATH_1 = APP_ROOT / "best1.pt"
@@ -1159,6 +1165,150 @@ def nav_icon(filename):
     return ("", 204)
 
 
+def _try_openai_vision(image_path: Path) -> Optional[Any]:
+	"""Try to detect exercise using OpenAI Vision API as fallback when YOLO fails."""
+	if not OPENAI_AVAILABLE:
+		return None
+	
+	OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+	if not OPENAI_API_KEY:
+		print("[WARNING] OPENAI_API_KEY not set, skipping Vision fallback")
+		return None
+	
+	try:
+		import base64
+		
+		# Read and encode image
+		with open(image_path, "rb") as image_file:
+			image_data = base64.b64encode(image_file.read()).decode('utf-8')
+		
+		# Determine image format
+		image_format = "jpeg"
+		if image_path.suffix.lower() in [".png"]:
+			image_format = "png"
+		elif image_path.suffix.lower() in [".webp"]:
+			image_format = "webp"
+		
+		# Build exercise list for matching
+		exercise_list = []
+		for key, meta in MACHINE_METADATA.items():
+			display_name = meta.get("display", key.replace("_", " ").title())
+			exercise_list.append(f"- {display_name} (key: {key})")
+		
+		exercises_context = "\n".join(exercise_list[:100])  # Limit to avoid token limits
+		
+		client = OpenAI(api_key=OPENAI_API_KEY)
+		
+		response = client.chat.completions.create(
+			model="gpt-4o-mini",
+			messages=[
+				{
+					"role": "system",
+					"content": f"""You are a fitness expert. Analyze the exercise equipment or movement in the image and identify what exercise this is.
+
+Available exercises in our database:
+{exercises_context}
+
+Return a JSON object with this structure:
+{{
+  "exercise_name": "Name of the exercise (use exact name from list if it matches, otherwise describe what you see)",
+  "exercise_key": "key_from_list_if_match_otherwise_null",
+  "description": "Brief description of what you see",
+  "muscles": ["Primary muscle", "Secondary muscle"],
+  "confidence": 0.0-1.0
+}}
+
+If the exercise matches one in the list, use that exact name and key. If it's a new/unlisted exercise, describe it clearly and set exercise_key to null."""
+				},
+				{
+					"role": "user",
+					"content": [
+						{
+							"type": "text",
+							"text": "What exercise is shown in this image? Be specific and accurate."
+						},
+						{
+							"type": "image_url",
+							"image_url": {
+								"url": f"data:image/{image_format};base64,{image_data}"
+							}
+						}
+					]
+				}
+			],
+			max_tokens=300,
+			temperature=0.3
+		)
+		
+		result_text = response.choices[0].message.content
+		print(f"[DEBUG] OpenAI Vision response: {result_text}")
+		
+		# Parse JSON response
+		import json
+		# Try to extract JSON from response (might be wrapped in markdown)
+		if "```json" in result_text:
+			json_start = result_text.find("```json") + 7
+			json_end = result_text.find("```", json_start)
+			result_text = result_text[json_start:json_end].strip()
+		elif "```" in result_text:
+			json_start = result_text.find("```") + 3
+			json_end = result_text.find("```", json_start)
+			result_text = result_text[json_start:json_end].strip()
+		elif "{" in result_text:
+			json_start = result_text.find("{")
+			json_end = result_text.rfind("}") + 1
+			result_text = result_text[json_start:json_end]
+		
+		vision_data = json.loads(result_text)
+		
+		# If we found a matching exercise key, use that
+		if vision_data.get("exercise_key") and vision_data["exercise_key"] in MACHINE_METADATA:
+			key = vision_data["exercise_key"]
+			meta = MACHINE_METADATA[key]
+			return jsonify({
+				"success": True,
+				"key": key,
+				"display": meta.get("display", key.replace("_", " ").title()),
+				"muscles": normalize_muscles(meta.get("muscles", [])),
+				"image": image_url_for_key(key, meta) or meta.get("image"),
+				"confidence": vision_data.get("confidence", 0.8),
+				"source": "openai_vision",
+				"description": vision_data.get("description", ""),
+				"top_predictions": [{
+					"key": key,
+					"display": meta.get("display", key.replace("_", " ").title()),
+					"muscles": normalize_muscles(meta.get("muscles", [])),
+					"confidence": vision_data.get("confidence", 0.8)
+				}]
+			})
+		else:
+			# New exercise not in database - return generic description
+			exercise_name = vision_data.get("exercise_name", "Unknown Exercise")
+			return jsonify({
+				"success": True,
+				"key": None,
+				"display": exercise_name,
+				"muscles": vision_data.get("muscles", []),
+				"image": None,
+				"confidence": vision_data.get("confidence", 0.7),
+				"source": "openai_vision",
+				"description": vision_data.get("description", ""),
+				"is_new_exercise": True,
+				"top_predictions": [{
+					"key": None,
+					"display": exercise_name,
+					"muscles": vision_data.get("muscles", []),
+					"confidence": vision_data.get("confidence", 0.7)
+				}]
+			})
+		
+	except Exception as e:
+		print(f"[ERROR] OpenAI Vision API error: {str(e)}")
+		import traceback
+		traceback.print_exc()
+		return None
+
+
 def _serialize_prediction_choice(pred: Dict[str, Any]) -> Dict[str, Any]:
 	key = pred["key"]
 	label = pred.get("label")
@@ -1381,6 +1531,21 @@ def vision_detect():
 		if model4:
 			predictions.extend(get_model_predictions(model4, "best4"))
 		
+		# Check if we have good predictions (confidence > 0.5)
+		good_predictions = [p for p in predictions if p.get("conf", 0) > 0.5]
+		
+		# If no good predictions, try OpenAI Vision as fallback
+		if not good_predictions and OPENAI_AVAILABLE:
+			print("[INFO] YOLO found no good predictions, trying OpenAI Vision as fallback...")
+			vision_result = _try_openai_vision(tmp_path)
+			if vision_result:
+				try:
+					os.remove(str(tmp_path))
+				except Exception:
+					pass
+				return vision_result
+		
+		# If still no predictions, return error
 		if not predictions:
 			try:
 				os.remove(str(tmp_path))
@@ -1450,6 +1615,20 @@ def vision_detect():
 			"top_predictions": top_payloads
 		})
 	except Exception as e:
+		# If YOLO fails completely, try OpenAI Vision as fallback
+		if OPENAI_AVAILABLE:
+			print(f"[INFO] YOLO error: {str(e)}, trying OpenAI Vision as fallback...")
+			try:
+				vision_result = _try_openai_vision(tmp_path)
+				if vision_result:
+					try:
+						os.remove(str(tmp_path))
+					except Exception:
+						pass
+					return vision_result
+			except Exception as vision_error:
+				print(f"[ERROR] OpenAI Vision also failed: {str(vision_error)}")
+		
 		error_msg = str(e)
 		print(f"[ERROR] Vision detect failed: {error_msg}")
 		import traceback
@@ -1848,7 +2027,7 @@ def vision_workout():
 		return jsonify({"error": "Groq API key not configured. Set GROQ_API_KEY environment variable."}), 500
 	
 	try:
-		data = request.get_json()
+	data = request.get_json()
 	except Exception as e:
 		return jsonify({"error": f"Invalid request data: {str(e)}"}), 400
 	
@@ -1925,15 +2104,15 @@ Examples:
 		
 		# Wrap API call in try-except to catch any Groq SDK errors
 		try:
-			response = client.chat.completions.create(
-				model="llama-3.3-70b-versatile",
-				messages=[
-					{"role": "system", "content": "You are a fitness expert. Return ONLY valid JSON, no explanations. Start your response with { and end with }."},
-					{"role": "user", "content": prompt}
-				],
-				temperature=0.3,
-				max_tokens=800
-			)
+		response = client.chat.completions.create(
+			model="llama-3.3-70b-versatile",
+			messages=[
+				{"role": "system", "content": "You are a fitness expert. Return ONLY valid JSON, no explanations. Start your response with { and end with }."},
+				{"role": "user", "content": prompt}
+			],
+			temperature=0.3,
+			max_tokens=800
+		)
 		except Exception as groq_error:
 			error_str = str(groq_error)
 			print(f"[ERROR] Groq API error: {error_str}")
@@ -1984,7 +2163,7 @@ Examples:
 		
 		# Parse JSON with better error handling
 		try:
-			workout_json = json.loads(content)
+		workout_json = json.loads(content)
 		except json.JSONDecodeError as parse_error:
 			print(f"[ERROR] JSON parse error: {parse_error}")
 			print(f"[DEBUG] Content was: {content[:500]}")
@@ -2073,7 +2252,7 @@ Examples:
 		error_msg = str(e)
 		print(f"[ERROR] Failed to parse workout JSON: {error_msg}")
 		if 'content' in locals():
-			print(f"[DEBUG] Content was: {content[:500]}")
+		print(f"[DEBUG] Content was: {content[:500]}")
 		# Provide user-friendly error message
 		return jsonify({"error": "The AI returned an invalid response. Please try rephrasing your request or try again."}), 500
 	except Exception as e:
