@@ -1,4 +1,25 @@
 // ======================
+// 🔥 API URL HELPER
+// ======================
+// Helper function to get the correct API URL for backend calls
+// In Capacitor (iOS/Android), we need to use the full backend URL
+// In web browser, we can use relative URLs
+function getApiUrl(path) {
+	// Check if we're in Capacitor (mobile app)
+	if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+		// For images, use local static files in Capacitor (much faster, no network requests)
+		if (path.startsWith('/images/')) {
+			return `static${path}`;
+		}
+		// For API calls, use the backend URL from environment or default to Render URL
+		const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
+		return `${backendUrl}${path}`;
+	}
+	// In web browser, use relative URL
+	return path;
+}
+
+// ======================
 // 🔥 SUPABASE INIT
 // ======================
 // Supabase config is injected from backend via window.SUPABASE_URL and window.SUPABASE_ANON_KEY
@@ -44,10 +65,6 @@ let currentWorkout = null;
 let editingWorkoutId = null;
 let workoutTimer = null;
 let workoutStartTime = null;
-let restTimer = null;
-let restTimerInterval = null;
-let restTimerSeconds = 0;
-let restTimerRunning = false;
 const WORKOUT_DRAFT_KEY = 'currentWorkoutDraft';
 const DEFAULT_SET_COUNT = 3;
 
@@ -178,9 +195,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 	loadExercises();
 	loadWorkouts();
 	updateWorkoutStartButton();
-	
-	// Check if daily reminder should be cancelled (if workout already done today)
-	checkAndCancelDailyReminder();
 });
 
 // ======================
@@ -365,12 +379,7 @@ function initRegisterForm() {
 			return;
 		}
 		
-		// Registration successful - set defaults for new account
-		localStorage.setItem('restTimerEnabled', 'true'); // Rest timer automatically on
-		
-		// Request notification permission for new account
-		await requestNotificationPermission();
-		
+		// Registration successful
 		alert('Account created! Please log in.');
 		window.location.href = '/login';
 	});
@@ -540,7 +549,8 @@ function initTabs() {
 // ========== FILE UPLOAD & CLASSIFICATION ==========
 function initFileUpload() {
 	const fileInput = document.getElementById('fileInput');
-	const classifyBtn = document.getElementById('classify');
+	// AI Detect button removed from home page - now only in exercise selector
+	const classifyBtn = null; // document.getElementById('classify');
 	const camera = document.getElementById('camera');
 	const snapshot = document.getElementById('snapshot');
 	const manualPreview = document.getElementById('manual-preview');
@@ -566,7 +576,7 @@ function initFileUpload() {
 						}
 						if (camera) camera.classList.add('hidden');
 						if (snapshot) snapshot.classList.add('hidden');
-						classifyBtn.disabled = false;
+						if (classifyBtn) classifyBtn.disabled = false;
 					};
 					img.src = event.target.result;
 				};
@@ -587,7 +597,8 @@ function initFileUpload() {
 				const formData = new FormData();
 				formData.append('image', file);
 				
-				const res = await fetch('/predict', {
+				const apiUrl = getApiUrl('/api/vision-detect');
+				const res = await fetch(apiUrl, {
 					method: 'POST',
 					body: formData
 				});
@@ -892,17 +903,10 @@ function initExerciseSelector() {
 		});
 	}
 
-	// AI detect inside selector
-	if (aiDetectBtn && fileInput) {
+	// AI detect inside selector - open chat modal
+	if (aiDetectBtn) {
 		aiDetectBtn.addEventListener('click', () => {
-			fileInput.click();
-		});
-		fileInput.addEventListener('change', async (e) => {
-			const file = e.target.files[0];
-			if (!file) return;
-			await classifyForExerciseSelector(file, predictionsContainer, selector);
-			// reset value so the same file can be chosen again if needed
-			fileInput.value = '';
+			openAIDetectChat();
 		});
 	}
 	
@@ -992,11 +996,8 @@ function initExerciseSelector() {
 				</div>
 			`;
 			item.onclick = () => {
-				try {
 				const ctx = window.exerciseSelectorContext || null;
-					const exerciseKey = ex.key || '';
-					const exerciseDisplay = ex.display || exerciseKey || 'Unknown Exercise';
-					const labelLower = exerciseDisplay.toLowerCase().trim();
+				const labelLower = (ex.display || ex.key || '').toLowerCase().trim();
 				
 				// Check if this is a generic detection that needs refinement
 				const refinements = {
@@ -1052,35 +1053,17 @@ function initExerciseSelector() {
 				// Otherwise, proceed with normal selection
 				if (ctx === 'insights') {
 					// Use insights view for history
-						if (typeof handleExerciseInsightsForName === 'function') {
-							handleExerciseInsightsForName(exerciseDisplay);
-						} else {
-							console.error('handleExerciseInsightsForName is not defined');
-						}
+					handleExerciseInsightsForName(ex.display || ex.key);
 				} else if (currentTab === 'workout-builder') {
 					// Add to workout
-						if (typeof addExerciseToWorkout === 'function') {
 					addExerciseToWorkout(ex);
-						} else {
-							console.error('addExerciseToWorkout is not defined');
-						}
 				} else {
 					// Display exercise info on home
-						if (typeof selectExercise === 'function' && exerciseKey) {
-							selectExercise(exerciseKey);
-						} else {
-							console.error('selectExercise is not defined or exercise key is missing', { exerciseKey, ex });
-						}
+					selectExercise(ex.key);
 				}
 				window.exerciseSelectorContext = null;
-					if (selector) {
 				selector.classList.add('hidden');
-					}
 				document.body.classList.remove('selector-open');
-				} catch (error) {
-					console.error('Error in exercise selector onclick:', error, { exercise: ex });
-					// Don't show alert for user - just log it
-				}
 			};
 			resultsContainer.appendChild(item);
 		});
@@ -1187,7 +1170,8 @@ async function classifyForExerciseSelector(file, predictionsContainer, selectorE
 	try {
 		const formData = new FormData();
 		formData.append('image', file);
-		const res = await fetch('/predict', {
+		const apiUrl = getApiUrl('/api/vision-detect');
+		const res = await fetch(apiUrl, {
 			method: 'POST',
 			body: formData
 		});
@@ -1326,17 +1310,33 @@ async function classifyForExerciseSelector(file, predictionsContainer, selectorE
 	}
 }
 
-async function openExerciseSelector() {
+function openExerciseSelector() {
+	console.log('[DEBUG] openExerciseSelector called');
 	const selector = document.getElementById('exercise-selector');
+	console.log('[DEBUG] selector element:', selector);
 	if (selector) {
-		// Make sure exercises are loaded before opening selector
-		if (!exercisesLoaded || allExercises.length === 0) {
-			console.log('Exercises not loaded yet, loading now...');
-			await loadExercises();
-		}
-		
 		selector.classList.remove('hidden');
 		document.body.classList.add('selector-open');
+		console.log('[DEBUG] Selector opened, hidden class removed');
+		
+		// Force visibility of "or" and "AI-detect" elements
+		const orDiv = selector.querySelector('.exercise-selector-or');
+		const aiDetectDiv = selector.querySelector('.exercise-selector-ai-detect');
+		console.log('[DEBUG] orDiv:', orDiv);
+		console.log('[DEBUG] aiDetectDiv:', aiDetectDiv);
+		if (orDiv) {
+			orDiv.style.display = 'block';
+			orDiv.style.visibility = 'visible';
+			orDiv.style.opacity = '1';
+			console.log('[DEBUG] orDiv forced visible');
+		}
+		if (aiDetectDiv) {
+			aiDetectDiv.style.display = 'flex';
+			aiDetectDiv.style.visibility = 'visible';
+			aiDetectDiv.style.opacity = '1';
+			console.log('[DEBUG] aiDetectDiv forced visible');
+		}
+		
 		const searchInput = document.getElementById('exercise-selector-search');
 		if (searchInput) {
 			searchInput.value = '';
@@ -1352,6 +1352,8 @@ async function openExerciseSelector() {
 		if (typeof filterFn === 'function') {
 			filterFn('', null);
 		}
+	} else {
+		console.error('[ERROR] exercise-selector element not found!');
 	}
 }
 
@@ -1472,7 +1474,24 @@ function generateQuickWorkout(message) {
 		};
 	}
 	
-	// Shoulders workout
+	// Check for specific exercise combinations
+	if (msg.includes('dip')) {
+		const exercises = [];
+		if (msg.includes('pushup') || msg.includes('push-up') || msg.includes('push up')) {
+			exercises.push({ key: 'push_up', display: 'Push-Up' });
+		}
+		if (msg.includes('dip')) {
+			exercises.push({ key: 'dips', display: 'Dips' });
+		}
+		if (exercises.length > 0) {
+			return {
+				name: 'Workout',
+				exercises: exercises
+			};
+		}
+	}
+	
+	// Shoulders workout (check for "shoulder" or "shoulders" - with or without "workout")
 	if (msg.includes('shoulder')) {
 		return {
 			name: 'Shoulders Workout',
@@ -1486,7 +1505,7 @@ function generateQuickWorkout(message) {
 		};
 	}
 	
-	// Chest workout
+	// Chest workout (check for "chest" - handles "only chest", "chest workout", etc.)
 	if (msg.includes('chest') || msg.includes('borst')) {
 		return {
 			name: 'Chest Workout',
@@ -1540,7 +1559,7 @@ function generateQuickWorkout(message) {
 		};
 	}
 	
-	// Legs workout
+	// Legs workout (check for leg, quad, hamstring, glute, calf)
 	if (msg.includes('leg') || msg.includes('quad') || msg.includes('hamstring') || msg.includes('glute') || msg.includes('calf')) {
 		return {
 			name: 'Legs Workout',
@@ -1554,7 +1573,7 @@ function generateQuickWorkout(message) {
 		};
 	}
 	
-	// Full body
+	// Full body (check before generic push/pull/legs)
 	if (msg.includes('full body') || msg.includes('fullbody') || msg.includes('full-body')) {
 		return {
 			name: 'Full Body Workout',
@@ -1569,7 +1588,7 @@ function generateQuickWorkout(message) {
 		};
 	}
 	
-	// Push workout
+	// Push workout - only if it's explicitly "push workout" or "push day", not just "push" in other words
 	if ((msg.match(/\bpush\b/) && (msg.includes('workout') || msg.includes('day') || msg.includes('train')))) {
 		return {
 			name: 'Push Workout',
@@ -1800,22 +1819,12 @@ function renderWorkoutList() {
 			if ((setIdx % 2) === 1) {
 				setRow.classList.add('even');
 			}
-			const currentUnit = getWeightUnit();
-			// Convert weight to current unit if it exists
-			let displayWeight = set.weight ?? '';
-			if (displayWeight && set.weight) {
-				// Assume stored weights are in kg, convert if needed
-				const storedUnit = 'kg'; // We store in kg
-				if (storedUnit !== currentUnit) {
-					displayWeight = convertWeight(set.weight, storedUnit, currentUnit);
-				}
-			}
 			setRow.innerHTML = `
 				<div class="set-col">
 				<div class="workout-edit-set-number">${setIdx + 1}</div>
 				</div>
 				${isBodyweight ? '' : `<div class="weight-col">
-					<input type="number" class="workout-edit-set-input weight" placeholder="${weightPlaceholder}" inputmode="decimal" value="${displayWeight}" aria-label="Set weight (${currentUnit})">
+					<input type="number" class="workout-edit-set-input weight" placeholder="${weightPlaceholder}" inputmode="decimal" value="${set.weight ?? ''}" aria-label="Set weight (kg)">
 				</div>`}
 				<div class="reps-col">
 					<input type="number" class="workout-edit-set-input reps" placeholder="${repsPlaceholder}" inputmode="numeric" value="${set.reps ?? ''}" aria-label="Set reps">
@@ -1833,19 +1842,14 @@ function renderWorkoutList() {
 			
 			if (weightInput) {
 				weightInput.addEventListener('input', (e) => {
-					// Store the value as entered (will be converted to kg on save)
 					ex.sets[setIdx].weight = e.target.value ? Number(e.target.value) : '';
 					saveWorkoutDraft();
-					// Check if set is complete and show rest timer
-					checkAndShowRestTimer(ex.sets[setIdx]);
 				});
 			}
 			
 				repsInput.addEventListener('input', (e) => {
 				ex.sets[setIdx].reps = e.target.value ? Number(e.target.value) : '';
 				saveWorkoutDraft();
-				// Check if set is complete and show rest timer
-				checkAndShowRestTimer(ex.sets[setIdx]);
 				});
 			
 			deleteBtn.addEventListener('click', () => {
@@ -1897,9 +1901,18 @@ function renderWorkoutList() {
 		const addBtn = document.createElement('button');
 		addBtn.className = 'btn workout-add-exercise-btn';
 		addBtn.textContent = '+ Add Exercise';
-		addBtn.onclick = () => {
+		addBtn.onclick = (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			console.log('[DEBUG] Add Exercise button clicked');
 			openExerciseSelector();
 		};
+		addBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			console.log('[DEBUG] Add Exercise button clicked (addEventListener)');
+			openExerciseSelector();
+		});
 		workoutList.insertAdjacentElement('afterend', addBtn);
 
 		// Cancel workout button (insert after the add exercise button)
@@ -1933,24 +1946,10 @@ function saveWorkout() {
 		workoutName.value = capitalizedName; // Update the input field to show capitalized version
 	}
 	
-	// Convert weights to kg for storage (we always store in kg)
-	const currentUnit = getWeightUnit();
-	currentWorkout.exercises = (currentWorkout.exercises || []).map(ex => {
-		const isBodyweight = isBodyweightExercise(ex);
-		return {
+	currentWorkout.exercises = (currentWorkout.exercises || []).map(ex => ({
 		...ex,
-			sets: (ex.sets || []).filter(set => set.weight !== '' || set.reps !== '').map(set => {
-				// Convert weight to kg if needed (only for non-bodyweight exercises)
-				if (!isBodyweight && set.weight && currentUnit === 'lbs') {
-					return {
-						...set,
-						weight: parseFloat(convertWeight(set.weight, 'lbs', 'kg'))
-					};
-				}
-				return set;
-			})
-		};
-	});
+		sets: (ex.sets || []).filter(set => set.weight !== '' || set.reps !== '')
+	}));
 	
 	let duration = currentWorkout.duration || 0;
 	if (!editingWorkoutId && workoutStartTime) {
@@ -1981,8 +1980,6 @@ function saveWorkout() {
 	// Update streak only for new workouts (not edits)
 	if (!editingWorkoutId) {
 		updateStreak();
-		// Cancel daily reminder if workout was saved today
-		checkAndCancelDailyReminder();
 	}
 	
 	editingWorkoutId = null;
@@ -1997,8 +1994,6 @@ function saveWorkout() {
 	}
 	
 	loadWorkouts(workouts);
-	// Always update settings stats when workouts change
-	loadSettingsStats();
 	switchTab('workouts');
 }
 
@@ -2122,24 +2117,14 @@ function buildWorkoutExercisesMarkup(workout) {
 		const sets = exercise.sets || [];
 		const isBodyweight = isBodyweightExercise(exercise);
 		
-		const currentUnit = getWeightUnit();
 		const setsMarkup = sets.length
-			? sets.map((set, idx) => {
-				// Convert weight to current unit (stored weights are in kg)
-				let displayWeight = set.weight ?? 0;
-				if (displayWeight && set.weight && !isBodyweight) {
-					const storedUnit = 'kg';
-					if (storedUnit !== currentUnit) {
-						displayWeight = convertWeight(set.weight, storedUnit, currentUnit);
-					}
-				}
-				return `
+			? sets.map((set, idx) => `
 				<div class="workout-edit-set-row view${(idx % 2) === 1 ? ' even' : ''}">
 					<div class="set-col">
 						<div class="workout-edit-set-number">${idx + 1}</div>
 				</div>
 					${isBodyweight ? '' : `<div class="weight-col">
-						<div class="workout-view-value">${displayWeight}</div>
+						<div class="workout-view-value">${set.weight ?? 0}</div>
 				</div>`}
 					<div class="reps-col">
 						<div class="workout-view-value">${set.reps ?? 0}</div>
@@ -2150,8 +2135,7 @@ function buildWorkoutExercisesMarkup(workout) {
 						</button>
 					</div>
 				</div>
-			`;
-			}).join('')
+			`).join('')
 			: `<div class="workout-set-line empty">No sets recorded</div>`;
 		
 		const infoButtonHtml = renderExerciseInfoButton(exercise);
@@ -2169,7 +2153,7 @@ function buildWorkoutExercisesMarkup(workout) {
 				<div class="workout-edit-sets view-mode ${isBodyweight ? 'bodyweight' : ''}">
 					<div class="workout-edit-set-row workout-edit-set-header">
 						<div class="set-col">Set</div>
-						${isBodyweight ? '' : `<div class="weight-col">${getWeightUnit().toUpperCase()}</div>`}
+						${isBodyweight ? '' : '<div class="weight-col">Kg</div>'}
 						<div class="reps-col">Reps</div>
 						<div class="action-col"></div>
 					</div>
@@ -2214,71 +2198,49 @@ function buildExerciseThumb(exercise, size = 'large') {
 }
 
 function getExerciseImageSource(exercise) {
-	if (!exercise) return null;
-	
-	// First, try to find local images (preferred for Capacitor)
 	const candidates = getExerciseImageCandidates(exercise);
-	if (candidates.length > 0) {
-		// Return the first local candidate
-		return candidates[0];
-	}
-	
-	// If no local images found, fall back to backend image URL
-	if (exercise.image) {
-		// Convert /images/ to static/images/ for Capacitor
-		if (exercise.image.startsWith('/images/')) {
-			return exercise.image.replace('/images/', 'static/images/');
-		}
-		// If it's already a full URL (from strengthlevel.com), use it as fallback
-		if (exercise.image.startsWith('http://') || exercise.image.startsWith('https://')) {
-			return exercise.image;
-		}
-		// Otherwise assume it's a relative path and use as is
-		return exercise.image;
-	}
-	
-	return null;
+	return candidates.length ? candidates[0] : null;
 }
 
 function getExerciseImageCandidates(exercise) {
 	if (!exercise) return [];
-	
-	// Don't use backend image URL here - we want to prioritize local images
-	// The backend image will be used as fallback in getExerciseImageSource
-	
+	if (exercise.image) {
+		// If it's an external URL (http/https), use it directly
+		if (exercise.image.startsWith('http://') || exercise.image.startsWith('https://')) {
+			return [exercise.image];
+		}
+		// If it's a local path, use getApiUrl to resolve it correctly
+		return [getApiUrl(exercise.image)];
+	}
 	const candidates = [];
 	const seen = new Set();
-	
-	// Helper to get the correct image path
-	const getImagePath = (filename) => {
-		// In Capacitor, use static/images path
-		// For web, also use static/images (relative to root)
-		return `static/images/${filename}`;
-	};
-	
 	const addPath = (path) => {
 		if (path && !seen.has(path)) {
 			seen.add(path);
-			candidates.push(path);
+			// Use getApiUrl for local paths
+			const resolvedPath = path.startsWith('http://') || path.startsWith('https://') 
+				? path 
+				: getApiUrl(path);
+			candidates.push(resolvedPath);
 		}
 	};
 	const addBase = (base) => {
 		if (!base) return;
-		addPath(getImagePath(`${base}.jpg`));
-		addPath(getImagePath(`${base}.png`));
-		addPath(getImagePath(`${base}.jpeg`));
+		addPath(`/images/${base}.jpg`);
+		addPath(`/images/${base}.png`);
+		addPath(`/images/${base}.jpeg`);
 	};
 	
 	// Special case: use specific images for generic predictions
 	const label = (exercise.display || exercise.key || '').toString().toLowerCase().trim();
 	if (label === 'smith machine') {
-		addPath(getImagePath('smithmachine.jpg'));
+		addPath('/images/smithmachine.jpg');
 	}
 	if (label === 'dumbbell') {
-		addPath(getImagePath('dumbbell.jpg'));
+		addPath('/images/dumbbell.jpg');
 	}
 	if (label === 'chinning dipping' || label === 'leg raise tower') {
-		addPath(getImagePath('chinningdipping.jpg'));
+		addPath('/images/chinningdipping.jpg');
 	}
 	
 	const displaySlug = slugifyForImage(exercise.display);
@@ -2494,16 +2456,8 @@ function calculateWorkoutVolume(workout) {
 }
 
 function formatVolume(volumeKg) {
-	const unit = getWeightUnit();
-	if (volumeKg === 0) return `0 ${unit}`;
-	
-	// Convert volume if needed (volume is always stored in kg)
-	let displayVolume = volumeKg;
-	if (unit === 'lbs') {
-		displayVolume = volumeKg * 2.20462;
-	}
-	
-	return `${Math.round(displayVolume).toLocaleString()} ${unit}`;
+	if (volumeKg === 0) return '0 kg';
+	return `${Math.round(volumeKg).toLocaleString()} kg`;
 }
 
 function deleteWorkout(id) {
@@ -2580,9 +2534,6 @@ function initProgress() {
 		dateInput.value = `${year}-${month}-${day}`;
 	}
 	
-	// Update unit label
-	updateProgressUnitLabel();
-	
 	const progressForm = document.getElementById('progress-form');
 	if (progressForm) {
 		progressForm.addEventListener('submit', (e) => {
@@ -2594,12 +2545,7 @@ function initProgress() {
 				// Use the selected date so you can backfill specific days
 				const dayKey = dateInputValue; // YYYY-MM-DD from input[type=date]
 				const now = new Date(`${dayKey}T12:00:00`);
-				const inputUnit = getWeightUnit();
-				let value = parseFloat(weight);
-				// Convert to kg for storage (we always store in kg)
-				if (inputUnit === 'lbs') {
-					value = parseFloat(convertWeight(weight, 'lbs', 'kg'));
-				}
+				const value = parseFloat(weight);
 				// Remove any existing entries for this day (to prevent duplicates)
 				const filteredProgress = progress.filter(p => {
 					const pDayKey = p.dayKey || (p.date ? p.date.slice(0, 10) : '');
@@ -2667,7 +2613,6 @@ function initProgress() {
 async function loadProgress() {
 	const progress = JSON.parse(localStorage.getItem('progress') || '[]');
 	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-	updateProgressUnitLabel(); // Update unit label before rendering
 	renderWeightChart(progress);
 	await renderMuscleFocus(workouts);
 	updateExerciseInsightsOptions(workouts);
@@ -2821,17 +2766,11 @@ function renderWeightChart(progress) {
 	// Hide tooltip initially
 	if (tooltip) tooltip.style.display = 'none';
 	
-	// Set placeholder to last weight entry (convert to current unit)
+	// Set placeholder to last weight entry
 	const weightInput = document.getElementById('progress-weight');
 	if (weightInput && sorted.length > 0) {
 		const lastEntry = sorted[sorted.length - 1];
-		const currentUnit = getWeightUnit();
-		// Progress weights are stored in kg, convert if needed
-		let displayWeight = lastEntry.weight;
-		if (currentUnit === 'lbs') {
-			displayWeight = convertWeight(lastEntry.weight, 'kg', 'lbs');
-		}
-		weightInput.placeholder = `${displayWeight}`;
+		weightInput.placeholder = `${lastEntry.weight}`;
 	} else if (weightInput) {
 		weightInput.placeholder = '';
 	}
@@ -2905,13 +2844,7 @@ function renderWeightChart(progress) {
 				day: '2-digit',
 				month: 'short'
 			});
-			const unit = getWeightUnit();
-			// Convert weight if needed (stored in kg)
-			let displayWeight = nearest.weight;
-			if (unit === 'lbs') {
-				displayWeight = convertWeight(nearest.weight, 'kg', 'lbs');
-			}
-			tooltip.textContent = `${labelDate} • ${displayWeight} ${unit}`;
+			tooltip.textContent = `${labelDate} • ${nearest.weight} kg`;
 			tooltip.style.left = `${nearest.cx}px`;
 			tooltip.style.top = `${nearest.cy}px`;
 			tooltip.style.display = 'block';
@@ -3235,30 +3168,19 @@ function handleExerciseInsightsForName(name) {
 			}
 		});
 
-		const unit = getWeightUnit();
-		// Convert weights to current unit (stored in kg)
-		let displayBestWeight = bestWeightSet.weight;
-		let displayBestVolumeWeight = bestVolumeSet.weight;
-		let displayBestVolume = bestVolumeSet.volume;
-		if (unit === 'lbs') {
-			displayBestWeight = convertWeight(bestWeightSet.weight, 'kg', 'lbs');
-			displayBestVolumeWeight = convertWeight(bestVolumeSet.weight, 'kg', 'lbs');
-			displayBestVolume = bestVolumeSet.volume * 2.20462; // Volume conversion
-		}
-
 		results.innerHTML = `
 			<div class="progress-pr-result">
 				<div class="progress-pr-result-title">Top weight set</div>
 				<div class="progress-pr-result-meta">
 					<span><strong>${entry.name}</strong></span>
-					<span>${displayBestWeight} ${unit} × ${bestWeightSet.reps}</span>
+					<span>${bestWeightSet.weight} kg × ${bestWeightSet.reps}</span>
 				</div>
 			</div>
 			<div class="progress-pr-result">
 				<div class="progress-pr-result-title">Top volume set</div>
 				<div class="progress-pr-result-meta">
 					<span><strong>${entry.name}</strong></span>
-					<span>${displayBestVolumeWeight} ${unit} × ${bestVolumeSet.reps} (${Math.round(displayBestVolume)} ${unit})</span>
+					<span>${bestVolumeSet.weight} kg × ${bestVolumeSet.reps} (${bestVolumeSet.volume} kg)</span>
 				</div>
 			</div>
 		`;
@@ -3344,20 +3266,14 @@ function renderPRTimeline(workouts) {
 		return;
 	}
 	
-	const unit = getWeightUnit();
 	container.innerHTML = prs.map(pr => {
 		const dateStr = pr.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-		// Convert weight to current unit (stored in kg)
-		let displayWeight = pr.bestWeight;
-		if (unit === 'lbs') {
-			displayWeight = convertWeight(pr.bestWeight, 'kg', 'lbs');
-		}
 		return `
 			<div class="progress-pr-timeline-item">
 				<div class="progress-pr-timeline-date">${dateStr}</div>
 				<div class="progress-pr-timeline-content">
 					<div class="progress-pr-timeline-exercise">${pr.display}</div>
-					<div class="progress-pr-timeline-value">${displayWeight} ${unit} × ${pr.bestReps} reps</div>
+					<div class="progress-pr-timeline-value">${pr.bestWeight} kg × ${pr.bestReps} reps</div>
 				</div>
 			</div>
 		`;
@@ -3459,15 +3375,6 @@ function renderProgressiveOverloadTracker(workouts) {
 			statusText = 'Declining';
 		}
 		
-		const unit = getWeightUnit();
-		// Convert weights to current unit (stored in kg)
-		let displayRecentWeight = recentBestSet.weight;
-		let displayOldWeight = oldBestSet.weight;
-		if (unit === 'lbs') {
-			displayRecentWeight = convertWeight(recentBestSet.weight, 'kg', 'lbs');
-			displayOldWeight = convertWeight(oldBestSet.weight, 'kg', 'lbs');
-		}
-		
 		return {
 			key: ex.key,
 			display: ex.display,
@@ -3475,8 +3382,8 @@ function renderProgressiveOverloadTracker(workouts) {
 			statusClass,
 			statusText,
 			changePercent: Math.abs(changePercent).toFixed(1),
-			recentBest: `${displayRecentWeight}${unit} × ${recentBestSet.reps}`,
-			oldBest: `${displayOldWeight}${unit} × ${oldBestSet.reps}`,
+			recentBest: `${recentBestSet.weight}kg × ${recentBestSet.reps}`,
+			oldBest: `${oldBestSet.weight}kg × ${oldBestSet.reps}`,
 			workoutCount: workoutCount
 		};
 	});
@@ -3521,237 +3428,8 @@ function initLogout() {
 	}
 
 // ========== SETTINGS ==========
-// ========== REST TIMER ==========
-let restTimerCheckTimeout = null;
-
-function checkAndShowRestTimer(set) {
-	// Check if rest timer is enabled
-	const restTimerEnabled = localStorage.getItem('restTimerEnabled') === 'true';
-	if (!restTimerEnabled) return;
-	
-	// Clear any existing timeout
-	if (restTimerCheckTimeout) {
-		clearTimeout(restTimerCheckTimeout);
-		restTimerCheckTimeout = null;
-	}
-	
-	// Check if set is complete (has both weight and reps)
-	const weight = parseFloat(set.weight) || 0;
-	const reps = parseFloat(set.reps) || 0;
-	
-	if (weight > 0 && reps > 0) {
-		// Small delay to avoid showing timer immediately while typing
-		restTimerCheckTimeout = setTimeout(() => {
-			// Double check that set is still complete
-			const currentWeight = parseFloat(set.weight) || 0;
-			const currentReps = parseFloat(set.reps) || 0;
-			if (currentWeight > 0 && currentReps > 0) {
-				showRestTimer();
-			}
-		}, 800);
-	}
-}
-
-function showRestTimer() {
-	const overlay = document.getElementById('rest-timer-overlay');
-	if (!overlay) {
-		console.error('Rest timer overlay not found');
-		return;
-	}
-	
-	// Get default rest time from settings (default 60 seconds)
-	const defaultRestTime = parseInt(localStorage.getItem('restTimerDefaultTime') || '60');
-	restTimerSeconds = defaultRestTime;
-	
-	// Reset timer state
-	stopRestTimer();
-	
-	overlay.classList.remove('hidden');
-	updateRestTimerDisplay();
-	updateStartButtonText();
-	
-	console.log('Rest timer shown', { restTimerSeconds, defaultRestTime });
-}
-
-function hideRestTimer() {
-	const overlay = document.getElementById('rest-timer-overlay');
-	if (overlay) overlay.classList.add('hidden');
-	stopRestTimer();
-}
-
-function startRestTimer() {
-	if (restTimerRunning) return;
-	
-	restTimerRunning = true;
-	updateStartButtonText();
-	
-	// Schedule notification for when timer reaches 00:00 (now + restTimerSeconds)
-	const notificationsEnabled = localStorage.getItem('notificationsEnabled') === 'true';
-	if (notificationsEnabled && restTimerSeconds > 0) {
-		scheduleRestTimerNotification(restTimerSeconds);
-	}
-	
-	restTimerInterval = setInterval(() => {
-		if (restTimerSeconds > 0) {
-			restTimerSeconds--;
-			updateRestTimerDisplay();
-		} else {
-			stopRestTimer();
-			updateStartButtonText();
-			// Optional: play sound or haptic feedback when timer ends
-		}
-	}, 1000);
-}
-
-async function stopRestTimer() {
-	restTimerRunning = false;
-	if (restTimerInterval) {
-		clearInterval(restTimerInterval);
-		restTimerInterval = null;
-	}
-	updateStartButtonText();
-	
-	// Cancel rest timer notification if timer was stopped
-	try {
-		if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
-			const LocalNotifications = Capacitor.Plugins.LocalNotifications;
-			await LocalNotifications.cancel({ notifications: [{ id: 300 }] });
-		}
-	} catch (e) {
-		// Ignore errors
-	}
-}
-
-async function addMinuteToTimer() {
-	// Add 60 seconds to the current timer
-	restTimerSeconds += 60;
-	updateRestTimerDisplay();
-	
-	// Reschedule notification with new time if timer is running
-	if (restTimerRunning) {
-		const notificationsEnabled = localStorage.getItem('notificationsEnabled') === 'true';
-		if (notificationsEnabled) {
-			await scheduleRestTimerNotification(restTimerSeconds);
-		}
-	}
-}
-
-function updateRestTimerDisplay() {
-	const timeEl = document.getElementById('rest-timer-time');
-	if (!timeEl) return;
-	
-	const minutes = Math.floor(restTimerSeconds / 60);
-	const seconds = restTimerSeconds % 60;
-	timeEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-}
-
-function updateStartButtonText() {
-	const startBtn = document.getElementById('rest-timer-start');
-	if (!startBtn) return;
-	
-	startBtn.textContent = restTimerRunning ? 'Pause' : 'Start';
-}
-
-function initRestTimer() {
-	const overlay = document.getElementById('rest-timer-overlay');
-	if (!overlay) return;
-	
-	const closeBtn = document.getElementById('rest-timer-close');
-	const startBtn = document.getElementById('rest-timer-start');
-	const addMinuteBtn = document.getElementById('rest-timer-add-minute');
-	
-	if (closeBtn) {
-		closeBtn.addEventListener('click', () => {
-			hideRestTimer();
-		});
-	}
-	
-	if (startBtn) {
-		startBtn.addEventListener('click', () => {
-			if (restTimerRunning) {
-				stopRestTimer();
-			} else {
-				startRestTimer();
-			}
-			updateStartButtonText();
-		});
-	}
-	
-	if (addMinuteBtn) {
-		addMinuteBtn.addEventListener('click', () => {
-			addMinuteToTimer();
-		});
-	}
-	
-	// Listen for notification actions (when user taps notification)
-	if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
-		const LocalNotifications = Capacitor.Plugins.LocalNotifications;
-		LocalNotifications.addListener('localNotificationActionPerformed', (notification) => {
-			// If rest timer notification was tapped, show the rest timer overlay
-			if (notification.notification && notification.notification.id === 300) {
-				showRestTimer();
-			}
-		});
-	}
-}
-
-async function initSettings() {
+function initSettings() {
 	initLogout(); // Initialize logout button
-	initRestTimer(); // Initialize rest timer
-	
-	// Initialize notifications toggle
-	const notificationsToggle = document.getElementById('settings-notifications-toggle');
-	if (notificationsToggle) {
-		const savedNotifications = localStorage.getItem('notificationsEnabled') === 'true';
-		notificationsToggle.checked = savedNotifications;
-		notificationsToggle.addEventListener('change', async (e) => {
-			const enabled = e.target.checked;
-			localStorage.setItem('notificationsEnabled', enabled.toString());
-			if (enabled) {
-				await requestNotificationPermission();
-				await scheduleAllNotifications();
-			} else {
-				await cancelAllNotifications();
-			}
-		});
-		
-		// Initialize notifications if already enabled
-		if (savedNotifications) {
-			await requestNotificationPermission();
-			await scheduleAllNotifications();
-		}
-	}
-	
-	// Initialize unit toggle (kg/lbs)
-	const unitToggle = document.getElementById('settings-unit-toggle');
-	if (unitToggle) {
-		// Load saved unit preference (default to kg)
-		// Toggle checked (ON/right) = lbs, Toggle unchecked (OFF/left) = kg
-		const savedUnit = localStorage.getItem('weightUnit') || 'kg';
-		const isLbs = savedUnit === 'lbs';
-		unitToggle.checked = isLbs;
-		
-		unitToggle.addEventListener('change', (e) => {
-			const oldUnit = localStorage.getItem('weightUnit') || 'kg';
-			// Toggle checked (ON/right) = lbs, Toggle unchecked (OFF/left) = kg
-			const newUnit = e.target.checked ? 'lbs' : 'kg';
-			localStorage.setItem('weightUnit', newUnit);
-			// Update all weight displays in the app
-			updateWeightDisplays(newUnit);
-		});
-	}
-	
-	// Initialize rest timer toggle
-	const restTimerToggle = document.getElementById('settings-rest-timer-toggle');
-	if (restTimerToggle) {
-		const savedRestTimer = localStorage.getItem('restTimerEnabled') === 'true';
-		restTimerToggle.checked = savedRestTimer;
-		
-		restTimerToggle.addEventListener('change', (e) => {
-			localStorage.setItem('restTimerEnabled', e.target.checked.toString());
-		});
-	}
-	
 }
 
 async function loadSettings() {
@@ -3759,122 +3437,15 @@ async function loadSettings() {
 	try {
 		const user = await getUser();
 		if (user) {
-			const usernameEl = document.getElementById('settings-username');
-			const emailEl = document.getElementById('settings-email');
-			
-			const username = user.user_metadata?.username || user.email?.split('@')[0] || '—';
-			if (usernameEl) usernameEl.textContent = username;
+				const usernameEl = document.getElementById('settings-username');
+				const emailEl = document.getElementById('settings-email');
+			if (usernameEl) usernameEl.textContent = user.user_metadata?.username || user.email?.split('@')[0] || '—';
 			if (emailEl) emailEl.textContent = user.email || '—';
-		}
-		
-		// Load stats
-		loadSettingsStats();
+			}
 	} catch (e) {
 		console.error('Failed to load settings:', e);
 	}
 }
-
-function loadSettingsStats() {
-	// Load streak
-	const streak = parseInt(localStorage.getItem('streak') || '0');
-	const streakEl = document.getElementById('settings-stat-streak');
-	if (streakEl) streakEl.textContent = streak;
-	
-	// Load workouts and calculate stats
-	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-	const workoutsCount = workouts.length;
-	const workoutsEl = document.getElementById('settings-stat-workouts');
-	if (workoutsEl) workoutsEl.textContent = workoutsCount;
-	
-	// Calculate total hours
-	let totalMs = 0;
-	workouts.forEach(workout => {
-		if (workout.duration && workout.duration > 0) {
-			totalMs += workout.duration;
-		}
-	});
-	const totalHours = totalMs / (1000 * 60 * 60);
-	const hoursEl = document.getElementById('settings-stat-hours');
-	if (hoursEl) hoursEl.textContent = totalHours.toFixed(1);
-}
-
-// Helper function to get current weight unit
-function getWeightUnit() {
-	return localStorage.getItem('weightUnit') || 'kg';
-}
-
-// Helper function to convert weight between kg and lbs
-function convertWeight(value, fromUnit, toUnit) {
-	if (!value || value === '') return '';
-	const numValue = parseFloat(value);
-	if (isNaN(numValue)) return value;
-	
-	if (fromUnit === toUnit) return numValue;
-	
-	if (fromUnit === 'kg' && toUnit === 'lbs') {
-		return (numValue * 2.20462).toFixed(1);
-	} else if (fromUnit === 'lbs' && toUnit === 'kg') {
-		return (numValue / 2.20462).toFixed(1);
-	}
-	return numValue;
-}
-
-// Helper function to format weight with unit
-function formatWeight(weight, unit = null) {
-	if (!weight || weight === '') return '0';
-	const unitToUse = unit || getWeightUnit();
-	const numWeight = parseFloat(weight);
-	if (isNaN(numWeight)) return '0';
-	return `${numWeight.toFixed(numWeight % 1 === 0 ? 0 : 1)} ${unitToUse}`;
-}
-
-// Update progress unit label
-function updateProgressUnitLabel() {
-	const unitLabel = document.getElementById('progress-unit-label');
-	if (unitLabel) {
-		unitLabel.textContent = getWeightUnit();
-	}
-	// Update progress chart wrapper unit attribute
-	const chartWrapper = document.querySelector('.progress-chart-wrapper');
-	if (chartWrapper) {
-		chartWrapper.setAttribute('data-unit', getWeightUnit());
-	}
-}
-
-// Update all weight displays in the app when unit changes
-function updateWeightDisplays(newUnit) {
-	// Update placeholder text in workout inputs
-	const weightInputs = document.querySelectorAll('.workout-edit-set-input.weight');
-	weightInputs.forEach(input => {
-		const currentValue = input.value;
-		if (currentValue) {
-			const oldUnit = localStorage.getItem('weightUnit') || 'kg';
-			// We store weights in kg, so convert from kg to new unit
-			const storedUnit = 'kg';
-			const converted = convertWeight(currentValue, storedUnit, newUnit);
-			input.value = converted;
-		}
-		input.setAttribute('aria-label', `Set weight (${newUnit})`);
-	});
-	
-	// Update progress unit label
-	updateProgressUnitLabel();
-	
-	// Reload progress chart if visible
-	if (currentTab === 'progress') {
-		loadProgress();
-	}
-	
-	// Reload workouts to update displays
-	if (currentTab === 'workouts') {
-		loadWorkouts();
-	}
-	
-	console.log(`Weight unit changed to ${newUnit}`);
-}
-
-
-// Delete account function removed - was causing issues
 
 // ========== VISION CHAT ==========
 function initVision() {
@@ -3919,48 +3490,24 @@ function initVision() {
 					}
 					: null;
 				
-				// Check if user specified a number of exercises - if so, skip quick workout and use AI
+				// Simple check: is this a workout request? (only basic keywords, no muscle group matching)
 				const msgLower = message.toLowerCase();
-				const hasSpecificCount = /\d+\s*(exercise|oefening)/i.test(message) || 
-					/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s+(exercise|oefening)/i.test(message);
-				
-				// INSTANT: Try to generate quick workout first (works for muscle groups, exercises, etc.)
-				// But skip if user specified a specific number of exercises
-				const quickWorkout = hasSpecificCount ? null : generateQuickWorkout(message);
-				
-				// Check if this is a workout request (keywords OR if quick workout was generated OR muscle groups mentioned)
-				const workoutKeywords = ["workout", "make", "create", "maak", "train", "push", "pull", "legs", "oefeningen", "exercises"];
-				const muscleGroups = ["chest", "shoulder", "back", "bicep", "tricep", "leg", "quad", "hamstring", "glute", "calf", "abs", "core", "borst"];
-				const hasMuscleGroup = muscleGroups.some(muscle => msgLower.includes(muscle));
-				const isWorkoutRequest = quickWorkout !== null || 
-					workoutKeywords.some(keyword => msgLower.includes(keyword)) ||
-					hasMuscleGroup;
+				const workoutKeywords = ["workout", "make", "create", "maak", "train", "oefeningen", "exercises"];
+				const isWorkoutRequest = workoutKeywords.some(keyword => msgLower.includes(keyword));
 				
 				if (isWorkoutRequest) {
-					// INSTANT: Use quick workout if available
-					if (quickWorkout) {
-						// Remove loading message and show instant workout
-						if (loadingElement) loadingElement.remove();
-						applyWorkoutFromVision(quickWorkout);
-						switchTab('workout-builder');
-						addChatMessage(`✓ Created "${quickWorkout.name}" with ${quickWorkout.exercises.length} exercises!`, 'bot');
-						
-						sendBtn.disabled = false;
-						return;
-					}
-					
-					// Fallback: Start request if quick workout not available
+					// Send to Groq API - let Groq determine the workout based on the prompt
 					const apiUrl = getApiUrl('/api/vision-workout');
 					const requestPromise = fetch(apiUrl, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ 
-						message,
-						workoutContext: workoutContext
-					})
-				});
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ 
+							message,
+							workoutContext: workoutContext
+						})
+					});
 					
-					// Update message while waiting (non-blocking) - instant feedback
+					// Update message while waiting
 					let dotCount = 0;
 					const updateInterval = setInterval(() => {
 						if (loadingElement) {
@@ -3973,92 +3520,47 @@ function initVision() {
 					}, 300);
 					
 					try {
-					const res = await requestPromise;
-					clearInterval(updateInterval);
-					
-					if (!res.ok) {
-						const errorData = await res.json().catch(() => ({ error: 'Failed to generate workout' }));
-						if (loadingElement) loadingElement.remove();
+						const res = await requestPromise;
+						clearInterval(updateInterval);
 						
-						// Always try fallback workout on error (don't check hasMuscleGroup, just try)
-							const fallbackWorkout = generateQuickWorkout(message);
-							if (fallbackWorkout) {
-								applyWorkoutFromVision(fallbackWorkout);
-								switchTab('workout-builder');
-								addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
-								sendBtn.disabled = false;
-								return;
-							}
-						
-						addChatMessage(`Error: ${errorData.error || 'Failed to generate workout'}`, 'bot');
-						sendBtn.disabled = false;
-						return;
-					}
-				
-				const data = await res.json();
-				if (data.error) {
-					if (loadingElement) loadingElement.remove();
-						
-						// Always try fallback workout on error (don't check hasMuscleGroup, just try)
-						const fallbackWorkout = generateQuickWorkout(message);
-						if (fallbackWorkout) {
-							applyWorkoutFromVision(fallbackWorkout);
-							switchTab('workout-builder');
-							addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
+						if (!res.ok) {
+							const errorData = await res.json().catch(() => ({ error: 'Failed to generate workout' }));
+							if (loadingElement) loadingElement.remove();
+							addChatMessage(`Error: ${errorData.error || 'Failed to generate workout'}`, 'bot');
 							sendBtn.disabled = false;
 							return;
 						}
 						
-					addChatMessage(`Error: ${data.error}`, 'bot');
-						sendBtn.disabled = false;
-						return;
-					}
-					
-					if (data.workout && data.workout.exercises && data.workout.exercises.length > 0) {
-					// Successfully generated workout - apply it and switch to workout builder
-						if (loadingElement) loadingElement.remove();
-						applyWorkoutFromVision(data.workout);
-						switchTab('workout-builder');
-						addChatMessage(`✓ Created "${data.workout.name}" with ${data.workout.exercises.length} exercises!`, 'bot');
+						const data = await res.json();
+						if (data.error) {
+							if (loadingElement) loadingElement.remove();
+							addChatMessage(`Error: ${data.error}`, 'bot');
+							sendBtn.disabled = false;
+							return;
+						}
+						
+						if (data.workout && data.workout.exercises && data.workout.exercises.length > 0) {
+							// Successfully generated workout - apply it and switch to workout builder
+							if (loadingElement) loadingElement.remove();
+							applyWorkoutFromVision(data.workout);
+							switchTab('workout-builder');
+							addChatMessage(`✓ Created "${data.workout.name}" with ${data.workout.exercises.length} exercises!`, 'bot');
 						} else {
-						if (loadingElement) loadingElement.remove();
-						
-						// Always try fallback workout if no workout generated
-							const fallbackWorkout = generateQuickWorkout(message);
-							if (fallbackWorkout) {
-								applyWorkoutFromVision(fallbackWorkout);
-								switchTab('workout-builder');
-								addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
-								sendBtn.disabled = false;
-								return;
-							}
-						
-						addChatMessage('No workout was generated. Please try again with a clearer request.', 'bot');
-					}
-					sendBtn.disabled = false;
+							if (loadingElement) loadingElement.remove();
+							addChatMessage('No workout was generated. Please try again with a clearer request.', 'bot');
+						}
+						sendBtn.disabled = false;
 					} catch (fetchError) {
 						clearInterval(updateInterval);
-								if (loadingElement) loadingElement.remove();
+						if (loadingElement) loadingElement.remove();
 						console.error('Workout request failed:', fetchError);
-						
-						// Always try fallback workout on error (don't check hasMuscleGroup, just try)
-						const fallbackWorkout = generateQuickWorkout(message);
-						if (fallbackWorkout) {
-							applyWorkoutFromVision(fallbackWorkout);
-								switchTab('workout-builder');
-							addChatMessage(`✓ Created "${fallbackWorkout.name}" with ${fallbackWorkout.exercises.length} exercises!`, 'bot');
-								sendBtn.disabled = false;
-								return;
-					}
-					
 						addChatMessage(`Error: ${fetchError.message || 'Failed to generate workout. Please try again.'}`, 'bot');
 						sendBtn.disabled = false;
-						return;
 					}
 				} else {
-					// Regular chat message - use the chat endpoint (only for non-workout questions)
-					try {
-					const res = await fetch('/chat', {
+					// Regular chat message - use the chat endpoint
+					const apiUrl = getApiUrl('/chat');
+					const res = await fetch(apiUrl, {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({ 
@@ -4071,13 +3573,6 @@ function initVision() {
 					if (loadingElement) {
 						loadingElement.remove();
 					}
-						
-						if (!res.ok) {
-							const errorData = await res.json().catch(() => ({ error: 'Failed to get response' }));
-							addChatMessage(`Error: ${errorData.error || 'Failed to get response'}`, 'bot');
-							sendBtn.disabled = false;
-							return;
-					}
 					
 					const data = await res.json();
 					if (data.error) {
@@ -4088,16 +3583,9 @@ function initVision() {
 						switchTab('workout-builder');
 						addChatMessage(`✓ Created "${data.workout.name}" with ${data.workout.exercises.length} exercises!`, 'bot');
 					} else {
-							addChatMessage(data.reply || 'I didn\'t understand that. Please try asking for a workout or a question.', 'bot');
+						addChatMessage(data.reply, 'bot');
 					}
 					sendBtn.disabled = false;
-					} catch (chatError) {
-						if (loadingElement) loadingElement.remove();
-						console.error('Chat request failed:', chatError);
-						addChatMessage(`Error: ${chatError.message || 'Failed to get response. Please try again.'}`, 'bot');
-						sendBtn.disabled = false;
-						return;
-					}
 				}
 			} catch (e) {
 				console.error('Request failed:', e);
@@ -4278,105 +3766,19 @@ function initExerciseCard() {
 }
 
 // ========== UTILITY FUNCTIONS ==========
-// Helper function to get the correct API URL
-function getApiUrl(path) {
-	// Remove leading slash if present
-	const cleanPath = path.startsWith('/') ? path.slice(1) : path;
-	
-	// If BACKEND_URL is set (for Capacitor), use it
-	if (window.BACKEND_URL) {
-		return `${window.BACKEND_URL}/${cleanPath}`;
-	}
-	
-	// Otherwise use relative path (for web)
-	return `/${cleanPath}`;
-}
-
-let exercisesLoading = false;
-let exercisesLoaded = false;
-
 async function loadExercises() {
-	// Prevent multiple simultaneous loads
-	if (exercisesLoading) {
-		console.log('Exercises already loading, waiting...');
-		// Wait for existing load to complete
-		while (exercisesLoading) {
-			await new Promise(resolve => setTimeout(resolve, 100));
-		}
-		return;
-	}
-	
-	// If already loaded, don't reload
-	if (exercisesLoaded && allExercises.length > 0) {
-		console.log('Exercises already loaded');
-		return;
-	}
-	
-	exercisesLoading = true;
-	
 	try {
-		const url = getApiUrl('/exercises');
-		console.log('Loading exercises from:', url);
-		console.log('BACKEND_URL:', window.BACKEND_URL);
-		
-		const res = await fetch(url, {
-			method: 'GET',
-			headers: {
-				'Content-Type': 'application/json',
-			}
-		});
-		
-		console.log('Response status:', res.status, res.statusText);
-		
+		const apiUrl = getApiUrl('/exercises');
+		const res = await fetch(apiUrl);
 		if (!res.ok) {
-			const errorText = await res.text();
-			console.error('Error response:', errorText);
-			throw new Error(`Failed to fetch exercises: ${res.status} ${res.statusText} - ${errorText}`);
+			throw new Error(`HTTP ${res.status}: ${res.statusText}`);
 		}
-		
 		const data = await res.json();
-		console.log('Response data:', data);
-		
 		allExercises = data.exercises || [];
-		exercisesLoaded = true;
-		console.log(`Successfully loaded ${allExercises.length} exercises`);
-		
-		// If no exercises loaded, try to show a user-friendly message
-		if (allExercises.length === 0) {
-			console.warn('No exercises found in response');
-		}
-		
-		// If exercise selector is open, refresh it
-		const selector = document.getElementById('exercise-selector');
-		if (selector && !selector.classList.contains('hidden')) {
-			const filterFn = window.filterExercisesForSelector;
-			if (typeof filterFn === 'function') {
-				const searchInput = document.getElementById('exercise-selector-search');
-				const query = searchInput?.value || '';
-				filterFn(query, null);
-			}
-		}
+		console.log(`[DEBUG] Loaded ${allExercises.length} exercises`);
 	} catch (e) {
 		console.error('Failed to load exercises:', e);
-		console.error('Error details:', {
-			message: e.message,
-			stack: e.stack,
-			url: getApiUrl('/exercises'),
-			backendUrl: window.BACKEND_URL
-		});
-		// Set empty array to prevent further errors
-		allExercises = [];
-		exercisesLoaded = false;
-		
-		// Try to show error to user if possible
-		if (typeof alert !== 'undefined') {
-			// Only in development/debug mode
-			if (window.location.href.includes('localhost') || window.location.href.includes('capacitor://')) {
-				alert(`Failed to load exercises: ${e.message}\n\nCheck console for details.`);
-			}
-		}
-	} finally {
-		exercisesLoading = false;
+		allExercises = []; // Set empty array on error
 	}
 }
 
@@ -4400,8 +3802,6 @@ function updateStreak() {
 		localStorage.setItem('streak', newStreak.toString());
 		localStorage.setItem('lastStreakDate', todayKey);
 		loadStreak();
-		// Always update settings stats when streak changes
-		loadSettingsStats();
 	}
 }
 
@@ -4442,325 +3842,192 @@ function loadRecentScans() {
 	});
 }
 
+// AI Detect Error Modal
+function showAIDetectErrorModal() {
+	const modal = document.getElementById('ai-detect-error-modal');
+	if (modal) {
+		modal.classList.remove('hidden');
+		const tryAgainBtn = document.getElementById('ai-detect-error-try-again');
+		const backdrop = modal.querySelector('.ai-detect-error-backdrop');
+		
+		const closeModal = () => {
+			modal.classList.add('hidden');
+		};
+		
+		if (tryAgainBtn) {
+			tryAgainBtn.onclick = closeModal;
+		}
+		if (backdrop) {
+			backdrop.onclick = closeModal;
+		}
+	}
+}
+
+// AI Detect Chat Modal
+function openAIDetectChat() {
+	const selector = document.getElementById('exercise-selector');
+	const modal = document.getElementById('ai-detect-chat-modal');
+	if (!modal) return;
+	
+	modal.classList.remove('hidden');
+	document.body.classList.add('ai-detect-chat-open');
+	
+	// Clear previous messages except the initial bot message
+	const messagesContainer = document.getElementById('ai-detect-chat-messages');
+	if (messagesContainer) {
+		messagesContainer.innerHTML = `
+			<div class="ai-detect-chat-message ai-detect-chat-message-bot">
+				<div class="ai-detect-chat-avatar">🤖</div>
+				<div class="ai-detect-chat-text">Upload a photo of the exercise machine or movement, and I'll identify it for you!</div>
+			</div>
+		`;
+	}
+	
+	// Setup file input
+	const fileInput = document.getElementById('ai-detect-chat-file');
+	if (fileInput) {
+		fileInput.onchange = async (e) => {
+			const file = e.target.files[0];
+			if (!file) return;
+			
+			// Show user message with image preview
+			addAIDetectChatMessage('user', null, file);
+			
+			// Show loading message
+			const loadingId = addAIDetectChatMessage('bot', 'Analyzing your photo...', null, true);
+			
+			try {
+				// Send to backend
+				const formData = new FormData();
+				formData.append('image', file);
+				const apiUrl = getApiUrl('/api/vision-detect');
+				const res = await fetch(apiUrl, {
+					method: 'POST',
+					body: formData
+				});
+				
+				const data = await res.json();
+				
+				// Remove loading message
+				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
+				if (loadingEl) loadingEl.remove();
+				
+				if (data.success && data.key) {
+					// Success - show exercise name
+					const exerciseName = data.display || data.key;
+					const muscles = data.muscles || [];
+					const musclesText = muscles.length > 0 ? ` (${muscles.join(', ')})` : '';
+					addAIDetectChatMessage('bot', `I detected: **${exerciseName}**${musclesText}`, null);
+					
+					// Add button to select this exercise
+					setTimeout(() => {
+						const selectBtn = document.createElement('button');
+						selectBtn.className = 'ai-detect-chat-select-btn';
+						selectBtn.textContent = `Select "${exerciseName}"`;
+						selectBtn.onclick = () => {
+							// Close chat and exercise selector
+							closeAIDetectChat();
+							if (selector) selector.classList.add('hidden');
+							document.body.classList.remove('selector-open');
+							
+							// Add exercise to workout or select it
+							if (currentTab === 'workout-builder') {
+								const exercise = {
+									key: data.key,
+									display: exerciseName,
+									muscles: muscles,
+									sets: createDefaultSets(3)
+								};
+								addExerciseToWorkout(exercise);
+							} else {
+								selectExercise(data.key);
+							}
+						};
+						
+						const lastMessage = messagesContainer.lastElementChild;
+						if (lastMessage) {
+							lastMessage.appendChild(selectBtn);
+						}
+					}, 500);
+				} else {
+					// Error
+					addAIDetectChatMessage('bot', `Sorry, I couldn't identify the exercise from this photo. Please try a clearer picture.`, null);
+				}
+			} catch (e) {
+				// Remove loading message
+				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
+				if (loadingEl) loadingEl.remove();
+				
+				console.error('AI detect failed:', e);
+				addAIDetectChatMessage('bot', `Sorry, something went wrong. Please try again.`, null);
+			}
+			
+			// Reset file input
+			fileInput.value = '';
+		};
+	}
+	
+	// Setup close button
+	const closeBtn = document.getElementById('ai-detect-chat-close');
+	const backdrop = modal.querySelector('.ai-detect-chat-backdrop');
+	
+	const closeModal = () => {
+		closeAIDetectChat();
+	};
+	
+	if (closeBtn) {
+		closeBtn.onclick = closeModal;
+	}
+	if (backdrop) {
+		backdrop.onclick = closeModal;
+	}
+}
+
+function closeAIDetectChat() {
+	const modal = document.getElementById('ai-detect-chat-modal');
+	if (modal) {
+		modal.classList.add('hidden');
+		document.body.classList.remove('ai-detect-chat-open');
+	}
+}
+
+function addAIDetectChatMessage(role, text, file, isLoading = false) {
+	const messagesContainer = document.getElementById('ai-detect-chat-messages');
+	if (!messagesContainer) return null;
+	
+	const messageId = 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+	const messageDiv = document.createElement('div');
+	messageDiv.className = `ai-detect-chat-message ai-detect-chat-message-${role}`;
+	messageDiv.setAttribute('data-message-id', messageId);
+	
+	if (role === 'user' && file) {
+		// User message with image
+		const reader = new FileReader();
+		reader.onload = (e) => {
+			messageDiv.innerHTML = `
+				<div class="ai-detect-chat-avatar">👤</div>
+				<div class="ai-detect-chat-content">
+					<img src="${e.target.result}" alt="Uploaded photo" class="ai-detect-chat-image" />
+				</div>
+			`;
+		};
+		reader.readAsDataURL(file);
+	} else if (role === 'bot') {
+		// Bot message - convert markdown ** to bold
+		const formattedText = text ? text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') : '';
+		messageDiv.innerHTML = `
+			<div class="ai-detect-chat-avatar">🤖</div>
+			<div class="ai-detect-chat-text">${isLoading ? '<span class="ai-detect-chat-loading">' + formattedText + '</span>' : formattedText}</div>
+		`;
+	}
+	
+	messagesContainer.appendChild(messageDiv);
+	messagesContainer.scrollTop = messagesContainer.scrollHeight;
+	
+	return messageId;
+}
+
 // Make exercise selector accessible from workout builder
 window.openExerciseSelector = openExerciseSelector;
 window.addExerciseToWorkout = addExerciseToWorkout;
-
-// ========== NOTIFICATIONS ==========
-async function requestNotificationPermission() {
-	try {
-		if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
-			const LocalNotifications = Capacitor.Plugins.LocalNotifications;
-			const result = await LocalNotifications.requestPermissions();
-			if (result.display === 'granted') {
-				console.log('Notification permission granted');
-				return true;
-			} else {
-				console.log('Notification permission denied');
-				return false;
-			}
-		}
-		return false;
-	} catch (e) {
-		console.error('Error requesting notification permission:', e);
-		return false;
-	}
-}
-
-// Check if user has saved a workout today
-function hasWorkoutToday() {
-	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-	const today = new Date();
-	const todayKey = today.toISOString().split('T')[0]; // YYYY-MM-DD
-	
-	return workouts.some(workout => {
-		if (!workout.date) return false;
-		const workoutDate = new Date(workout.date);
-		const workoutKey = workoutDate.toISOString().split('T')[0];
-		return workoutKey === todayKey;
-	});
-}
-
-// Get current streak
-function getCurrentStreak() {
-	return parseInt(localStorage.getItem('streak') || '0');
-}
-
-// Schedule daily workout reminder (18:00) - only shows if no workout today
-async function scheduleDailyWorkoutReminder() {
-	try {
-		if (typeof Capacitor === 'undefined' || !Capacitor.Plugins || !Capacitor.Plugins.LocalNotifications) {
-			return;
-		}
-		
-		const LocalNotifications = Capacitor.Plugins.LocalNotifications;
-		
-		// Cancel existing daily reminder
-		try {
-			await LocalNotifications.cancel({ notifications: [{ id: 100 }] });
-		} catch (e) {}
-		
-		// Schedule for 18:00 today (or tomorrow if already past)
-		const now = new Date();
-		const reminderTime = new Date();
-		reminderTime.setHours(18, 0, 0, 0);
-		
-		if (now >= reminderTime) {
-			reminderTime.setDate(reminderTime.getDate() + 1);
-		}
-		
-		// Get body text (will be checked when notification fires)
-		const bodyText = getDailyReminderBody();
-		
-		// Schedule repeating daily notification
-		// Note: We can't conditionally show notifications, but we can update the body
-		// The notification will always show, but the body will indicate if workout is needed
-		await LocalNotifications.schedule({
-			notifications: [
-				{
-					title: 'Time to work out!💪',
-					body: bodyText,
-					id: 100,
-					schedule: { 
-						at: reminderTime,
-						repeats: true,
-						every: 'day'
-					},
-					sound: 'default'
-				}
-			]
-		});
-		
-		console.log('Daily workout reminder scheduled for 18:00');
-	} catch (e) {
-		console.error('Error scheduling daily reminder:', e);
-	}
-}
-
-// Check and cancel daily reminder if workout already done today, then reschedule for tomorrow
-async function checkAndCancelDailyReminder() {
-	try {
-		if (typeof Capacitor === 'undefined' || !Capacitor.Plugins || !Capacitor.Plugins.LocalNotifications) {
-			return;
-		}
-		
-		const LocalNotifications = Capacitor.Plugins.LocalNotifications;
-		
-		if (hasWorkoutToday()) {
-			// Cancel today's reminder
-			await LocalNotifications.cancel({ notifications: [{ id: 100 }] });
-			console.log('Daily reminder cancelled - workout already done today');
-			
-			// Reschedule for tomorrow at 18:00
-			const tomorrow = new Date();
-			tomorrow.setDate(tomorrow.getDate() + 1);
-			tomorrow.setHours(18, 0, 0, 0);
-			
-			await LocalNotifications.schedule({
-				notifications: [
-					{
-						title: 'Time to work out!💪',
-						body: getDailyReminderBody(),
-						id: 100,
-						schedule: { 
-							at: tomorrow,
-							repeats: true,
-							every: 'day'
-						},
-						sound: 'default'
-					}
-				]
-			});
-			console.log('Daily reminder rescheduled for tomorrow 18:00');
-		} else {
-			// No workout today, ensure reminder is scheduled
-			await scheduleDailyWorkoutReminder();
-		}
-	} catch (e) {
-		console.error('Error checking daily reminder:', e);
-	}
-}
-
-// Get daily reminder body text
-function getDailyReminderBody() {
-	const streak = getCurrentStreak();
-	if (streak > 0) {
-		return `Don't break your ${streak} day streak!🔥`;
-	}
-	return 'Time to work out!💪';
-}
-
-// Schedule weekly progress summary (Sunday 20:00)
-async function scheduleWeeklyProgressSummary() {
-	try {
-		if (typeof Capacitor === 'undefined' || !Capacitor.Plugins || !Capacitor.Plugins.LocalNotifications) {
-			return;
-		}
-		
-		const LocalNotifications = Capacitor.Plugins.LocalNotifications;
-		
-		// Cancel existing weekly summary
-		try {
-			await LocalNotifications.cancel({ notifications: [{ id: 200 }] });
-		} catch (e) {}
-		
-		// Find next Sunday at 20:00
-		const now = new Date();
-		const nextSunday = new Date();
-		nextSunday.setHours(20, 0, 0, 0);
-		
-		// Get days until next Sunday (0 = Sunday, 1 = Monday, etc.)
-		const daysUntilSunday = (7 - nextSunday.getDay()) % 7;
-		if (daysUntilSunday === 0 && now >= nextSunday) {
-			// If it's already Sunday after 20:00, schedule for next week
-			nextSunday.setDate(nextSunday.getDate() + 7);
-		} else {
-			nextSunday.setDate(nextSunday.getDate() + daysUntilSunday);
-		}
-		
-		// Schedule repeating weekly notification
-		await LocalNotifications.schedule({
-			notifications: [
-				{
-					title: 'Weekly Progress Summary',
-					body: getWeeklySummaryBody(),
-					id: 200,
-					schedule: { 
-						at: nextSunday,
-						repeats: true,
-						every: 'week'
-					},
-					sound: 'default'
-				}
-			]
-		});
-		
-		console.log('Weekly progress summary scheduled for Sunday 20:00');
-	} catch (e) {
-		console.error('Error scheduling weekly summary:', e);
-	}
-}
-
-// Get weekly summary body text
-function getWeeklySummaryBody() {
-	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-	const now = new Date();
-	const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-	
-	// Filter workouts from last 7 days
-	const recentWorkouts = workouts.filter(workout => {
-		if (!workout.date) return false;
-		const workoutDate = new Date(workout.date);
-		return workoutDate >= weekAgo;
-	});
-	
-	const workoutCount = recentWorkouts.length;
-	
-	// Calculate total hours
-	let totalMs = 0;
-	recentWorkouts.forEach(workout => {
-		if (workout.duration && workout.duration > 0) {
-			totalMs += workout.duration;
-		}
-	});
-	const totalHours = (totalMs / (1000 * 60 * 60)).toFixed(1);
-	
-	// Calculate total volume
-	const unit = getWeightUnit();
-	let totalVolume = 0;
-	recentWorkouts.forEach(workout => {
-		if (workout.exercises) {
-			workout.exercises.forEach(ex => {
-				if (ex.sets) {
-					ex.sets.forEach(set => {
-						const weight = parseFloat(set.weight) || 0;
-						const reps = parseInt(set.reps) || 0;
-						if (weight > 0 && reps > 0) {
-							// Volume is stored in kg, convert if needed
-							let displayWeight = weight;
-							if (unit === 'lbs') {
-								displayWeight = weight * 2.20462;
-							}
-							totalVolume += displayWeight * reps;
-						}
-					});
-				}
-			});
-		}
-	});
-	const volumeText = unit === 'lbs' ? `${Math.round(totalVolume)} ${unit}` : `${Math.round(totalVolume)} ${unit}`;
-	
-	return `This week: ${workoutCount} workouts, ${totalHours} hours, ${volumeText} volume`;
-}
-
-// Schedule rest timer notification
-async function scheduleRestTimerNotification(seconds) {
-	try {
-		if (typeof Capacitor === 'undefined' || !Capacitor.Plugins || !Capacitor.Plugins.LocalNotifications) {
-			return;
-		}
-		
-		const LocalNotifications = Capacitor.Plugins.LocalNotifications;
-		
-		// Cancel existing rest timer notification
-		try {
-			await LocalNotifications.cancel({ notifications: [{ id: 300 }] });
-		} catch (e) {}
-		
-		// Don't schedule if seconds is 0 or less
-		if (seconds <= 0) {
-			return;
-		}
-		
-		// Schedule notification for when timer reaches 00:00 (now + seconds)
-		const notificationTime = new Date(Date.now() + seconds * 1000);
-		
-		await LocalNotifications.schedule({
-			notifications: [
-				{
-					title: 'Rest time is up!',
-					body: 'Ready for your next set?',
-					id: 300,
-					schedule: { at: notificationTime },
-					sound: 'default',
-					actionTypeId: 'REST_TIMER_ACTION'
-				}
-			]
-		});
-		
-		console.log('Rest timer notification scheduled for', seconds, 'seconds from now');
-	} catch (e) {
-		console.error('Error scheduling rest timer notification:', e);
-	}
-}
-
-async function cancelAllNotifications() {
-	try {
-		if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
-			const LocalNotifications = Capacitor.Plugins.LocalNotifications;
-			await LocalNotifications.cancel({ notifications: [{ id: 100 }, { id: 200 }, { id: 300 }] });
-			console.log('All notifications cancelled');
-		}
-	} catch (e) {
-		console.error('Error cancelling notifications:', e);
-	}
-}
-
-// Schedule all notifications
-async function scheduleAllNotifications() {
-	await scheduleDailyWorkoutReminder();
-	await scheduleWeeklyProgressSummary();
-}
-
-async function cancelAllNotifications() {
-	try {
-		if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
-			const { LocalNotifications } = Capacitor.Plugins;
-			await LocalNotifications.cancel({ notifications: [{ id: 1 }] });
-			console.log('All notifications cancelled');
-		}
-	} catch (e) {
-		console.error('Error cancelling notifications:', e);
-	}
-}
 

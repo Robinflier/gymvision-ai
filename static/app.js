@@ -7,7 +7,11 @@
 function getApiUrl(path) {
 	// Check if we're in Capacitor (mobile app)
 	if (window.Capacitor && window.Capacitor.isNativePlatform()) {
-		// Use the backend URL from environment or default to Render URL
+		// For images, use local static files in Capacitor (much faster, no network requests)
+		if (path.startsWith('/images/')) {
+			return `static${path}`;
+		}
+		// For API calls, use the backend URL from environment or default to Render URL
 		const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
 		return `${backendUrl}${path}`;
 	}
@@ -149,25 +153,6 @@ async function fetchUser() {
 // ======================
 document.addEventListener('DOMContentLoaded', async () => {
 	await initSupabase();
-	
-	// Cancel all existing notifications to prevent spam
-	// This fixes the issue where notifications keep repeating every 5 minutes
-	try {
-		if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.LocalNotifications) {
-			const LocalNotifications = Capacitor.Plugins.LocalNotifications;
-			// Get all pending notifications and cancel them
-			const pending = await LocalNotifications.getPending();
-			if (pending && pending.notifications && pending.notifications.length > 0) {
-				const idsToCancel = pending.notifications.map(n => ({ id: n.id }));
-				await LocalNotifications.cancel({ notifications: idsToCancel });
-				console.log(`[INFO] Cancelled ${idsToCancel.length} existing notifications`);
-			}
-			// Also cancel known notification IDs (in case getPending doesn't return them)
-			await LocalNotifications.cancel({ notifications: [{ id: 100 }, { id: 200 }, { id: 300 }] });
-		}
-	} catch (e) {
-		console.log('[INFO] Could not cancel notifications (may not be available):', e);
-	}
 	
 	// PUBLIC PAGES MUST NOT REQUIRE AUTH
 	if (isPublicPage()) {
@@ -1357,11 +1342,6 @@ function openExerciseSelector() {
 			searchInput.value = '';
 			// Don't auto-focus - let user click to type
 		}
-		
-		// Show all exercises when opening selector
-		if (window.filterExercisesForSelector) {
-			window.filterExercisesForSelector('', null);
-		}
 		// clear any previous AI predictions
 		const preds = document.getElementById('exercise-selector-predictions');
 		if (preds) {
@@ -2224,13 +2204,24 @@ function getExerciseImageSource(exercise) {
 
 function getExerciseImageCandidates(exercise) {
 	if (!exercise) return [];
-	if (exercise.image) return [exercise.image];
+	if (exercise.image) {
+		// If it's an external URL (http/https), use it directly
+		if (exercise.image.startsWith('http://') || exercise.image.startsWith('https://')) {
+			return [exercise.image];
+		}
+		// If it's a local path, use getApiUrl to resolve it correctly
+		return [getApiUrl(exercise.image)];
+	}
 	const candidates = [];
 	const seen = new Set();
 	const addPath = (path) => {
 		if (path && !seen.has(path)) {
 			seen.add(path);
-			candidates.push(path);
+			// Use getApiUrl for local paths
+			const resolvedPath = path.startsWith('http://') || path.startsWith('https://') 
+				? path 
+				: getApiUrl(path);
+			candidates.push(resolvedPath);
 		}
 	};
 	const addBase = (base) => {
@@ -3777,11 +3768,17 @@ function initExerciseCard() {
 // ========== UTILITY FUNCTIONS ==========
 async function loadExercises() {
 	try {
-		const res = await fetch('/exercises');
+		const apiUrl = getApiUrl('/exercises');
+		const res = await fetch(apiUrl);
+		if (!res.ok) {
+			throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+		}
 		const data = await res.json();
 		allExercises = data.exercises || [];
+		console.log(`[DEBUG] Loaded ${allExercises.length} exercises`);
 	} catch (e) {
 		console.error('Failed to load exercises:', e);
+		allExercises = []; // Set empty array on error
 	}
 }
 
@@ -3902,19 +3899,12 @@ function openAIDetectChat() {
 			try {
 				// Send to backend
 				const formData = new FormData();
-				formData.append('image', file, file.name || 'photo.jpg');
+				formData.append('image', file);
 				const apiUrl = getApiUrl('/api/vision-detect');
-				console.log('[DEBUG] Sending image to:', apiUrl, 'File:', file.name, 'Size:', file.size);
 				const res = await fetch(apiUrl, {
 					method: 'POST',
 					body: formData
 				});
-				
-				if (!res.ok) {
-					console.error('[ERROR] Vision detect failed:', res.status, res.statusText);
-					const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
-					throw new Error(errorData.error || `Server error: ${res.status}`);
-				}
 				
 				const data = await res.json();
 				
