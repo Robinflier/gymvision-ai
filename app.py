@@ -1977,7 +1977,7 @@ Examples:
 		
 		# Parse JSON with better error handling
 		try:
-		workout_json = json.loads(content)
+			workout_json = json.loads(content)
 		except json.JSONDecodeError as parse_error:
 			print(f"[ERROR] JSON parse error: {parse_error}")
 			print(f"[DEBUG] Content was: {content[:500]}")
