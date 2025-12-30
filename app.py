@@ -1297,122 +1297,61 @@ def check_models():
 
 @app.route("/api/vision-detect", methods=["POST"])
 def vision_detect():
-	"""AI exercise detection endpoint using OpenAI Vision API."""
-	# Check if OpenAI is available
-	if not OPENAI_AVAILABLE:
-		return jsonify({"success": False, "error": "OpenAI API not available. Please install openai package."}), 500
-
-	OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-	if not OPENAI_API_KEY:
-		return jsonify({"success": False, "error": "OpenAI API key not configured. Set OPENAI_API_KEY environment variable."}), 500
-
-	# Debug: Log request info
-	print(f"[DEBUG] Vision detect request - Content-Type: {request.content_type}")
-	print(f"[DEBUG] Vision detect request - Files: {list(request.files.keys())}")
-	print(f"[DEBUG] Vision detect request - Form data keys: {list(request.form.keys())}")
-	print(f"[DEBUG] Vision detect request - Headers: {dict(request.headers)}")
+	"""Simple: photo in → exercise name out."""
+	import base64
 	
+	# Get image file
 	file = request.files.get("image")
 	if not file:
-		print("[ERROR] No 'image' file in request.files")
-		print(f"[DEBUG] Available files: {list(request.files.keys())}")
-		print(f"[DEBUG] Available form keys: {list(request.form.keys())}")
-		return jsonify({"success": False, "error": "No image provided. Please make sure to upload an image file."}), 400
-
-	# Check filename (some clients may not provide filename, so make it optional)
-	# We'll generate a default filename if needed
-	if not file.filename:
-		# Generate a default filename based on content type or use generic name
-		content_type = file.content_type or "image/jpeg"
-		ext = ".jpg"
-		if "png" in content_type:
-			ext = ".png"
-		elif "webp" in content_type:
-			ext = ".webp"
-		file.filename = f"upload{ext}"
-
-	# Check if file has content
-	# Note: content_length may be None in some cases (e.g., chunked uploads)
-	# So we'll save the file first and check its size
-	if file.content_length is not None and file.content_length == 0:
-		return jsonify({"success": False, "error": "Image file is empty"}), 400
-
-	tmp_dir = APP_ROOT / "tmp"
-	tmp_dir.mkdir(exist_ok=True)
+		return jsonify({"success": False, "error": "No image provided"}), 400
 	
-	# Use the filename from the file, or default to upload.jpg
-	safe_filename = file.filename or "upload.jpg"
-	# Sanitize filename to prevent path traversal
-	safe_filename = safe_filename.split("/")[-1].split("\\")[-1]
-	tmp_path = tmp_dir / safe_filename
-
+	# Get OpenAI API key
+	api_key = os.getenv("OPENAI_API_KEY")
+	if not api_key:
+		return jsonify({"success": False, "error": "OpenAI API key not configured"}), 500
+	
+	# Read image and encode
+	image_bytes = file.read()
+	if not image_bytes:
+		return jsonify({"success": False, "error": "Image is empty"}), 400
+	
+	image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+	
+	# Determine format
+	image_format = "jpeg"
+	if file.content_type and "png" in file.content_type:
+		image_format = "png"
+	elif file.content_type and "webp" in file.content_type:
+		image_format = "webp"
+	
+	# Call OpenAI Vision
 	try:
-		file.save(str(tmp_path))
-		print(f"[DEBUG] Saved file to: {tmp_path}")
+		client = OpenAI(api_key=api_key)
+		response = client.chat.completions.create(
+			model="gpt-4o-mini",
+			messages=[
+				{
+					"role": "user",
+					"content": [
+						{"type": "text", "text": "What exercise is shown in this image? Just return the exercise name."},
+						{"type": "image_url", "image_url": {"url": f"data:image/{image_format};base64,{image_base64}"}}
+					]
+				}
+			],
+			max_tokens=50
+		)
+		
+		exercise_name = response.choices[0].message.content.strip()
+		
+		return jsonify({
+			"success": True,
+			"display": exercise_name,
+			"exercise_name": exercise_name
+		})
+		
 	except Exception as e:
-		print(f"[ERROR] Failed to save file: {str(e)}")
-		import traceback
-		traceback.print_exc()
-		return jsonify({"success": False, "error": f"Failed to save image: {str(e)}"}), 500
-
-	# Verify file was saved and is not empty
-	if not tmp_path.exists():
-		print(f"[ERROR] File does not exist after save: {tmp_path}")
-		return jsonify({"success": False, "error": "Failed to save image file"}), 500
-
-	file_size = tmp_path.stat().st_size
-	if file_size == 0:
-		print(f"[ERROR] Saved file is empty (0 bytes): {tmp_path}")
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		return jsonify({"success": False, "error": "Saved image file is empty (0 bytes)"}), 400
-
-	print(f"[DEBUG] Vision detect: Received image: {file.filename}, size: {file_size} bytes, saved to: {tmp_path}")
-
-	# Use OpenAI Vision directly (no YOLO)
-	try:
-		print("[DEBUG] Calling OpenAI Vision API...")
-		vision_result = _try_openai_vision(tmp_path)
-		if vision_result:
-			try:
-				os.remove(str(tmp_path))
-			except Exception:
-				pass
-			print("[DEBUG] OpenAI Vision returned result")
-			return vision_result
-		else:
-			print("[ERROR] OpenAI Vision returned None - check logs above for details")
-			try:
-				os.remove(str(tmp_path))
-			except Exception:
-				pass
-			return jsonify({
-				"success": False, 
-				"error": "OpenAI Vision API call failed. Check server logs for details.",
-				"message": "Could not detect exercise from image. Please try a clearer photo."
-			}), 422
-	except Exception as e:
-		error_msg = str(e)
-		print(f"[ERROR] Vision detect failed: {error_msg}")
-		import traceback
-		traceback.print_exc()
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		# Return more detailed error message
-		error_detail = f"Error: {error_msg}"
-		if "yolo" in error_msg.lower() or "ultralytics" in error_msg.lower():
-			error_detail = "YOLO model error. Models may not be loaded. Please check server logs."
-		elif "no model" in error_msg.lower() or "model file" in error_msg.lower():
-			error_detail = "YOLO model files not found. Please ensure best.pt files are available."
-		elif "api_key" in error_msg.lower() or "authentication" in error_msg.lower():
-			error_detail = "API key error. Please check configuration."
-		elif "model" in error_msg.lower():
-			error_detail = f"Model error: {error_msg}"
-		return jsonify({"success": False, "error": error_detail}), 500
+		print(f"[ERROR] OpenAI Vision error: {e}")
+		return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/predict", methods=["POST"])
