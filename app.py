@@ -32,11 +32,6 @@ except Exception:
 	Client = None
 
 try:
-	from ultralytics import YOLO  # type: ignore
-except Exception:
-	YOLO = None  # type: ignore
-
-try:
 	from groq import Groq  # type: ignore
 	GROQ_AVAILABLE = True
 except Exception:
@@ -49,11 +44,6 @@ except Exception:
 	OPENAI_AVAILABLE = False
 
 APP_ROOT = Path(__file__).resolve().parent
-MODEL_PATH = APP_ROOT / "best.pt"
-MODEL_PATH_1 = APP_ROOT / "best1.pt"
-MODEL_PATH_2 = APP_ROOT / "best2.pt"
-MODEL_PATH_3 = APP_ROOT / "best3.pt"
-MODEL_PATH_4 = APP_ROOT / "best4.pt"
 DATABASE_PATH = APP_ROOT / "gymvision.db"
 IMAGES_PATHS = [APP_ROOT / "images"]
 PARENT_IMAGES_PATH = APP_ROOT.parent / "images"
@@ -76,78 +66,7 @@ IMAGE_BASENAMES = sorted(set(IMAGE_BASENAMES))
 def normalize_label(text: str) -> str:
 	return "".join(ch if ch.isalnum() else "_" for ch in (text or "").lower()).strip("_")
 
-MODEL_LABELS: Dict[str, List[str]] = {
-	"best": [
-		"Hack Squat",
-		"Hip Thrust",
-		"Leg Extension",
-		"Leg Press",
-		"Lying Leg Curl",
-		"V Squat",
-	],
-	"best1": [
-		"Chest Press Machine",
-		"Lat Pull Down",
-		"Seated Cable Rows",
-		"Arm Curl Machine",
-		"Chest Fly Machine",
-		"Chinning Dipping",
-		"Lateral Raises Machine",
-		"Leg Extension",
-		"Leg Press",
-		"Reg Curl Machine",
-		"Seated Dip Machine",
-		"Shoulder Press Machine",
-		"Smith Machine",
-	],
-	"best2": [
-		"Back Extension Machine",
-		"Hip Abductor Machine",
-		"Seated Leg Curl Machine",
-		"T-Bar Row",
-	],
-	"best3": [
-		"Barbell",
-		"Bench",
-		"Biceps Curl",
-		"Chest Fly Machine",
-		"Chest Press Machine",
-		"Dumbbell",
-		"Elliptical",
-		"Functional Trainer",
-		"Incline Bench Press",
-		"Lat Pull Down Machine",
-		"Lateral Raises Machine",
-		"Leg Curl Machine",
-		"Leg Extension Machine",
-		"Leg Press Machine",
-		"Preacher Curl",
-		"Seated Dip Machine",
-		"Seated Row Machine",
-		"Shoulder Press Machine",
-		"Smith Machine",
-		"Stability Ball",
-		"Stationary Bike",
-		"Stepmill",
-		"Treadmill",
-	],
-	"best4": [
-		"Bench Press",
-		"Lat Pulldown",
-		"Leg Press",
-	],
-}
-
-LABEL_MODEL_PRIORITY: Dict[str, List[str]] = {}
-for model_name, labels in MODEL_LABELS.items():
-	for label_name in labels:
-		key = normalize_label(label_name)
-		LABEL_MODEL_PRIORITY.setdefault(key, [])
-		if model_name not in LABEL_MODEL_PRIORITY[key]:
-			LABEL_MODEL_PRIORITY[key].append(model_name)
-
-DEFAULT_MODEL_PRIORITY = ["best", "best3", "best4", "best1", "best2"]
-MODEL_PRIORITY_MARGIN = 0.05
+# YOLO model labels and priorities removed - no longer using YOLO models
 
 app = Flask(
 	__name__,
@@ -594,89 +513,6 @@ def load_user(user_id: str):
 # Memory-efficient model loading: only load models when needed, unload when not in use
 # Max 2 models in memory at once to prevent memory issues on Render
 
-_model_cache = {}  # Dict to store loaded models: {"best": model_obj, ...}
-_model_paths = {
-	"best": MODEL_PATH,
-	"best1": MODEL_PATH_1,
-	"best2": MODEL_PATH_2,
-	"best3": MODEL_PATH_3,
-	"best4": MODEL_PATH_4
-}
-_MAX_MODELS_IN_MEMORY = 2  # Maximum number of models to keep in memory
-
-
-def _load_model(model_name: str):
-	"""Load a single model if it exists and isn't already loaded."""
-	if YOLO is None:
-		raise RuntimeError("Ultralytics not available. Install dependencies from requirements.txt")
-	
-	if model_name in _model_cache:
-		return _model_cache[model_name]
-	
-	model_path = _model_paths.get(model_name)
-	if not model_path or not model_path.exists():
-		return None
-	
-	# If we're at memory limit, unload least recently used model
-	if len(_model_cache) >= _MAX_MODELS_IN_MEMORY:
-		# Remove first model (FIFO - simple strategy)
-		oldest_key = next(iter(_model_cache))
-		print(f"[INFO] Unloading model {oldest_key} to free memory")
-		del _model_cache[oldest_key]
-		import gc
-		gc.collect()  # Force garbage collection
-	
-	print(f"[INFO] Loading model: {model_name} ({model_path})")
-	_model_cache[model_name] = YOLO(str(model_path))
-	print(f"[INFO] Model loaded: {model_name}")
-	return _model_cache[model_name]
-
-
-def get_models():
-	"""Get all available models, loading them on-demand with memory management."""
-	# Load models on-demand (only when actually needed for prediction)
-	# Priority: best, best3 (most commonly used), then others
-	# Only load max 2 models at once to prevent memory issues
-	models = {}
-	
-	# Load priority models first (best and best3 are most commonly used)
-	priority_models = ["best", "best3"]
-	for model_name in priority_models:
-		model = _load_model(model_name)
-		if model is not None:
-			models[model_name] = model
-	
-	# Only load additional models if we have memory space
-	if len(models) < _MAX_MODELS_IN_MEMORY:
-		for model_name in ["best1", "best2", "best4"]:
-			if len(models) >= _MAX_MODELS_IN_MEMORY:
-				break
-			model = _load_model(model_name)
-			if model is not None:
-				models[model_name] = model
-	
-	if not models:
-		raise FileNotFoundError("No model files found. Check for best.pt, best1.pt, best2.pt, best3.pt or best4.pt")
-	
-	# Return in expected format for backward compatibility
-	return (
-		models.get("best"),
-		models.get("best1"),
-		models.get("best2"),
-		models.get("best3"),
-		models.get("best4")
-	)
-
-
-def unload_models():
-	"""Unload all models from memory to free up RAM."""
-	global _model_cache
-	if _model_cache:
-		print(f"[INFO] Unloading {len(_model_cache)} models from memory")
-		_model_cache.clear()
-		import gc
-		gc.collect()
-		print("[INFO] Models unloaded, memory freed")
 
 
 # ========== AUTHENTICATION ROUTES ==========
@@ -1242,58 +1078,17 @@ def _try_openai_vision(image_path: Path) -> Optional[Any]:
 			"source": "openai_vision"
 		})
 		
-	except Exception as e:
+		except Exception as e:
 		print(f"[ERROR] OpenAI Vision API error: {str(e)}")
 		print(f"[ERROR] Error type: {type(e).__name__}")
-		import traceback
-		traceback.print_exc()
+				import traceback
+				traceback.print_exc()
 		return None
 
 
-def _serialize_prediction_choice(pred: Dict[str, Any]) -> Dict[str, Any]:
-	key = pred["key"]
-	label = pred.get("label")
-	meta = MACHINE_METADATA.get(key, {
-		"display": label or "Unknown",
-		"muscles": [],
-		"video": "",
-	})
-	# Use metadata display name if available, otherwise format the label nicely
-	display_name = meta.get("display") or (label.replace("_", " ").title() if label else "Unknown")
-	return {
-		"key": key,
-		"label": label,
-		"display": display_name,
-		"muscles": normalize_muscles(meta.get("muscles", [])),
-		"video": meta.get("video", ""),
-		"image": image_url_for_key(key, meta) or meta.get("image"),
-		"confidence": pred.get("conf", 0.0),
-	}
+# _serialize_prediction_choice removed - no longer using YOLO predictions
 
 
-@app.route("/api/check-models", methods=["GET"])
-def check_models():
-	"""Check if YOLO models are available on the server."""
-	models_status = {
-		"yolo_available": YOLO is not None,
-		"models": {},
-		"loaded_in_memory": len(_model_cache),
-		"max_models_in_memory": _MAX_MODELS_IN_MEMORY
-	}
-	
-	if YOLO is not None:
-		for name, path in [("best", MODEL_PATH), ("best1", MODEL_PATH_1), ("best2", MODEL_PATH_2), ("best3", MODEL_PATH_3), ("best4", MODEL_PATH_4)]:
-			exists = path.exists()
-			size = path.stat().st_size if exists else 0
-			models_status["models"][name] = {
-				"exists": exists,
-				"size_bytes": size,
-				"size_mb": round(size / (1024 * 1024), 2) if exists else 0,
-				"path": str(path),
-				"loaded": name in _model_cache
-			}
-	
-	return jsonify(models_status)
 
 @app.route("/api/vision-detect", methods=["POST"])
 def vision_detect():
@@ -1362,300 +1157,25 @@ def vision_detect():
 		print("[INFO] OpenAI response empty, using fallback")
 		return jsonify({"success": True, "display": "Exercise detected", "exercise_name": "Exercise detected"}), 200
 		
-	except Exception as e:
+		except Exception as e:
 		# On ANY error, just return a success response with fallback text
 		print(f"[ERROR] Vision detect error: {e}")
-		import traceback
-		traceback.print_exc()
+				import traceback
+				traceback.print_exc()
 		return jsonify({"success": True, "display": "Exercise detected", "exercise_name": "Exercise detected"}), 200
 
 
-@app.route("/predict", methods=["POST"])
-def predict():
-	# Public endpoint - authentication handled by frontend via Supabase
-	file = request.files.get("image")
-	if not file:
-		return jsonify({"error": "No image provided"}), 400
-	
-	# Check if file has content
-	if file.content_length == 0:
-		return jsonify({"error": "Image file is empty"}), 400
-	
-	# Check filename
-	if not file.filename:
-		return jsonify({"error": "No filename provided"}), 400
-
-	tmp_dir = APP_ROOT / "tmp"
-	tmp_dir.mkdir(exist_ok=True)
-	tmp_path = tmp_dir / "upload.jpg"
-	
-	try:
-		file.save(str(tmp_path))
-	except Exception as e:
-		return jsonify({"error": f"Failed to save image: {str(e)}"}), 500
-	
-	# Verify file was saved and is not empty
-	if not tmp_path.exists():
-		return jsonify({"error": "Failed to save image file"}), 500
-	
-	file_size = tmp_path.stat().st_size
-	if file_size == 0:
-		return jsonify({"error": "Saved image file is empty (0 bytes)"}), 400
-	
-	print(f"[DEBUG] Received image: {file.filename}, size: {file_size} bytes")
-	print(f"[DEBUG] Content-Type: {request.content_type}")
-	print(f"[DEBUG] Request method: {request.method}")
-	print(f"[DEBUG] Request headers: {dict(request.headers)}")
-
-	model, model1, model2, model3, model4 = get_models()
-	
-	# Check if models are loaded
-	models_loaded = sum(1 for m in [model, model1, model2, model3, model4] if m is not None)
-	print(f"[DEBUG] Models loaded: {models_loaded}/5")
-	
-	# Get predictions from all models (best.pt, best1.pt, best2.pt, best3.pt, best4.pt)
-	predictions = []
-	
-	# Helper function to get top predictions from a model
-	def get_model_predictions(model_obj, model_name, max_predictions=3):
-		model_preds = []
-		try:
-			# Verify file still exists and is readable
-			if not tmp_path.exists():
-				print(f"[ERROR] Model {model_name}: Image file does not exist at {tmp_path}")
-				return model_preds
-			
-			file_size = tmp_path.stat().st_size
-			if file_size == 0:
-				print(f"[ERROR] Model {model_name}: Image file is empty (0 bytes)")
-				return model_preds
-			
-			results = model_obj.predict(source=str(tmp_path), verbose=False)
-			if not results or len(results) == 0:
-				print(f"[ERROR] Model {model_name}: No results returned from prediction")
-				return model_preds
-			
-			best = results[0]
-			
-			if hasattr(best, "probs") and best.probs is not None:
-				# Classification model - get top predictions
-				probs = best.probs.data
-				top_indices = probs.topk(min(max_predictions, len(best.names))).indices.tolist()
-				top_confs = probs.topk(min(max_predictions, len(best.names))).values.tolist()
-				
-				print(f"[DEBUG] Model {model_name} (classification): Found {len(top_indices)} predictions")
-				for idx, conf in zip(top_indices, top_confs):
-					label = best.names[int(idx)]
-					norm = normalize_label(label)
-					key = ALIASES.get(norm, norm)
-					conf_float = float(conf)
-					print(f"[DEBUG] Model {model_name}: {label} (key: {key}) - confidence: {conf_float:.4f}")
-					model_preds.append({"label": label, "conf": conf_float, "key": key, "source": model_name})
-			elif hasattr(best, "boxes") and len(best.boxes) > 0:  # type: ignore[attr-defined]
-				# Detection model - get top predictions by confidence
-				confidences = best.boxes.conf.tolist()  # type: ignore[attr-defined]
-				classes = best.boxes.cls.tolist()  # type: ignore[attr-defined]
-				
-				print(f"[DEBUG] Model {model_name} (detection): Found {len(confidences)} boxes")
-				
-				# Combine and sort by confidence
-				box_predictions = []
-				for i, (conf, cls_idx) in enumerate(zip(confidences, classes)):
-					label = best.names[int(cls_idx)]
-					norm = normalize_label(label)
-					key = ALIASES.get(norm, norm)
-					conf_float = float(conf)
-					print(f"[DEBUG] Model {model_name}: Box {i} - {label} (key: {key}) - confidence: {conf_float:.4f}")
-					box_predictions.append({"label": label, "conf": conf_float, "key": key, "source": model_name, "index": i})
-				
-				# Sort by confidence and get top unique keys
-				box_predictions.sort(key=lambda x: x["conf"], reverse=True)
-				seen_keys = set()
-				for pred in box_predictions:
-					if pred["key"] not in seen_keys:
-						model_preds.append(pred)
-						seen_keys.add(pred["key"])
-						if len(model_preds) >= max_predictions:
-							break
-			else:
-				print(f"[DEBUG] Model {model_name}: No predictions found (no probs, no boxes)")
-		except Exception as e:
-			error_msg = str(e)
-			print(f"[ERROR] Model {model_name} prediction failed: {error_msg}")
-			
-			# Check for specific OpenCV errors
-			if "buf.empty()" in error_msg or "imdecode" in error_msg:
-				print(f"[ERROR] Model {model_name}: Image file is corrupted or empty. File size: {tmp_path.stat().st_size if tmp_path.exists() else 0} bytes")
-			elif "No such file" in error_msg:
-				print(f"[ERROR] Model {model_name}: Image file not found at {tmp_path}")
-			else:
-				import traceback
-				traceback.print_exc()
-		return model_preds
-	
-	# Get predictions from all available models
-	if model:
-		predictions.extend(get_model_predictions(model, "best"))
-	if model1:
-		predictions.extend(get_model_predictions(model1, "best1"))
-	if model2:
-		predictions.extend(get_model_predictions(model2, "best2"))
-	if model3:
-		predictions.extend(get_model_predictions(model3, "best3"))
-	if model4:
-		predictions.extend(get_model_predictions(model4, "best4"))
-	
-	if not predictions:
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
-	
-	# Filter out unwanted predictions
-	excluded_keys = {normalize_label("Kettlebells"), normalize_label("Assisted Chin Up-Dip")}
-	predictions_before_filter = len(predictions)
-	predictions = [p for p in predictions if p.get("key") not in excluded_keys]
-	print(f"[DEBUG] After filtering excluded keys: {len(predictions)} predictions (removed {predictions_before_filter - len(predictions)})")
-	
-	if not predictions:
-		print("[ERROR] All predictions were filtered out by excluded_keys")
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		return jsonify({"success": False, "error": "NO_PREDICTION", "message": "No exercise detected. Please try a clearer photo with a visible exercise machine."}), 422
-	
-	# Group predictions by key and select best from each model group
-	grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-	for pred in predictions:
-		grouped[pred["key"]].append(pred)
-	
-	# For each unique key, select the best prediction based on model priority
-	label_candidates: List[Dict[str, Any]] = []
-	for key, preds_for_label in grouped.items():
-		sorted_preds = sorted(preds_for_label, key=lambda p: p["conf"], reverse=True)
-		top_conf = sorted_preds[0]["conf"]
-		priority = LABEL_MODEL_PRIORITY.get(key, DEFAULT_MODEL_PRIORITY)
-		chosen = None
-		for model_name in priority:
-			candidate = next((p for p in sorted_preds if p["source"] == model_name), None)
-			if candidate and candidate["conf"] >= top_conf - MODEL_PRIORITY_MARGIN:
-				chosen = candidate
-				break
-		if chosen is None:
-			chosen = sorted_preds[0]
-		label_candidates.append(chosen)
-	
-	# Get top 3 predictions sorted by confidence
-	sorted_predictions = sorted(label_candidates, key=lambda p: p["conf"], reverse=True)[:3]
-	
-	if not sorted_predictions:
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
-
-	selected = sorted_predictions[0]
-	top_payloads = [_serialize_prediction_choice(pred) for pred in sorted_predictions]
-	primary_payload = top_payloads[0]
-	
-	# Check if primary prediction is a generic exercise that needs refinements
-	generic_refinements = {
-		"smith_machine": [
-			{"key": "smith_machine_bench_press", "display": "Smith Machine Bench Press"},
-			{"key": "smith_machine_incline_bench_press", "display": "Smith Machine Incline Bench Press"},
-			{"key": "smith_machine_decline_bench_press", "display": "Smith Machine Decline Bench Press"},
-			{"key": "smith_machine_squat", "display": "Smith Machine Squat"},
-			{"key": "smith_machine_shoulder_press", "display": "Smith Machine Shoulder Press"}
-		],
-		"leg_raise_tower": [
-			{"key": "hanging_leg_raise", "display": "Hanging Leg Raise"},
-			{"key": "knee_raise", "display": "Knee Raise"},
-			{"key": "dips", "display": "Dips"},
-			{"key": "pull_up", "display": "Pull-Up"},
-			{"key": "chin_up", "display": "Chin-Up"}
-		],
-		"chinning_dipping": [
-			{"key": "pull_up", "display": "Pull-Up"},
-			{"key": "chin_up", "display": "Chin-Up"},
-			{"key": "dips", "display": "Dips"},
-			{"key": "hanging_leg_raise", "display": "Hanging Leg Raise"},
-			{"key": "knee_raise", "display": "Knee Raise"}
-		],
-		"dumbbell": [
-			{"key": "dumbbell_bench_press", "display": "Dumbbell Bench Press"},
-			{"key": "incline_dumbbell_press", "display": "Incline Dumbbell Press"},
-			{"key": "decline_dumbbell_press", "display": "Decline Dumbbell Press"},
-			{"key": "dumbbell_fly", "display": "Dumbbell Fly"},
-			{"key": "arnold_press", "display": "Arnold Press"},
-			{"key": "lateral_raise", "display": "Lateral Raise"},
-			{"key": "front_raise", "display": "Front Raise"},
-			{"key": "one_arm_dumbbell_row", "display": "One Arm Dumbbell Row"},
-			{"key": "chest_supported_row", "display": "Chest Supported Row"},
-			{"key": "bulgarian_split_squat", "display": "Bulgarian Split Squat"},
-			{"key": "alternating_dumbbell_curl", "display": "Alternating Dumbbell Curl"},
-			{"key": "incline_dumbbell_curl", "display": "Incline Dumbbell Curl"},
-			{"key": "reverse_curl", "display": "Reverse Curl"},
-			{"key": "spider_curl", "display": "Spider Curl"},
-			{"key": "overhead_tricep_extension", "display": "Overhead Tricep Extension"},
-			{"key": "rear_delt_fly", "display": "Rear Delt Fly"}
-		]
-	}
-	
-	refinements = None
-	if primary_payload["key"] in generic_refinements:
-		refinements = [_serialize_prediction_choice({"key": ex["key"], "label": ex["display"], "conf": 0.0}) for ex in generic_refinements[primary_payload["key"]]]
-
-	label = selected["label"]
-	conf = selected["conf"]
-	key = selected["key"]
-	print(f"[DEBUG] Selected: {label} with {conf:.2%} confidence")
-	
-	# Cleanup temp file
-	try:
-		os.remove(str(tmp_path))
-	except Exception:
-		pass
-
-	# Resolve metadata using normalized label and aliases
-	response = {
-		"success": True,
-		"label": primary_payload["label"],
-		"confidence": primary_payload["confidence"],
-		"display": primary_payload["display"],
-		"muscles": primary_payload["muscles"],
-		"video": primary_payload["video"],
-		"key": primary_payload["key"],
-		"image": primary_payload.get("image"),
-		"top_predictions": top_payloads,
-	}
-	
-	# Add refinements if this is a generic exercise
-	if refinements:
-		response["refinements"] = refinements
-	
-	return jsonify(response)
+# /predict endpoint removed - now using /api/vision-detect with OpenAI Vision
 
 
 @app.route("/health", methods=["GET"])
 def health():
 	"""Health check endpoint to test if backend is working."""
-	try:
-		model, model1, model2, model3, model4 = get_models()
-		models_loaded = sum(1 for m in [model, model1, model2, model3, model4] if m is not None)
 		return jsonify({
 			"status": "ok",
-			"models_loaded": models_loaded,
-			"yolo_available": YOLO is not None
+		"openai_available": OPENAI_AVAILABLE,
+		"groq_available": GROQ_AVAILABLE
 		}), 200
-	except Exception as e:
-		return jsonify({
-			"status": "error",
-			"error": str(e),
-			"yolo_available": YOLO is not None
-		}), 500
 
 @app.route("/favicon.ico")
 def favicon():
@@ -1706,33 +1226,7 @@ def exercises_list():
 	return jsonify({"exercises": exercises})
 
 
-@app.route("/model-classes", methods=["GET"])
-def model_classes():
-	"""Get all classes that the models can predict."""
-	# Public endpoint - model classes are not sensitive
-	all_classes = set()
-	try:
-		model, model1, model2, model3, model4 = get_models()
-		if model and hasattr(model, 'names'):
-			all_classes.update(model.names.values())
-		if model2 and hasattr(model2, 'names'):
-			all_classes.update(model2.names.values())
-		if model3 and hasattr(model3, 'names'):
-			all_classes.update(model3.names.values())
-	except Exception as e:
-		return jsonify({"error": str(e)}), 500
-	
-	# Get classes in metadata
-	metadata_classes = set(MACHINE_METADATA.keys())
-	
-	# Find missing classes
-	missing = sorted(all_classes - metadata_classes)
-	
-	return jsonify({
-		"all_model_classes": sorted(all_classes),
-		"metadata_classes": sorted(metadata_classes),
-		"missing_in_metadata": missing
-	})
+# /model-classes endpoint removed - no longer using YOLO models
 
 
 @app.route("/api/vision-workout", methods=["POST"])
@@ -1747,7 +1241,7 @@ def vision_workout():
 		return jsonify({"error": "Groq API key not configured. Set GROQ_API_KEY environment variable."}), 500
 	
 	try:
-		data = request.get_json()
+	data = request.get_json()
 	except Exception as e:
 		return jsonify({"error": f"Invalid request data: {str(e)}"}), 400
 	
@@ -1824,15 +1318,15 @@ Examples:
 		
 		# Wrap API call in try-except to catch any Groq SDK errors
 		try:
-			response = client.chat.completions.create(
-				model="llama-3.3-70b-versatile",
-				messages=[
-					{"role": "system", "content": "You are a fitness expert. Return ONLY valid JSON, no explanations. Start your response with { and end with }."},
-					{"role": "user", "content": prompt}
-				],
-				temperature=0.3,
-				max_tokens=800
-			)
+		response = client.chat.completions.create(
+			model="llama-3.3-70b-versatile",
+			messages=[
+				{"role": "system", "content": "You are a fitness expert. Return ONLY valid JSON, no explanations. Start your response with { and end with }."},
+				{"role": "user", "content": prompt}
+			],
+			temperature=0.3,
+			max_tokens=800
+		)
 		except Exception as groq_error:
 			error_str = str(groq_error)
 			print(f"[ERROR] Groq API error: {error_str}")
@@ -1883,7 +1377,7 @@ Examples:
 		
 		# Parse JSON with better error handling
 		try:
-			workout_json = json.loads(content)
+		workout_json = json.loads(content)
 		except json.JSONDecodeError as parse_error:
 			print(f"[ERROR] JSON parse error: {parse_error}")
 			print(f"[DEBUG] Content was: {content[:500]}")
@@ -1972,7 +1466,7 @@ Examples:
 		error_msg = str(e)
 		print(f"[ERROR] Failed to parse workout JSON: {error_msg}")
 		if 'content' in locals():
-			print(f"[DEBUG] Content was: {content[:500]}")
+		print(f"[DEBUG] Content was: {content[:500]}")
 		# Provide user-friendly error message
 		return jsonify({"error": "The AI returned an invalid response. Please try rephrasing your request or try again."}), 500
 	except Exception as e:
