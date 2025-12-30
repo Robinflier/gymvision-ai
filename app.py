@@ -1918,15 +1918,15 @@ Examples:
 		
 		# Wrap API call in try-except to catch any Groq SDK errors
 		try:
-		response = client.chat.completions.create(
-			model="llama-3.3-70b-versatile",
-			messages=[
-				{"role": "system", "content": "You are a fitness expert. Return ONLY valid JSON, no explanations. Start your response with { and end with }."},
-				{"role": "user", "content": prompt}
-			],
-			temperature=0.3,
-			max_tokens=800
-		)
+			response = client.chat.completions.create(
+				model="llama-3.3-70b-versatile",
+				messages=[
+					{"role": "system", "content": "You are a fitness expert. Return ONLY valid JSON, no explanations. Start your response with { and end with }."},
+					{"role": "user", "content": prompt}
+				],
+				temperature=0.3,
+				max_tokens=800
+			)
 		except Exception as groq_error:
 			error_str = str(groq_error)
 			print(f"[ERROR] Groq API error: {error_str}")
