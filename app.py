@@ -1344,28 +1344,52 @@ def vision_detect():
 			max_tokens=50
 		)
 		
+		# Debug: print full response structure
+		print(f"[DEBUG] OpenAI response type: {type(response)}")
+		print(f"[DEBUG] OpenAI response: {response}")
+		print(f"[DEBUG] Response choices length: {len(response.choices) if response.choices else 0}")
+		
+		if not response.choices or len(response.choices) == 0:
+			print("[ERROR] OpenAI returned no choices")
+			return jsonify({"success": False, "error": "OpenAI returned no choices"}), 500
+		
 		response_content = response.choices[0].message.content
+		print(f"[DEBUG] Response content (raw): {repr(response_content)}")
+		print(f"[DEBUG] Response content type: {type(response_content)}")
+		
 		if not response_content:
 			print("[ERROR] OpenAI returned empty response")
 			return jsonify({"success": False, "error": "OpenAI returned empty response"}), 500
 		
 		exercise_name = response_content.strip()
+		print(f"[DEBUG] Exercise name after strip: {repr(exercise_name)}")
+		
 		if not exercise_name:
 			print("[ERROR] Exercise name is empty after stripping")
 			return jsonify({"success": False, "error": "Could not identify exercise"}), 500
 		
 		print(f"[SUCCESS] Detected exercise: {exercise_name}")
-		return jsonify({
+		result = {
 			"success": True,
 			"display": exercise_name,
 			"exercise_name": exercise_name
-		})
+		}
+		print(f"[DEBUG] Returning JSON: {result}")
+		return jsonify(result)
 		
 	except Exception as e:
 		print(f"[ERROR] OpenAI Vision error: {e}")
+		print(f"[ERROR] Error type: {type(e).__name__}")
+		print(f"[ERROR] Error args: {e.args}")
 		import traceback
 		traceback.print_exc()
-		return jsonify({"success": False, "error": str(e)}), 500
+		error_msg = str(e)
+		# Don't expose internal errors to user, use generic message
+		if "api_key" in error_msg.lower() or "authentication" in error_msg.lower():
+			error_msg = "API authentication failed"
+		elif "rate" in error_msg.lower() or "limit" in error_msg.lower():
+			error_msg = "Rate limit exceeded"
+		return jsonify({"success": False, "error": error_msg}), 500
 
 
 @app.route("/predict", methods=["POST"])

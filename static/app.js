@@ -3922,20 +3922,37 @@ function openAIDetectChat() {
 				
 				const data = await res.json();
 				console.log('AI detect response:', data);
+				console.log('AI detect response.success:', data.success);
+				console.log('AI detect response.display:', data.display);
+				console.log('AI detect response.exercise_name:', data.exercise_name);
+				console.log('AI detect response.error:', data.error);
 				
 				// Remove loading message
 				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
 				if (loadingEl) loadingEl.remove();
 				
-				if (data.success) {
+				// Check for success (handle both boolean true and string "true")
+				const isSuccess = data.success === true || data.success === "true" || 
+				                 (data.display || data.exercise_name) && !data.error;
+				
+				if (isSuccess) {
 					// Success - just show the exercise name
 					const exerciseName = data.display || data.exercise_name || 'Unknown Exercise';
-					addAIDetectChatMessage('bot', `I detected: **${exerciseName}**`, null);
+					console.log('Showing success message with exercise:', exerciseName);
+					if (exerciseName && exerciseName !== 'Unknown Exercise') {
+						addAIDetectChatMessage('bot', `I detected: **${exerciseName}**`, null);
+					} else {
+						// Fallback if exercise name is missing
+						const errorMsg = data.error || 'Could not identify exercise';
+						console.error('Success but no exercise name:', data);
+						addAIDetectChatMessage('bot', `Sorry, I couldn't identify the exercise from this photo. Please try a clearer picture.`, null);
+					}
 				} else {
 					// Error from backend
 					const errorMsg = data.error || data.message || 'Unknown error';
 					console.error('AI detect backend error:', errorMsg);
-					addAIDetectChatMessage('bot', `Sorry, I couldn't identify the exercise: ${errorMsg}. Please try a clearer picture.`, null);
+					console.error('Full error data:', data);
+					addAIDetectChatMessage('bot', `Sorry, I couldn't identify the exercise from this photo. Please try a clearer picture.`, null);
 				}
 			} catch (e) {
 				// Remove loading message
