@@ -1368,12 +1368,15 @@ def vision_detect():
 	# Debug: Log request info
 	print(f"[DEBUG] Vision detect request - Content-Type: {request.content_type}")
 	print(f"[DEBUG] Vision detect request - Files: {list(request.files.keys())}")
+	print(f"[DEBUG] Vision detect request - Form data keys: {list(request.form.keys())}")
+	print(f"[DEBUG] Vision detect request - Headers: {dict(request.headers)}")
 	
 	file = request.files.get("image")
 	if not file:
 		print("[ERROR] No 'image' file in request.files")
 		print(f"[DEBUG] Available files: {list(request.files.keys())}")
-		return jsonify({"success": False, "error": "No image provided"}), 400
+		print(f"[DEBUG] Available form keys: {list(request.form.keys())}")
+		return jsonify({"success": False, "error": "No image provided. Please make sure to upload an image file."}), 400
 
 	# Check filename (some clients may not provide filename, so make it optional)
 	# We'll generate a default filename if needed
