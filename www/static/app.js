@@ -3878,7 +3878,7 @@ function openAIDetectChat() {
 		messagesContainer.innerHTML = `
 			<div class="ai-detect-chat-message ai-detect-chat-message-bot">
 				<div class="ai-detect-chat-avatar">🤖</div>
-				<div class="ai-detect-chat-text">Upload a photo of the exercise machine or movement, and I'll identify it for you!</div>
+				<div class="ai-detect-chat-text">Hoi! Stuur een foto van een oefening en ik vertel je welke oefening het is! 📸</div>
 			</div>
 		`;
 	}
@@ -3891,42 +3891,44 @@ function openAIDetectChat() {
 			if (!file) return;
 			
 			// Show user message with image preview
-			addAIDetectChatMessage('user', null, file);
+			addAIDetectChatMessage('user', 'Welke oefening is dit?', file);
 			
 			// Show loading message
-			const loadingId = addAIDetectChatMessage('bot', 'Analyzing your photo...', null, true);
+			const loadingId = addAIDetectChatMessage('bot', 'Even nadenken...', null, true);
 			
 			try {
 				// Send to backend
 				const formData = new FormData();
 				formData.append('image', file);
+				formData.append('message', 'Welke oefening is dit?');
 				const apiUrl = getApiUrl('/api/vision-detect');
 				const res = await fetch(apiUrl, {
 					method: 'POST',
 					body: formData
 				});
 				
-				// Always try to parse response, even if status is not ok
-				const data = await res.json().catch(() => ({}));
+				const data = await res.json();
 				console.log('AI detect response:', data);
 				
 				// Remove loading message
 				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
 				if (loadingEl) loadingEl.remove();
 				
-				// ALWAYS show something - get exercise name from any field
-				const exerciseName = data.display || data.exercise_name || data.exercise || 'Exercise detected';
-				
-				// Always show the detected exercise
-				addAIDetectChatMessage('bot', `I detected: **${exerciseName}**`, null);
+				if (data.success && data.message) {
+					// Show AI chat response
+					addAIDetectChatMessage('bot', data.message, null);
+				} else {
+					// Error from backend
+					const errorMsg = data.error || 'Er ging iets mis. Probeer het opnieuw.';
+					addAIDetectChatMessage('bot', errorMsg, null);
+				}
 			} catch (e) {
 				// Remove loading message
 				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
 				if (loadingEl) loadingEl.remove();
 				
 				console.error('AI detect failed:', e);
-				// Even on error, show something
-				addAIDetectChatMessage('bot', `I detected: **Exercise detected**`, null);
+				addAIDetectChatMessage('bot', 'Sorry, er ging iets mis. Probeer het opnieuw.', null);
 			}
 			
 			// Reset file input

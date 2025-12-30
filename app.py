@@ -1092,28 +1092,27 @@ def _try_openai_vision(image_path: Path) -> Optional[Any]:
 
 @app.route("/api/vision-detect", methods=["POST"])
 def vision_detect():
-	"""Simple: photo in → exercise name out. ALWAYS returns a response."""
+	"""Chat endpoint: photo + question → AI chat response."""
 	import base64
 	
-	# Always return 200, even on errors
 	try:
 		if not OPENAI_AVAILABLE:
-			return jsonify({"success": True, "display": "Exercise detected", "exercise_name": "Exercise detected"}), 200
+			return jsonify({"success": False, "error": "OpenAI not available"}), 500
 		
 		# Get image file
 		file = request.files.get("image")
 		if not file:
-			return jsonify({"success": True, "display": "Exercise detected", "exercise_name": "Exercise detected"}), 200
+			return jsonify({"success": False, "error": "No image provided"}), 400
 		
 		# Get OpenAI API key
 		api_key = os.getenv("OPENAI_API_KEY")
 		if not api_key:
-			return jsonify({"success": True, "display": "Exercise detected", "exercise_name": "Exercise detected"}), 200
+			return jsonify({"success": False, "error": "OpenAI API key not configured"}), 500
 		
 		# Read image and encode
 		image_bytes = file.read()
 		if not image_bytes:
-			return jsonify({"success": True, "display": "Exercise detected", "exercise_name": "Exercise detected"}), 200
+			return jsonify({"success": False, "error": "Image is empty"}), 400
 		
 		image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 		
@@ -1124,45 +1123,49 @@ def vision_detect():
 		elif file.content_type and "webp" in file.content_type:
 			image_format = "webp"
 		
-		# Call OpenAI Vision
+		# Get user message (optional, defaults to "welke oefening is dit?")
+		user_message = request.form.get("message", "Welke oefening is dit?")
+		
+		# Call OpenAI Vision for chat response
 		client = OpenAI(api_key=api_key)
 		response = client.chat.completions.create(
 			model="gpt-4o-mini",
 			messages=[
 				{
+					"role": "system",
+					"content": "Je bent een fitness expert. Beantwoord vragen over oefeningen in het Nederlands. Wees vriendelijk en behulpzaam."
+				},
+				{
 					"role": "user",
 					"content": [
-						{"type": "text", "text": "What exercise is shown in this image? Just return the exercise name, nothing else."},
+						{"type": "text", "text": user_message},
 						{"type": "image_url", "image_url": {"url": f"data:image/{image_format};base64,{image_base64}"}}
 					]
 				}
 			],
-			max_tokens=50
+			max_tokens=200
 		)
 		
-		# Extract exercise name
+		# Extract response
 		if response.choices and len(response.choices) > 0:
 			response_content = response.choices[0].message.content
 			if response_content:
-				exercise_name = response_content.strip()
-				if exercise_name:
-					print(f"[SUCCESS] Detected exercise: {exercise_name}")
-					return jsonify({
-						"success": True,
-						"display": exercise_name,
-						"exercise_name": exercise_name
-					}), 200
+				chat_response = response_content.strip()
+				print(f"[SUCCESS] AI chat response: {chat_response}")
+				return jsonify({
+					"success": True,
+					"message": chat_response
+				}), 200
 		
 		# Fallback if OpenAI response is empty
-		print("[INFO] OpenAI response empty, using fallback")
-		return jsonify({"success": True, "display": "Exercise detected", "exercise_name": "Exercise detected"}), 200
+		print("[ERROR] OpenAI returned empty response")
+		return jsonify({"success": False, "error": "No response from AI"}), 500
 		
-		except Exception as e:
-		# On ANY error, just return a success response with fallback text
+	except Exception as e:
 		print(f"[ERROR] Vision detect error: {e}")
-				import traceback
-				traceback.print_exc()
-		return jsonify({"success": True, "display": "Exercise detected", "exercise_name": "Exercise detected"}), 200
+		import traceback
+		traceback.print_exc()
+		return jsonify({"success": False, "error": str(e)}), 500
 
 
 # /predict endpoint removed - now using /api/vision-detect with OpenAI Vision
