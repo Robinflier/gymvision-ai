@@ -1168,12 +1168,15 @@ def nav_icon(filename):
 def _try_openai_vision(image_path: Path) -> Optional[Any]:
 	"""Simple OpenAI Vision API call: photo in → exercise name out."""
 	if not OPENAI_AVAILABLE:
+		print("[ERROR] OpenAI package not available")
 		return None
 	
 	OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 	if not OPENAI_API_KEY:
-		print("[WARNING] OPENAI_API_KEY not set")
+		print("[ERROR] OPENAI_API_KEY not set in environment variables")
 		return None
+	
+	print(f"[DEBUG] OpenAI API key found: {OPENAI_API_KEY[:10]}...")
 	
 	try:
 		import base64
@@ -1219,8 +1222,17 @@ def _try_openai_vision(image_path: Path) -> Optional[Any]:
 			temperature=0.3
 		)
 		
-		exercise_name = response.choices[0].message.content.strip()
+		response_content = response.choices[0].message.content
+		if not response_content:
+			print("[ERROR] OpenAI Vision returned empty response")
+			return None
+		
+		exercise_name = response_content.strip()
 		print(f"[DEBUG] OpenAI Vision detected: {exercise_name}")
+		
+		if not exercise_name:
+			print("[ERROR] Exercise name is empty after stripping")
+			return None
 		
 		# Simple response: just return the exercise name
 		return jsonify({
@@ -1232,6 +1244,7 @@ def _try_openai_vision(image_path: Path) -> Optional[Any]:
 		
 	except Exception as e:
 		print(f"[ERROR] OpenAI Vision API error: {str(e)}")
+		print(f"[ERROR] Error type: {type(e).__name__}")
 		import traceback
 		traceback.print_exc()
 		return None
@@ -1360,19 +1373,26 @@ def vision_detect():
 
 	# Use OpenAI Vision directly (no YOLO)
 	try:
+		print("[DEBUG] Calling OpenAI Vision API...")
 		vision_result = _try_openai_vision(tmp_path)
 		if vision_result:
 			try:
 				os.remove(str(tmp_path))
 			except Exception:
 				pass
+			print("[DEBUG] OpenAI Vision returned result")
 			return vision_result
 		else:
+			print("[ERROR] OpenAI Vision returned None - check logs above for details")
 			try:
 				os.remove(str(tmp_path))
 			except Exception:
 				pass
-			return jsonify({"success": False, "error": "NO_PREDICTION", "message": "Could not detect exercise from image. Please try a clearer photo."}), 422
+			return jsonify({
+				"success": False, 
+				"error": "OpenAI Vision API call failed. Check server logs for details.",
+				"message": "Could not detect exercise from image. Please try a clearer photo."
+			}), 422
 	except Exception as e:
 		error_msg = str(e)
 		print(f"[ERROR] Vision detect failed: {error_msg}")
