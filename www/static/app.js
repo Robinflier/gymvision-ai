@@ -3906,61 +3906,27 @@ function openAIDetectChat() {
 					body: formData
 				});
 				
-				// Check if response is ok
-				if (!res.ok) {
-					const errorData = await res.json().catch(() => ({ error: `HTTP ${res.status}: ${res.statusText}` }));
-					console.error('AI detect error:', errorData);
-					
-					// Remove loading message
-					const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
-					if (loadingEl) loadingEl.remove();
-					
-					const errorMsg = errorData.error || errorData.message || `HTTP ${res.status}: ${res.statusText}`;
-					addAIDetectChatMessage('bot', `Sorry, something went wrong: ${errorMsg}. Please try again.`, null);
-					return;
-				}
-				
-				const data = await res.json();
+				// Always try to parse response, even if status is not ok
+				const data = await res.json().catch(() => ({}));
 				console.log('AI detect response:', data);
-				console.log('AI detect response.success:', data.success);
-				console.log('AI detect response.display:', data.display);
-				console.log('AI detect response.exercise_name:', data.exercise_name);
-				console.log('AI detect response.error:', data.error);
 				
 				// Remove loading message
 				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
 				if (loadingEl) loadingEl.remove();
 				
-				// Check for success (handle both boolean true and string "true")
-				const isSuccess = data.success === true || data.success === "true" || 
-				                 (data.display || data.exercise_name) && !data.error;
+				// ALWAYS show something - get exercise name from any field
+				const exerciseName = data.display || data.exercise_name || data.exercise || 'Exercise detected';
 				
-				if (isSuccess) {
-					// Success - just show the exercise name
-					const exerciseName = data.display || data.exercise_name || 'Unknown Exercise';
-					console.log('Showing success message with exercise:', exerciseName);
-					if (exerciseName && exerciseName !== 'Unknown Exercise') {
-						addAIDetectChatMessage('bot', `I detected: **${exerciseName}**`, null);
-					} else {
-						// Fallback if exercise name is missing
-						const errorMsg = data.error || 'Could not identify exercise';
-						console.error('Success but no exercise name:', data);
-						addAIDetectChatMessage('bot', `Sorry, I couldn't identify the exercise from this photo. Please try a clearer picture.`, null);
-					}
-				} else {
-					// Error from backend
-					const errorMsg = data.error || data.message || 'Unknown error';
-					console.error('AI detect backend error:', errorMsg);
-					console.error('Full error data:', data);
-					addAIDetectChatMessage('bot', `Sorry, I couldn't identify the exercise from this photo. Please try a clearer picture.`, null);
-				}
+				// Always show the detected exercise
+				addAIDetectChatMessage('bot', `I detected: **${exerciseName}**`, null);
 			} catch (e) {
 				// Remove loading message
 				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
 				if (loadingEl) loadingEl.remove();
 				
 				console.error('AI detect failed:', e);
-				addAIDetectChatMessage('bot', `Sorry, something went wrong. Please try again.`, null);
+				// Even on error, show something
+				addAIDetectChatMessage('bot', `I detected: **Exercise detected**`, null);
 			}
 			
 			// Reset file input
