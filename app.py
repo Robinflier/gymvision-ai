@@ -1001,89 +1001,7 @@ def nav_icon(filename):
     return ("", 204)
 
 
-def _try_openai_vision(image_path: Path) -> Optional[Any]:
-	"""Simple OpenAI Vision API call: photo in → exercise name out."""
-	if not OPENAI_AVAILABLE:
-		print("[ERROR] OpenAI package not available")
-		return None
-	
-	OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-	if not OPENAI_API_KEY:
-		print("[ERROR] OPENAI_API_KEY not set in environment variables")
-		return None
-	
-	print(f"[DEBUG] OpenAI API key found: {OPENAI_API_KEY[:10]}...")
-	
-	try:
-		import base64
-		
-		# Read and encode image
-		with open(image_path, "rb") as image_file:
-			image_data = base64.b64encode(image_file.read()).decode('utf-8')
-		
-		# Determine image format
-		image_format = "jpeg"
-		if image_path.suffix.lower() in [".png"]:
-			image_format = "png"
-		elif image_path.suffix.lower() in [".webp"]:
-			image_format = "webp"
-		
-		client = OpenAI(api_key=OPENAI_API_KEY)
-		
-		# Simple prompt: just ask what exercise it is
-		response = client.chat.completions.create(
-			model="gpt-4o-mini",
-			messages=[
-				{
-					"role": "system",
-					"content": "You are a fitness expert. Look at the image and tell me what exercise you see. Be specific and accurate. Just return the exercise name, nothing else."
-				},
-				{
-					"role": "user",
-					"content": [
-						{
-							"type": "text",
-							"text": "What exercise is shown in this image? Just tell me the exercise name."
-						},
-						{
-							"type": "image_url",
-							"image_url": {
-								"url": f"data:image/{image_format};base64,{image_data}"
-							}
-						}
-					]
-				}
-			],
-			max_tokens=100,
-			temperature=0.3
-		)
-		
-		response_content = response.choices[0].message.content
-		if not response_content:
-			print("[ERROR] OpenAI Vision returned empty response")
-			return None
-		
-		exercise_name = response_content.strip()
-		print(f"[DEBUG] OpenAI Vision detected: {exercise_name}")
-		
-		if not exercise_name:
-			print("[ERROR] Exercise name is empty after stripping")
-			return None
-		
-		# Simple response: just return the exercise name
-		return jsonify({
-			"success": True,
-			"display": exercise_name,
-			"exercise_name": exercise_name,
-			"source": "openai_vision"
-		})
-		
-		except Exception as e:
-		print(f"[ERROR] OpenAI Vision API error: {str(e)}")
-		print(f"[ERROR] Error type: {type(e).__name__}")
-				import traceback
-				traceback.print_exc()
-		return None
+# _try_openai_vision function removed - no longer used
 
 
 # _serialize_prediction_choice removed - no longer using YOLO predictions
@@ -1161,10 +1079,10 @@ def vision_detect():
 		print("[ERROR] OpenAI returned empty response")
 		return jsonify({"success": False, "error": "No response from AI"}), 500
 		
-	except Exception as e:
+		except Exception as e:
 		print(f"[ERROR] Vision detect error: {e}")
-		import traceback
-		traceback.print_exc()
+				import traceback
+				traceback.print_exc()
 		return jsonify({"success": False, "error": str(e)}), 500
 
 
