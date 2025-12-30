@@ -1667,6 +1667,45 @@ function escapeHtmlAttr(value) {
 	return (value ?? '').toString().replace(/"/g, '&quot;');
 }
 
+// Helper function to find exercise by name (from OpenAI response)
+function findExerciseByName(exerciseName) {
+	if (!exerciseName || !allExercises || allExercises.length === 0) return null;
+	
+	const nameLower = exerciseName.toLowerCase().trim();
+	
+	// Try exact match first (key or display)
+	let match = allExercises.find(ex => {
+		const keyLower = (ex.key || '').toLowerCase().trim();
+		const displayLower = (ex.display || '').toLowerCase().trim();
+		return keyLower === nameLower || displayLower === nameLower;
+	});
+	
+	if (match) return match;
+	
+	// Try partial match - check if name is contained in key or display
+	match = allExercises.find(ex => {
+		const keyLower = (ex.key || '').toLowerCase().replace(/_/g, ' ').trim();
+		const displayLower = (ex.display || '').toLowerCase().trim();
+		return keyLower.includes(nameLower) || displayLower.includes(nameLower) ||
+		       nameLower.includes(keyLower) || nameLower.includes(displayLower);
+	});
+	
+	if (match) return match;
+	
+	// Try fuzzy match - check if key parts match
+	const nameParts = nameLower.split(' ').filter(p => p.length > 2);
+	if (nameParts.length > 0) {
+		match = allExercises.find(ex => {
+			const keyLower = (ex.key || '').toLowerCase().replace(/_/g, ' ');
+			const displayLower = (ex.display || '').toLowerCase();
+			// Check if all name parts are in key or display
+			return nameParts.every(part => keyLower.includes(part) || displayLower.includes(part));
+		});
+	}
+	
+	return match || null;
+}
+
 function findExerciseMetadata(exercise) {
 	if (!exercise) return null;
 	const key = normalizeExerciseKey(exercise.key);
@@ -3897,11 +3936,10 @@ function openAIDetectChat() {
 			const loadingId = addAIDetectChatMessage('bot', 'Even nadenken...', null, true);
 			
 			try {
-				// Send to backend
+				// Send to backend - use new OpenAI Vision endpoint
 				const formData = new FormData();
 				formData.append('image', file);
-				formData.append('message', 'Welke oefening is dit?');
-				const apiUrl = getApiUrl('/api/vision-detect');
+				const apiUrl = getApiUrl('/api/recognize-exercise');
 				const res = await fetch(apiUrl, {
 					method: 'POST',
 					body: formData
@@ -3914,12 +3952,51 @@ function openAIDetectChat() {
 				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
 				if (loadingEl) loadingEl.remove();
 				
-				// ALWAYS show something - even if it's an error, show it in the chat
-				if (data.success && data.message) {
-					// Show AI chat response
-					addAIDetectChatMessage('bot', data.message, null);
+				// Handle /api/recognize-exercise response
+				if (data.exercise) {
+					const exerciseName = data.exercise;
+					
+					// Check if it's unknown
+					if (exerciseName.toLowerCase() === 'unknown exercise' || exerciseName.toLowerCase().includes('unknown')) {
+						addAIDetectChatMessage('bot', 'Sorry, ik kon de oefening niet goed identificeren. Kun je een duidelijkere foto maken?', null);
+					} else {
+						// Format exercise name for display (capitalize first letter of each word)
+						const displayName = exerciseName.split(' ').map(word => 
+							word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+						).join(' ');
+						
+						addAIDetectChatMessage('bot', `Ik denk dat dit een **${displayName}** is!`, null);
+						
+						// Try to find matching exercise in the exercise list
+						const matchingExercise = findExerciseByName(exerciseName);
+						
+						if (matchingExercise) {
+							// Add a button to add this exercise to the workout
+							setTimeout(() => {
+								const messagesContainer = document.getElementById('ai-detect-chat-messages');
+								if (messagesContainer) {
+									const selectBtn = document.createElement('button');
+									selectBtn.className = 'ai-detect-chat-select-btn';
+									selectBtn.textContent = `✓ ${matchingExercise.display} toevoegen`;
+									selectBtn.onclick = () => {
+										// Close chat modal
+										closeAIDetectChat();
+										// Close exercise selector if open
+										const selector = document.getElementById('exercise-selector');
+										if (selector) selector.classList.add('hidden');
+										document.body.classList.remove('selector-open');
+										// Add exercise to workout
+										addExerciseToWorkout(matchingExercise);
+									};
+									messagesContainer.appendChild(selectBtn);
+								}
+							}, 500);
+						} else {
+							// Exercise not found in list, but still show the detected name
+							addAIDetectChatMessage('bot', `Let op: "${displayName}" staat niet in de oefeningenlijst. Je kunt handmatig een oefening selecteren.`, null);
+						}
+					}
 				} else {
-					// Error from backend - show in chat, don't show error modal
 					const errorMsg = data.error || 'Er ging iets mis. Probeer het opnieuw.';
 					addAIDetectChatMessage('bot', `Sorry, ${errorMsg.toLowerCase()}`, null);
 				}
