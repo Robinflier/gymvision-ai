@@ -32,6 +32,11 @@ except Exception:
 	Client = None
 
 try:
+	from ultralytics import YOLO  # type: ignore
+except Exception:
+	YOLO = None  # type: ignore
+
+try:
 	from groq import Groq  # type: ignore
 	GROQ_AVAILABLE = True
 except Exception:
@@ -44,6 +49,11 @@ except Exception:
 	OPENAI_AVAILABLE = False
 
 APP_ROOT = Path(__file__).resolve().parent
+MODEL_PATH = APP_ROOT / "best.pt"
+MODEL_PATH_1 = APP_ROOT / "best1.pt"
+MODEL_PATH_2 = APP_ROOT / "best2.pt"
+MODEL_PATH_3 = APP_ROOT / "best3.pt"
+MODEL_PATH_4 = APP_ROOT / "best4.pt"
 DATABASE_PATH = APP_ROOT / "gymvision.db"
 IMAGES_PATHS = [APP_ROOT / "images"]
 PARENT_IMAGES_PATH = APP_ROOT.parent / "images"
@@ -65,6 +75,60 @@ IMAGE_BASENAMES = sorted(set(IMAGE_BASENAMES))
 
 def normalize_label(text: str) -> str:
 	return "".join(ch if ch.isalnum() else "_" for ch in (text or "").lower()).strip("_")
+
+# ========== ML MODELS ==========
+_model_cache = {}
+_model_paths = {
+	"best": MODEL_PATH,
+	"best1": MODEL_PATH_1,
+	"best2": MODEL_PATH_2,
+	"best3": MODEL_PATH_3,
+	"best4": MODEL_PATH_4
+}
+_MAX_MODELS_IN_MEMORY = 2
+
+def _load_model(model_name: str):
+	"""Load a single model if it exists and isn't already loaded."""
+	if YOLO is None:
+		raise RuntimeError("Ultralytics not available")
+	if model_name in _model_cache:
+		return _model_cache[model_name]
+	model_path = _model_paths.get(model_name)
+	if not model_path or not model_path.exists():
+		return None
+	if len(_model_cache) >= _MAX_MODELS_IN_MEMORY:
+		oldest_key = next(iter(_model_cache))
+		del _model_cache[oldest_key]
+		import gc
+		gc.collect()
+	print(f"[INFO] Loading model: {model_name}")
+	_model_cache[model_name] = YOLO(str(model_path))
+	return _model_cache[model_name]
+
+def get_models():
+	"""Get all available models."""
+	models = {}
+	priority_models = ["best", "best3"]
+	for model_name in priority_models:
+		model = _load_model(model_name)
+		if model is not None:
+			models[model_name] = model
+	if len(models) < _MAX_MODELS_IN_MEMORY:
+		for model_name in ["best1", "best2", "best4"]:
+			if len(models) >= _MAX_MODELS_IN_MEMORY:
+				break
+			model = _load_model(model_name)
+			if model is not None:
+				models[model_name] = model
+	if not models:
+		raise FileNotFoundError("No model files found")
+	return (
+		models.get("best"),
+		models.get("best1"),
+		models.get("best2"),
+		models.get("best3"),
+		models.get("best4")
+	)
 
 # YOLO model labels and priorities removed - no longer using YOLO models
 
@@ -1004,9 +1068,143 @@ def nav_icon(filename):
 # _try_openai_vision function removed - no longer used
 
 
-# _serialize_prediction_choice removed - no longer using YOLO predictions
+def _serialize_prediction_choice(pred: Dict[str, Any]) -> Dict[str, Any]:
+	key = pred["key"]
+	label = pred.get("label")
+	meta = MACHINE_METADATA.get(key, {"display": label or "Unknown", "muscles": [], "video": ""})
+	display_name = meta.get("display") or (label.replace("_", " ").title() if label else "Unknown")
+	return {
+		"key": key, "label": label, "display": display_name,
+		"muscles": normalize_muscles(meta.get("muscles", [])),
+		"video": meta.get("video", ""),
+		"image": image_url_for_key(key, meta) or meta.get("image"),
+		"confidence": pred.get("conf", 0.0),
+	}
 
-
+@app.route("/predict", methods=["POST"])
+def predict():
+	"""YOLO prediction endpoint - uses local best.pt models."""
+	file = request.files.get("image")
+	if not file:
+		return jsonify({"error": "No image provided"}), 400
+	tmp_dir = APP_ROOT / "tmp"
+	tmp_dir.mkdir(exist_ok=True)
+	tmp_path = tmp_dir / "upload.jpg"
+	try:
+		file.save(str(tmp_path))
+	except Exception as e:
+		return jsonify({"error": f"Failed to save image: {str(e)}"}), 500
+	if not tmp_path.exists() or tmp_path.stat().st_size == 0:
+		return jsonify({"error": "Image file is empty"}), 400
+	try:
+		model, model1, model2, model3, model4 = get_models()
+	except Exception as e:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"error": "Models not available"}), 500
+	models_loaded = sum(1 for m in [model, model1, model2, model3, model4] if m is not None)
+	if models_loaded == 0:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"error": "No models available"}), 500
+	predictions = []
+	def get_model_predictions(model_obj, model_name, max_predictions=3):
+		model_preds = []
+		try:
+			if not tmp_path.exists():
+				return model_preds
+			results = model_obj.predict(source=str(tmp_path), verbose=False)
+			if not results or len(results) == 0:
+				return model_preds
+			best = results[0]
+			if hasattr(best, "probs") and best.probs is not None:
+				probs = best.probs.data
+				top_indices = probs.topk(min(max_predictions, len(best.names))).indices.tolist()
+				top_confs = probs.topk(min(max_predictions, len(best.names))).values.tolist()
+				for idx, conf in zip(top_indices, top_confs):
+					label = best.names[int(idx)]
+					norm = normalize_label(label)
+					key = ALIASES.get(norm, norm)
+					model_preds.append({"label": label, "conf": float(conf), "key": key, "source": model_name})
+			elif hasattr(best, "boxes") and len(best.boxes) > 0:
+				confidences = best.boxes.conf.tolist()
+				classes = best.boxes.cls.tolist()
+				box_predictions = []
+				for i, (conf, cls_idx) in enumerate(zip(confidences, classes)):
+					label = best.names[int(cls_idx)]
+					norm = normalize_label(label)
+					key = ALIASES.get(norm, norm)
+					box_predictions.append({"label": label, "conf": float(conf), "key": key, "source": model_name, "index": i})
+				box_predictions.sort(key=lambda x: x["conf"], reverse=True)
+				seen_keys = set()
+				for pred in box_predictions:
+					if pred["key"] not in seen_keys:
+						model_preds.append(pred)
+						seen_keys.add(pred["key"])
+						if len(model_preds) >= max_predictions:
+							break
+		except Exception as e:
+			print(f"[ERROR] Model {model_name} prediction failed: {e}")
+		return model_preds
+	if model:
+		predictions.extend(get_model_predictions(model, "best"))
+	if model1:
+		predictions.extend(get_model_predictions(model1, "best1"))
+	if model2:
+		predictions.extend(get_model_predictions(model2, "best2"))
+	if model3:
+		predictions.extend(get_model_predictions(model3, "best3"))
+	if model4:
+		predictions.extend(get_model_predictions(model4, "best4"))
+	if not predictions:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+	excluded_keys = {normalize_label("Kettlebells"), normalize_label("Assisted Chin Up-Dip")}
+	predictions = [p for p in predictions if p.get("key") not in excluded_keys]
+	if not predictions:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+	grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+	for pred in predictions:
+		grouped[pred["key"]].append(pred)
+	label_candidates: List[Dict[str, Any]] = []
+	for key, preds_for_label in grouped.items():
+		sorted_preds = sorted(preds_for_label, key=lambda p: p["conf"], reverse=True)
+		label_candidates.append(sorted_preds[0])
+	sorted_predictions = sorted(label_candidates, key=lambda p: p["conf"], reverse=True)[:3]
+	if not sorted_predictions:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+	top_payloads = [_serialize_prediction_choice(pred) for pred in sorted_predictions]
+	primary_payload = top_payloads[0]
+	try:
+		os.remove(str(tmp_path))
+	except Exception:
+		pass
+	return jsonify({
+		"success": True,
+		"label": primary_payload["label"],
+		"confidence": primary_payload["confidence"],
+		"display": primary_payload["display"],
+		"muscles": primary_payload["muscles"],
+		"video": primary_payload["video"],
+		"key": primary_payload["key"],
+		"image": primary_payload.get("image"),
+		"top_predictions": top_payloads,
+	})
 
 @app.route("/api/vision-detect", methods=["POST"])
 def vision_detect():
@@ -1077,7 +1275,7 @@ def vision_detect():
 		
 		# Fallback if OpenAI response is empty
 		print("[ERROR] OpenAI returned empty response")
-	# Return a friendly message instead of error
+		# Return a friendly message instead of error
 		return jsonify({
 			"success": True,
 			"message": "Sorry, ik kon de oefening niet goed identificeren. Kun je een duidelijkere foto maken?"
@@ -1096,14 +1294,133 @@ def vision_detect():
 # /predict endpoint removed - now using /api/vision-detect with OpenAI Vision
 
 
+@app.route("/api/recognize-exercise", methods=["POST"])
+def recognize_exercise():
+	"""Exercise recognition endpoint: image → exercise name."""
+	import base64
+	
+	try:
+		if not OPENAI_AVAILABLE:
+			return jsonify({"error": "OpenAI not available"}), 500
+		
+		# Get OpenAI API key
+		api_key = os.getenv("OPENAI_API_KEY")
+		if not api_key:
+			return jsonify({"error": "OpenAI API key not configured"}), 500
+		
+		# Support multiple input formats: file upload, base64, or image_url
+		image_url = None
+		image_base64 = None
+		image_format = "jpeg"
+		
+		# Try file upload first
+		file = request.files.get("image")
+		if file:
+			image_bytes = file.read()
+			if not image_bytes:
+				return jsonify({"error": "Image file is empty"}), 400
+			image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+			# Determine format from content type
+			if file.content_type:
+				if "png" in file.content_type:
+					image_format = "png"
+				elif "webp" in file.content_type:
+					image_format = "webp"
+				elif "jpeg" in file.content_type or "jpg" in file.content_type:
+					image_format = "jpeg"
+		else:
+			# Try JSON body with base64 or image_url
+			data = request.get_json() or {}
+			if "image_url" in data:
+				image_url = data["image_url"]
+			elif "image" in data:
+				# Assume base64 string
+				image_base64 = data["image"]
+				# Remove data URL prefix if present
+				if image_base64.startswith("data:image/"):
+					parts = image_base64.split(",", 1)
+					if len(parts) == 2:
+						header = parts[0]
+						image_base64 = parts[1]
+						# Extract format from header
+						if "png" in header:
+							image_format = "png"
+						elif "webp" in header:
+							image_format = "webp"
+			else:
+				return jsonify({"error": "No image provided. Send 'image' (file), 'image_url' (string), or 'image' (base64 string) in JSON body."}), 400
+		
+		# Build image content for OpenAI
+		if image_url:
+			image_content = {"type": "image_url", "image_url": {"url": image_url}}
+		elif image_base64:
+			image_content = {"type": "image_url", "image_url": {"url": f"data:image/{image_format};base64,{image_base64}"}}
+		else:
+			return jsonify({"error": "Could not process image"}), 400
+		
+		# Call OpenAI Vision with specific prompt
+		client = OpenAI(api_key=api_key)
+		response = client.chat.completions.create(
+			model="gpt-4o-mini",  # Vision-capable model
+			messages=[
+				{
+					"role": "user",
+					"content": [
+						{
+							"type": "text",
+							"text": "You are a fitness exercise recognition model. Identify the main exercise being performed in the image. Respond with ONLY the exercise name in English. If unsure, respond with: unknown exercise."
+						},
+						image_content
+					]
+				}
+			],
+			max_tokens=50  # Keep response short
+		)
+		
+		# Extract exercise name from response
+		if response.choices and len(response.choices) > 0:
+			response_content = response.choices[0].message.content
+			if response_content:
+				exercise_name = response_content.strip()
+				print(f"[DEBUG] OpenAI raw response: {exercise_name}")
+				
+				# Convert to lowercase for comparison
+				exercise_lower = exercise_name.lower()
+				
+				# Check if it's unknown/unsure
+				if "unknown" in exercise_lower or "unsure" in exercise_lower or "cannot" in exercise_lower or "unable" in exercise_lower:
+					exercise_name = "unknown exercise"
+				else:
+					# Clean up: remove quotes, periods, extra whitespace
+					exercise_name = exercise_name.strip('"\'.,').strip()
+					# Convert to lowercase for consistency
+					exercise_name = exercise_name.lower()
+					# Replace underscores with spaces for readability
+					exercise_name = exercise_name.replace("_", " ")
+				
+				print(f"[DEBUG] Final exercise name: {exercise_name}")
+				# Return clean JSON response
+				return jsonify({"exercise": exercise_name}), 200
+		
+		# Fallback if OpenAI response is empty
+		print("[DEBUG] OpenAI returned empty response")
+		return jsonify({"exercise": "unknown exercise"}), 200
+		
+	except Exception as e:
+		print(f"[ERROR] Exercise recognition error: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"exercise": "unknown exercise"}), 200
+
+
 @app.route("/health", methods=["GET"])
 def health():
 	"""Health check endpoint to test if backend is working."""
 	return jsonify({
-			"status": "ok",
+		"status": "ok",
 		"openai_available": OPENAI_AVAILABLE,
 		"groq_available": GROQ_AVAILABLE
-		}), 200
+	}), 200
 
 @app.route("/favicon.ico")
 def favicon():
