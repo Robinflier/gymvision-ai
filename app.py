@@ -1300,6 +1300,9 @@ def vision_detect():
 	"""Simple: photo in → exercise name out."""
 	import base64
 	
+	if not OPENAI_AVAILABLE:
+		return jsonify({"success": False, "error": "OpenAI not available"}), 500
+	
 	# Get image file
 	file = request.files.get("image")
 	if not file:
@@ -1351,6 +1354,8 @@ def vision_detect():
 		
 	except Exception as e:
 		print(f"[ERROR] OpenAI Vision error: {e}")
+		import traceback
+		traceback.print_exc()
 		return jsonify({"success": False, "error": str(e)}), 500
 
 
