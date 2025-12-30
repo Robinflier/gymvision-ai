@@ -1166,13 +1166,13 @@ def nav_icon(filename):
 
 
 def _try_openai_vision(image_path: Path) -> Optional[Any]:
-	"""Try to detect exercise using OpenAI Vision API as fallback when YOLO fails."""
+	"""Simple OpenAI Vision API call: photo in → exercise name out."""
 	if not OPENAI_AVAILABLE:
 		return None
 	
 	OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 	if not OPENAI_API_KEY:
-		print("[WARNING] OPENAI_API_KEY not set, skipping Vision fallback")
+		print("[WARNING] OPENAI_API_KEY not set")
 		return None
 	
 	try:
@@ -1189,43 +1189,22 @@ def _try_openai_vision(image_path: Path) -> Optional[Any]:
 		elif image_path.suffix.lower() in [".webp"]:
 			image_format = "webp"
 		
-		# Build exercise list for matching
-		exercise_list = []
-		for key, meta in MACHINE_METADATA.items():
-			display_name = meta.get("display", key.replace("_", " ").title())
-			exercise_list.append(f"- {display_name} (key: {key})")
-		
-		exercises_context = "\n".join(exercise_list[:100])  # Limit to avoid token limits
-		
 		client = OpenAI(api_key=OPENAI_API_KEY)
 		
+		# Simple prompt: just ask what exercise it is
 		response = client.chat.completions.create(
 			model="gpt-4o-mini",
 			messages=[
 				{
 					"role": "system",
-					"content": f"""You are a fitness expert. Analyze the exercise equipment or movement in the image and identify what exercise this is.
-
-Available exercises in our database:
-{exercises_context}
-
-Return a JSON object with this structure:
-{{
-  "exercise_name": "Name of the exercise (use exact name from list if it matches, otherwise describe what you see)",
-  "exercise_key": "key_from_list_if_match_otherwise_null",
-  "description": "Brief description of what you see",
-  "muscles": ["Primary muscle", "Secondary muscle"],
-  "confidence": 0.0-1.0
-}}
-
-If the exercise matches one in the list, use that exact name and key. If it's a new/unlisted exercise, describe it clearly and set exercise_key to null."""
+					"content": "You are a fitness expert. Look at the image and tell me what exercise you see. Be specific and accurate. Just return the exercise name, nothing else."
 				},
 				{
 					"role": "user",
 					"content": [
 						{
 							"type": "text",
-							"text": "What exercise is shown in this image? Be specific and accurate."
+							"text": "What exercise is shown in this image? Just tell me the exercise name."
 						},
 						{
 							"type": "image_url",
@@ -1236,71 +1215,20 @@ If the exercise matches one in the list, use that exact name and key. If it's a 
 					]
 				}
 			],
-			max_tokens=300,
+			max_tokens=100,
 			temperature=0.3
 		)
 		
-		result_text = response.choices[0].message.content
-		print(f"[DEBUG] OpenAI Vision response: {result_text}")
+		exercise_name = response.choices[0].message.content.strip()
+		print(f"[DEBUG] OpenAI Vision detected: {exercise_name}")
 		
-		# Parse JSON response
-		import json
-		# Try to extract JSON from response (might be wrapped in markdown)
-		if "```json" in result_text:
-			json_start = result_text.find("```json") + 7
-			json_end = result_text.find("```", json_start)
-			result_text = result_text[json_start:json_end].strip()
-		elif "```" in result_text:
-			json_start = result_text.find("```") + 3
-			json_end = result_text.find("```", json_start)
-			result_text = result_text[json_start:json_end].strip()
-		elif "{" in result_text:
-			json_start = result_text.find("{")
-			json_end = result_text.rfind("}") + 1
-			result_text = result_text[json_start:json_end]
-		
-		vision_data = json.loads(result_text)
-		
-		# If we found a matching exercise key, use that
-		if vision_data.get("exercise_key") and vision_data["exercise_key"] in MACHINE_METADATA:
-			key = vision_data["exercise_key"]
-			meta = MACHINE_METADATA[key]
-			return jsonify({
-				"success": True,
-				"key": key,
-				"display": meta.get("display", key.replace("_", " ").title()),
-				"muscles": normalize_muscles(meta.get("muscles", [])),
-				"image": image_url_for_key(key, meta) or meta.get("image"),
-				"confidence": vision_data.get("confidence", 0.8),
-				"source": "openai_vision",
-				"description": vision_data.get("description", ""),
-				"top_predictions": [{
-					"key": key,
-					"display": meta.get("display", key.replace("_", " ").title()),
-					"muscles": normalize_muscles(meta.get("muscles", [])),
-					"confidence": vision_data.get("confidence", 0.8)
-				}]
-			})
-		else:
-			# New exercise not in database - return generic description
-			exercise_name = vision_data.get("exercise_name", "Unknown Exercise")
-			return jsonify({
-				"success": True,
-				"key": None,
-				"display": exercise_name,
-				"muscles": vision_data.get("muscles", []),
-				"image": None,
-				"confidence": vision_data.get("confidence", 0.7),
-				"source": "openai_vision",
-				"description": vision_data.get("description", ""),
-				"is_new_exercise": True,
-				"top_predictions": [{
-					"key": None,
-					"display": exercise_name,
-					"muscles": vision_data.get("muscles", []),
-					"confidence": vision_data.get("confidence", 0.7)
-				}]
-			})
+		# Simple response: just return the exercise name
+		return jsonify({
+			"success": True,
+			"display": exercise_name,
+			"exercise_name": exercise_name,
+			"source": "openai_vision"
+		})
 		
 	except Exception as e:
 		print(f"[ERROR] OpenAI Vision API error: {str(e)}")
