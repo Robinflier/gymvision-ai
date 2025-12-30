@@ -1841,7 +1841,7 @@ def vision_workout():
 		return jsonify({"error": "Groq API key not configured. Set GROQ_API_KEY environment variable."}), 500
 	
 	try:
-	data = request.get_json()
+		data = request.get_json()
 	except Exception as e:
 		return jsonify({"error": f"Invalid request data: {str(e)}"}), 400
 	
