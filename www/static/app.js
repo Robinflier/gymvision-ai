@@ -3928,52 +3928,9 @@ function openAIDetectChat() {
 				if (loadingEl) loadingEl.remove();
 				
 				if (data.success) {
-					// Success - show exercise name (works for both known and new exercises)
+					// Success - just show the exercise name
 					const exerciseName = data.display || data.exercise_name || 'Unknown Exercise';
-					const muscles = data.muscles || [];
-					const musclesText = muscles.length > 0 ? ` (${muscles.join(', ')})` : '';
-					
-					if (data.is_new_exercise) {
-						// New exercise not in database
-						addAIDetectChatMessage('bot', `I detected: **${exerciseName}**${musclesText}\n\n*Note: This exercise is not in our database yet.*`, null);
-					} else if (data.key) {
-						// Known exercise - show with select button
-						addAIDetectChatMessage('bot', `I detected: **${exerciseName}**${musclesText}`, null);
-						
-						// Add button to select this exercise
-						setTimeout(() => {
-							const selectBtn = document.createElement('button');
-							selectBtn.className = 'ai-detect-chat-select-btn';
-							selectBtn.textContent = `Select "${exerciseName}"`;
-							selectBtn.onclick = () => {
-								// Close chat and exercise selector
-								closeAIDetectChat();
-								if (selector) selector.classList.add('hidden');
-								document.body.classList.remove('selector-open');
-								
-								// Add exercise to workout or select it
-								if (currentTab === 'workout-builder') {
-									const exercise = {
-										key: data.key,
-										display: exerciseName,
-										muscles: muscles,
-										sets: createDefaultSets(3)
-									};
-									addExerciseToWorkout(exercise);
-								} else {
-									selectExercise(data.key);
-								}
-							};
-							
-							const lastMessage = messagesContainer.lastElementChild;
-							if (lastMessage) {
-								lastMessage.appendChild(selectBtn);
-							}
-						}, 500);
-					} else {
-						// Success but no key (shouldn't happen, but handle gracefully)
-						addAIDetectChatMessage('bot', `I detected: **${exerciseName}**${musclesText}`, null);
-					}
+					addAIDetectChatMessage('bot', `I detected: **${exerciseName}**`, null);
 				} else {
 					// Error from backend
 					const errorMsg = data.error || data.message || 'Unknown error';
