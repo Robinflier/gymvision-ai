@@ -2066,7 +2066,7 @@ Examples:
 		error_msg = str(e)
 		print(f"[ERROR] Failed to parse workout JSON: {error_msg}")
 		if 'content' in locals():
-		print(f"[DEBUG] Content was: {content[:500]}")
+			print(f"[DEBUG] Content was: {content[:500]}")
 		# Provide user-friendly error message
 		return jsonify({"error": "The AI returned an invalid response. Please try rephrasing your request or try again."}), 500
 	except Exception as e:
