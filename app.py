@@ -1344,8 +1344,17 @@ def vision_detect():
 			max_tokens=50
 		)
 		
-		exercise_name = response.choices[0].message.content.strip()
+		response_content = response.choices[0].message.content
+		if not response_content:
+			print("[ERROR] OpenAI returned empty response")
+			return jsonify({"success": False, "error": "OpenAI returned empty response"}), 500
 		
+		exercise_name = response_content.strip()
+		if not exercise_name:
+			print("[ERROR] Exercise name is empty after stripping")
+			return jsonify({"success": False, "error": "Could not identify exercise"}), 500
+		
+		print(f"[SUCCESS] Detected exercise: {exercise_name}")
 		return jsonify({
 			"success": True,
 			"display": exercise_name,
