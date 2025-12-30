@@ -1296,114 +1296,82 @@ def vision_detect():
 
 @app.route("/api/recognize-exercise", methods=["POST"])
 def recognize_exercise():
-	"""Exercise recognition endpoint: image → exercise name."""
+	"""
+	Exercise recognition endpoint: image → exercise name.
+	Same pattern as vision-detect - just call OpenAI Vision directly.
+	"""
 	import base64
 	
 	try:
 		if not OPENAI_AVAILABLE:
-			return jsonify({"error": "OpenAI not available"}), 500
+			return jsonify({"exercise": "unknown exercise"}), 200
+		
+		# Get image file (same as vision-detect)
+		file = request.files.get("image")
+		if not file:
+			return jsonify({"exercise": "unknown exercise"}), 200
 		
 		# Get OpenAI API key
 		api_key = os.getenv("OPENAI_API_KEY")
 		if not api_key:
-			return jsonify({"error": "OpenAI API key not configured"}), 500
+			return jsonify({"exercise": "unknown exercise"}), 200
 		
-		# Support multiple input formats: file upload, base64, or image_url
-		image_url = None
-		image_base64 = None
+		# Read image and encode (same as vision-detect)
+		image_bytes = file.read()
+		if not image_bytes:
+			return jsonify({"exercise": "unknown exercise"}), 200
+		
+		image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+		
+		# Determine format (same as vision-detect)
 		image_format = "jpeg"
+		if file.content_type and "png" in file.content_type:
+			image_format = "png"
+		elif file.content_type and "webp" in file.content_type:
+			image_format = "webp"
 		
-		# Try file upload first
-		file = request.files.get("image")
-		if file:
-			image_bytes = file.read()
-			if not image_bytes:
-				return jsonify({"error": "Image file is empty"}), 400
-			image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-			# Determine format from content type
-			if file.content_type:
-				if "png" in file.content_type:
-					image_format = "png"
-				elif "webp" in file.content_type:
-					image_format = "webp"
-				elif "jpeg" in file.content_type or "jpg" in file.content_type:
-					image_format = "jpeg"
-		else:
-			# Try JSON body with base64 or image_url
-			data = request.get_json() or {}
-			if "image_url" in data:
-				image_url = data["image_url"]
-			elif "image" in data:
-				# Assume base64 string
-				image_base64 = data["image"]
-				# Remove data URL prefix if present
-				if image_base64.startswith("data:image/"):
-					parts = image_base64.split(",", 1)
-					if len(parts) == 2:
-						header = parts[0]
-						image_base64 = parts[1]
-						# Extract format from header
-						if "png" in header:
-							image_format = "png"
-						elif "webp" in header:
-							image_format = "webp"
-			else:
-				return jsonify({"error": "No image provided. Send 'image' (file), 'image_url' (string), or 'image' (base64 string) in JSON body."}), 400
-		
-		# Build image content for OpenAI
-		if image_url:
-			image_content = {"type": "image_url", "image_url": {"url": image_url}}
-		elif image_base64:
-			image_content = {"type": "image_url", "image_url": {"url": f"data:image/{image_format};base64,{image_base64}"}}
-		else:
-			return jsonify({"error": "Could not process image"}), 400
-		
-		# Call OpenAI Vision with specific prompt
+		# Call OpenAI Vision - same as vision-detect, just different prompt
 		client = OpenAI(api_key=api_key)
 		response = client.chat.completions.create(
-			model="gpt-4o-mini",  # Vision-capable model
+			model="gpt-4o-mini",
 			messages=[
 				{
 					"role": "user",
 					"content": [
 						{
 							"type": "text",
-							"text": "You are a fitness exercise recognition model. Identify the main exercise being performed in the image. Respond with ONLY the exercise name in English. If unsure, respond with: unknown exercise."
+							"text": "Welke oefening is dit? Geef alleen de naam van de oefening in het Engels, bijvoorbeeld 'bench press' of 'squat'. Als je geen oefening ziet, antwoord met 'unknown exercise'."
 						},
-						image_content
+						{
+							"type": "image_url",
+							"image_url": {"url": f"data:image/{image_format};base64,{image_base64}"}
+						}
 					]
 				}
 			],
-			max_tokens=50  # Keep response short
+			max_tokens=50
 		)
 		
-		# Extract exercise name from response
+		# Extract response (same as vision-detect)
 		if response.choices and len(response.choices) > 0:
 			response_content = response.choices[0].message.content
 			if response_content:
-				exercise_name = response_content.strip()
-				print(f"[DEBUG] OpenAI raw response: {exercise_name}")
+				exercise_name = response_content.strip().lower()
 				
-				# Convert to lowercase for comparison
-				exercise_lower = exercise_name.lower()
+				# Clean up
+				exercise_name = exercise_name.strip('"\'.,;:!?')
+				exercise_name = exercise_name.replace("dit is een ", "").replace("dit is ", "")
+				exercise_name = exercise_name.replace("this is a ", "").replace("this is ", "")
+				exercise_name = exercise_name.replace("looks like ", "").replace("appears to be ", "")
+				exercise_name = " ".join(exercise_name.split())
 				
-				# Check if it's unknown/unsure
-				if "unknown" in exercise_lower or "unsure" in exercise_lower or "cannot" in exercise_lower or "unable" in exercise_lower:
+				# Check if unknown
+				if "unknown exercise" in exercise_name or len(exercise_name) < 3:
 					exercise_name = "unknown exercise"
-				else:
-					# Clean up: remove quotes, periods, extra whitespace
-					exercise_name = exercise_name.strip('"\'.,').strip()
-					# Convert to lowercase for consistency
-					exercise_name = exercise_name.lower()
-					# Replace underscores with spaces for readability
-					exercise_name = exercise_name.replace("_", " ")
 				
-				print(f"[DEBUG] Final exercise name: {exercise_name}")
-				# Return clean JSON response
+				print(f"[DEBUG] Exercise detected: '{exercise_name}'")
 				return jsonify({"exercise": exercise_name}), 200
 		
-		# Fallback if OpenAI response is empty
-		print("[DEBUG] OpenAI returned empty response")
 		return jsonify({"exercise": "unknown exercise"}), 200
 		
 	except Exception as e:
