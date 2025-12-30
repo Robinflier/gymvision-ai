@@ -1077,12 +1077,20 @@ def vision_detect():
 		
 		# Fallback if OpenAI response is empty
 		print("[ERROR] OpenAI returned empty response")
-		return jsonify({"success": False, "error": "No response from AI"}), 500
+	# Return a friendly message instead of error
+		return jsonify({
+			"success": True,
+			"message": "Sorry, ik kon de oefening niet goed identificeren. Kun je een duidelijkere foto maken?"
+		}), 200
 	except Exception as e:
 		print(f"[ERROR] Vision detect error: {e}")
 		import traceback
 		traceback.print_exc()
-		return jsonify({"success": False, "error": str(e)}), 500
+		# Return a friendly message instead of technical error
+		return jsonify({
+			"success": True,
+			"message": "Sorry, er ging iets mis. Kun je het opnieuw proberen met een andere foto?"
+		}), 200
 
 
 # /predict endpoint removed - now using /api/vision-detect with OpenAI Vision
@@ -1238,7 +1246,7 @@ Examples:
 		
 		# Wrap API call in try-except to catch any Groq SDK errors
 		try:
-				response = client.chat.completions.create(
+			response = client.chat.completions.create(
 			model="llama-3.3-70b-versatile",
 			messages=[
 				{"role": "system", "content": "You are a fitness expert. Return ONLY valid JSON, no explanations. Start your response with { and end with }."},

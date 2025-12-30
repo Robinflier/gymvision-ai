@@ -3914,13 +3914,14 @@ function openAIDetectChat() {
 				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
 				if (loadingEl) loadingEl.remove();
 				
+				// ALWAYS show something - even if it's an error, show it in the chat
 				if (data.success && data.message) {
 					// Show AI chat response
 					addAIDetectChatMessage('bot', data.message, null);
 				} else {
-					// Error from backend
+					// Error from backend - show in chat, don't show error modal
 					const errorMsg = data.error || 'Er ging iets mis. Probeer het opnieuw.';
-					addAIDetectChatMessage('bot', errorMsg, null);
+					addAIDetectChatMessage('bot', `Sorry, ${errorMsg.toLowerCase()}`, null);
 				}
 			} catch (e) {
 				// Remove loading message
