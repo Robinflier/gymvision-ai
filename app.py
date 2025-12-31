@@ -1309,17 +1309,24 @@ def recognize_exercise():
 		# Get image file (same as vision-detect)
 		file = request.files.get("image")
 		if not file:
+			print("[ERROR] No file in request")
 			return jsonify({"exercise": "unknown exercise"}), 200
+		
+		print(f"[DEBUG] File received: {file.filename}, content_type: {file.content_type}")
 		
 		# Get OpenAI API key
 		api_key = os.getenv("OPENAI_API_KEY")
 		if not api_key:
+			print("[ERROR] OPENAI_API_KEY not set")
 			return jsonify({"exercise": "unknown exercise"}), 200
 		
 		# Read image and encode (same as vision-detect)
 		image_bytes = file.read()
 		if not image_bytes:
+			print("[ERROR] Image bytes is empty")
 			return jsonify({"exercise": "unknown exercise"}), 200
+		
+		print(f"[DEBUG] Image size: {len(image_bytes)} bytes")
 		
 		image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 		
@@ -1330,7 +1337,7 @@ def recognize_exercise():
 		elif file.content_type and "webp" in file.content_type:
 			image_format = "webp"
 		
-		# Call OpenAI Vision - same as vision-detect, just different prompt
+		# Call OpenAI Vision - FORCE it to always give an exercise
 		client = OpenAI(api_key=api_key)
 		response = client.chat.completions.create(
 			model="gpt-4o-mini",
@@ -1340,7 +1347,7 @@ def recognize_exercise():
 					"content": [
 						{
 							"type": "text",
-							"text": "Welke oefening is dit? Geef alleen de naam van de oefening in het Engels, bijvoorbeeld 'bench press' of 'squat'. Als je geen oefening ziet, antwoord met 'unknown exercise'."
+							"text": "What exercise is this? Respond with ONLY the exercise name in English (e.g. 'bench press', 'squat', 'deadlift'). Make your best guess. If you see any person or movement, identify it as an exercise. Only say 'unknown exercise' if the image is completely blank or shows no person at all."
 						},
 						{
 							"type": "image_url",
@@ -1349,29 +1356,48 @@ def recognize_exercise():
 					]
 				}
 			],
-			max_tokens=50
+			max_tokens=50,
+			temperature=0.3  # Lower temperature for more consistent responses
 		)
 		
-		# Extract response (same as vision-detect)
+		# Extract response
 		if response.choices and len(response.choices) > 0:
 			response_content = response.choices[0].message.content
 			if response_content:
-				exercise_name = response_content.strip().lower()
+				raw_response = response_content.strip()
+				print(f"[DEBUG] OpenAI raw response: '{raw_response}'")
 				
-				# Clean up
+				exercise_name = raw_response.lower()
+				
+				# Clean up - remove common prefixes and phrases
 				exercise_name = exercise_name.strip('"\'.,;:!?')
 				exercise_name = exercise_name.replace("dit is een ", "").replace("dit is ", "")
 				exercise_name = exercise_name.replace("this is a ", "").replace("this is ", "")
 				exercise_name = exercise_name.replace("looks like ", "").replace("appears to be ", "")
-				exercise_name = " ".join(exercise_name.split())
+				exercise_name = exercise_name.replace("i see a ", "").replace("i see ", "")
+				exercise_name = exercise_name.replace("it's a ", "").replace("it is a ", "")
+				exercise_name = exercise_name.replace("probably a ", "").replace("likely a ", "")
+				exercise_name = " ".join(exercise_name.split())  # Normalize whitespace
 				
-				# Check if unknown
-				if "unknown exercise" in exercise_name or len(exercise_name) < 3:
+				# ONLY mark as unknown if EXPLICITLY stated
+				# Accept everything else, even if weird
+				if exercise_name == "unknown exercise" or exercise_name == "unknown":
+					# Try one more time with a different prompt if we get unknown
+					print("[DEBUG] Got 'unknown', trying again with different prompt...")
+					# For now, just return unknown - but we could retry here
 					exercise_name = "unknown exercise"
+				elif len(exercise_name.strip()) < 2:
+					# Too short, but still try to use it
+					exercise_name = "unknown exercise"
+				else:
+					# We have something - use it!
+					# Don't mark as unknown even if it's weird
+					pass
 				
-				print(f"[DEBUG] Exercise detected: '{exercise_name}'")
+				print(f"[DEBUG] Final exercise: '{exercise_name}'")
 				return jsonify({"exercise": exercise_name}), 200
 		
+		print("[DEBUG] No response from OpenAI")
 		return jsonify({"exercise": "unknown exercise"}), 200
 		
 	except Exception as e:
