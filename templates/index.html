@@ -287,8 +287,8 @@
 			</header>
 			<button id="continue-workout-btn" class="btn primary start-workout-btn hidden" style="margin:22px 22px 12px;width:calc(100% - 44px);display:none">Continue workout</button>
 			<div id="start-workout-buttons" style="display:flex;gap:10px;margin:22px 22px 20px;">
-				<button id="ai-workout-btn" class="btn primary" style="flex:1">AI Workout</button>
-				<button id="manual-workout-btn" class="btn" style="flex:1">Manual Workout</button>
+				<button id="ai-workout-btn" class="btn primary" style="flex:1;touch-action:manipulation;-webkit-touch-callout:none;" onclick="console.log('AI onclick fired'); if(window.startAIWorkout){window.startAIWorkout();}else{alert('App loading...');} return false;" ontouchstart="console.log('AI touchstart fired'); if(window.startAIWorkout){window.startAIWorkout();}else{alert('App loading...');} return false;">AI Workout</button>
+				<button id="manual-workout-btn" class="btn" style="flex:1;touch-action:manipulation;-webkit-touch-callout:none;" onclick="console.log('Manual onclick fired'); if(window.startNewWorkout){window.startNewWorkout();}else{alert('App loading...');} return false;" ontouchstart="console.log('Manual touchstart fired'); if(window.startNewWorkout){window.startNewWorkout();}else{alert('App loading...');} return false;">Manual Workout</button>
 			</div>
 			<h2 style="padding:0 22px 12px;margin:0;font-size:24px;font-weight:800">Your Workouts <span id="workouts-count" style="color:var(--sub);font-size:14px">(0)</span></h2>
 			<ul id="workouts-list" class="workouts-main-list"></ul>
@@ -337,7 +337,7 @@
 					<h3>Weight Chart</h3>
 					<input type="date" id="progress-date" class="progress-chart-date-input" required>
 				</div>
-				<div class="progress-chart-wrapper">
+				<div class="progress-chart-wrapper" data-unit="kg">
 					<canvas id="progress-chart"></canvas>
 					<div id="progress-empty" class="progress-empty">No data yet</div>
 					<div id="progress-y-labels" class="progress-y-labels"></div>
@@ -455,7 +455,8 @@
 					<!-- Notifications Toggle -->
 					<div class="settings-option-item">
 						<div class="settings-option-left">
-							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+							<img src="static/images/notification-icon.png" alt="Notifications" class="settings-icon" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:none; width:20px; height:20px; color:#dfe0e6; flex-shrink:0;">
 								<path d="M10 2C8.9 2 8 2.9 8 4V5.58C6.84 6.42 6 7.85 6 9.5V13L4 15V16H16V15L14 13V9.5C14 7.85 13.16 6.42 12 5.58V4C12 2.9 11.1 2 10 2Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
 								<path d="M8 16V17C8 18.1 8.9 19 10 19C11.1 19 12 18.1 12 17V16" stroke="currentColor" stroke-width="1.5" fill="none"/>
 							</svg>
@@ -475,7 +476,8 @@
 					<!-- Unit Toggle (kg/lbs) -->
 					<div class="settings-option-item">
 						<div class="settings-option-left">
-							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+							<img src="static/images/weight-icon.png" alt="Weight Unit" class="settings-icon" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:none; width:20px; height:20px; color:#dfe0e6; flex-shrink:0;">
 								<circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.5" fill="none"/>
 								<path d="M10 4V16M4 10H16" stroke="currentColor" stroke-width="1.5" fill="none"/>
 							</svg>
@@ -697,15 +699,15 @@
 		</div>
 
 	<footer class="navbar" id="main-navbar">
-			<button class="nav-btn active" data-tab="workouts">
+			<button class="nav-btn active" data-tab="workouts" onclick="console.log('Nav workouts clicked'); if(window.switchTab){window.switchTab('workouts');} return false;" ontouchstart="console.log('Nav workouts touched'); if(window.switchTab){window.switchTab('workouts');} return false;" style="touch-action:manipulation;-webkit-touch-callout:none;">
 				<img src="static/nav/dumbell.png" alt="Workouts" class="nav-icon" />
 				<span>Workouts</span>
 			</button>
-			<button class="nav-btn" data-tab="progress">
+			<button class="nav-btn" data-tab="progress" onclick="console.log('Nav progress clicked'); if(window.switchTab){window.switchTab('progress');} return false;" ontouchstart="console.log('Nav progress touched'); if(window.switchTab){window.switchTab('progress');} return false;" style="touch-action:manipulation;-webkit-touch-callout:none;">
 				<img src="static/nav/progress.png" alt="Progress" class="nav-icon" />
 				<span>Progress</span>
 			</button>
-			<button class="nav-btn" data-tab="settings">
+			<button class="nav-btn" data-tab="settings" onclick="console.log('Nav settings clicked'); if(window.switchTab){window.switchTab('settings');} return false;" ontouchstart="console.log('Nav settings touched'); if(window.switchTab){window.switchTab('settings');} return false;" style="touch-action:manipulation;-webkit-touch-callout:none;">
 				<img src="static/nav/settings.png" alt="Settings" class="nav-icon" />
 				<span>Settings</span>
 			</button>
