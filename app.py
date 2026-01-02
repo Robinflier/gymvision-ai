@@ -203,18 +203,24 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 "chest_press_machine": {"display": "Chest Press Machine", "muscles": normalize_muscles(["Chest", "Triceps", "Shoulders"]), "video": "https://www.youtube.com/embed/65npK4Ijz1c", "image": "https://strengthlevel.com/images/illustrations/chest-press.png"},
 "push_up": {"display": "Push-Up", "muscles": normalize_muscles(["Chest", "Triceps", "Shoulders"]), "video": "https://www.youtube.com/embed/WDIpL0pjun0", "image": "https://strengthlevel.com/images/illustrations/push-up.png"},
 "incline_dumbbell_press": {"display": "Incline Dumbbell Press", "muscles": normalize_muscles(["Chest", "Shoulders", "Triceps"]), "video": "https://www.youtube.com/embed/jMQA3XtJSgo", "image": "https://strengthlevel.com/images/illustrations/incline-dumbbell-press.png"},
-"decline_dumbbell_press": {"display": "Decline Dumbbell Press", "muscles": normalize_muscles(["Chest", "Triceps", "Shoulders"]), "video": "https://www.youtube.com/embed/2B6WxyLaIrE", "image": "https://strengthlevel.com/images/illustrations/decline-dumbbell-press.png"},
+	"decline_dumbbell_press": {"display": "Decline Dumbbell Press", "muscles": normalize_muscles(["Chest", "Triceps", "Shoulders"]), "video": "https://www.youtube.com/embed/2B6WxyLaIrE", "image": "https://strengthlevel.com/images/illustrations/decline-dumbbell-press.png"},
+	"cable_fly": {"display": "Cable Fly", "muscles": normalize_muscles(["Chest", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/hhruLxo9yZU", "image": "/images/cablefly.jpg"},
+	"incline_cable_fly": {"display": "Incline Cable Fly", "muscles": normalize_muscles(["Chest", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/hhruLxo9yZU", "image": "/images/inclinecablefly.jpg"},
 
 	# Back
-"pull_up": {"display": "Pull-Up", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/eGo4IYlbE5g", "image": "https://strengthlevel.com/images/illustrations/pull-up.png"},
-"chin_up": {"display": "Chin-Up", "muscles": normalize_muscles(["Biceps", "Back", "Shoulders"]), "video": "https://www.youtube.com/embed/8mryJ3w2S78", "image": "https://strengthlevel.com/images/illustrations/chin-up.png"},
+	"pull_up": {"display": "Pull-Up", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/eGo4IYlbE5g", "image": "https://strengthlevel.com/images/illustrations/pull-up.png"},
+	"weighted_pull_up": {"display": "Weighted Pull-Up", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/eGo4IYlbE5g", "image": "/images/weightedpullup.jpg"},
+	"chin_up": {"display": "Chin-Up", "muscles": normalize_muscles(["Biceps", "Back", "Shoulders"]), "video": "https://www.youtube.com/embed/8mryJ3w2S78", "image": "https://strengthlevel.com/images/illustrations/chin-up.png"},
 	"lat_pulldown": {"display": "Lat Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/JGeRYIZdojU", "image": "https://strengthlevel.com/images/illustrations/lat-pulldown.png"},
 "wide_grip_pulldown": {"display": "Wide Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/YCKPD4BSD2E", "image": "https://strengthlevel.com/images/illustrations/wide-grip-pulldown.png"},
-"close_grip_pulldown": {"display": "Close Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/IjoFCmLX7z0", "image": "https://strengthlevel.com/images/illustrations/close-grip-pulldown.png"},
-"straight_arm_pulldown": {"display": "Straight Arm Pulldown", "muscles": normalize_muscles(["Back", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/G9uNaXGTJ4w", "image": "https://strengthlevel.com/images/illustrations/straight-arm-pulldown.png"},
+	"close_grip_pulldown": {"display": "Close Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/IjoFCmLX7z0", "image": "https://strengthlevel.com/images/illustrations/close-grip-pulldown.png"},
+	"reverse_grip_pulldown": {"display": "Reverse Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/IjoFCmLX7z0", "image": "/images/reversegrippulldown.jpg"},
+	"straight_arm_pulldown": {"display": "Straight Arm Pulldown", "muscles": normalize_muscles(["Back", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/G9uNaXGTJ4w", "image": "https://strengthlevel.com/images/illustrations/straight-arm-pulldown.png"},
 "seated_row": {"display": "Seated Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/UCXxvVItLoM", "image": "https://strengthlevel.com/images/illustrations/seated-row.png"},
 	"t_bar_row": {"display": "T-Bar Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/yPis7nlbqdY", "image": "https://strengthlevel.com/images/illustrations/t-bar-row.png"},
+	"chest_supported_t_bar_row": {"display": "Chest Supported T-Bar Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/yPis7nlbqdY", "image": "/images/chestsupportedtbarrow.jpg"},
 	"bent_over_row": {"display": "Bent Over Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/6FZHJGzMFEc", "image": "https://strengthlevel.com/images/illustrations/bent-over-row.png"},
+	"smith_machine_bent_over_row": {"display": "Smith Machine Bent Over Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/6FZHJGzMFEc", "image": "/images/smithmachinebentoverrow.jpg"},
 	"one_arm_dumbbell_row": {"display": "One Arm Dumbbell Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/DMo3HJoawrU", "image": "https://strengthlevel.com/images/illustrations/one-arm-dumbbell-row.png"},
 	"chest_supported_row": {"display": "Chest Supported Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/tZUYS7X50so", "image": "https://strengthlevel.com/images/illustrations/chest-supported-row.png"},
 	"lat_pullover_machine": {"display": "Lat Pullover Machine", "muscles": normalize_muscles(["Back", "Chest", "-"]), "video": "https://www.youtube.com/embed/oxpAl14EYyc", "image": "https://strengthlevel.com/images/illustrations/lat-pullover.png"},
@@ -234,6 +240,8 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"reverse_pec_deck": {"display": "Reverse Pec Deck", "muscles": normalize_muscles(["Shoulders", "Back", "-"]), "video": "https://www.youtube.com/embed/jw7oFFBnwCU", "image": "https://strengthlevel.com/images/illustrations/reverse-pec-deck.png"},
 	"upright_row": {"display": "Upright Row", "muscles": normalize_muscles(["Shoulders", "Triceps", "-"]), "video": "https://www.youtube.com/embed/um3VVzqunPU", "image": "https://strengthlevel.com/images/illustrations/upright-row.png"},
 	"cable_face_pull": {"display": "Cable Face Pull", "muscles": normalize_muscles(["Shoulders", "Back", "-"]), "video": "https://www.youtube.com/embed/0Po47vvj9g4", "image": "https://strengthlevel.com/images/illustrations/face-pull.png"},
+	"shrugs": {"display": "Shrugs", "muscles": normalize_muscles(["Shoulders", "-", "-"]), "video": "https://www.youtube.com/embed/NAqCVe2mwzE", "image": "https://strengthlevel.com/images/illustrations/barbell-shrug.png"},
+	"cable_lateral_raise": {"display": "Cable Lateral Raise", "muscles": normalize_muscles(["Shoulders", "-", "-"]), "video": "https://www.youtube.com/embed/xMEs3zEzS8s", "image": "https://strengthlevel.com/images/illustrations/cable-lateral-raise.png"},
 
 	# Biceps
 	"barbell_curl": {"display": "Barbell Curl", "muscles": normalize_muscles(["Biceps", "-", "-"]), "video": "https://www.youtube.com/embed/N5x5M1x1Gd0", "image": "https://strengthlevel.com/images/illustrations/barbell-curl.png"},
@@ -242,6 +250,8 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"hammer_curl": {"display": "Hammer Curl", "muscles": normalize_muscles(["Biceps", "-", "-"]), "video": "https://www.youtube.com/embed/fM0TQLoesLs", "image": "https://strengthlevel.com/images/illustrations/hammer-curl.png"},
 	"preacher_curl": {"display": "Preacher Curl", "muscles": normalize_muscles(["Biceps", "-", "-"]), "video": "https://www.youtube.com/embed/Ja6ZlIDONac", "image": "https://strengthlevel.com/images/illustrations/preacher-curl.png"},
 	"cable_curl": {"display": "Cable Curl", "muscles": normalize_muscles(["Biceps", "-", "-"]), "video": "https://www.youtube.com/embed/F3Y03RnVY8Y", "image": "https://strengthlevel.com/images/illustrations/cable-curl.png"},
+	"cable_hammer_curl": {"display": "Cable Hammer Curl", "muscles": normalize_muscles(["Biceps", "-", "-"]), "video": "https://www.youtube.com/embed/fM0TQLoesLs", "image": "/images/cablehammercurl.jpg"},
+	"bayesian_curl": {"display": "Bayesian Curl", "muscles": normalize_muscles(["Biceps", "-", "-"]), "video": "https://www.youtube.com/embed/F3Y03RnVY8Y", "image": "/images/bayesiancurl.jpg"},
 	"incline_dumbbell_curl": {"display": "Incline Dumbbell Curl", "muscles": normalize_muscles(["Biceps", "-", "-"]), "video": "https://www.youtube.com/embed/aG7CXiKxepw", "image": "https://strengthlevel.com/images/illustrations/incline-dumbbell-curl.png"},
 	"ez_bar_curl": {"display": "EZ Bar Curl", "muscles": normalize_muscles(["Biceps", "-", "-"]), "video": "https://www.youtube.com/embed/-gSM-kqNlUw", "image": "https://strengthlevel.com/images/illustrations/ez-bar-curl.png"},
 	"reverse_curl": {"display": "Reverse Curl", "muscles": normalize_muscles(["Biceps", "-", "-"]), "video": "https://www.youtube.com/embed/hUA-fIpM7nA", "image": "https://strengthlevel.com/images/illustrations/reverse-curl.png"},
@@ -253,6 +263,7 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"cable_overhead_extension": {"display": "Cable Overhead Extension", "muscles": normalize_muscles(["Triceps", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/ns-RGsbzqok", "image": "https://strengthlevel.com/images/illustrations/cable-overhead-extension.png"},
 	"close_grip_bench_press": {"display": "Close Grip Bench Press", "muscles": normalize_muscles(["Triceps", "Chest", "-"]), "video": "https://www.youtube.com/embed/FiQUzPtS90E", "image": "https://strengthlevel.com/images/illustrations/close-grip-bench-press.png"},
 	"dips": {"display": "Dips", "muscles": normalize_muscles(["Triceps", "Chest", "Shoulders"]), "video": "https://www.youtube.com/embed/oA8Sxv2WeOs", "image": "https://strengthlevel.com/images/illustrations/dip.png"},
+	"weighted_dip": {"display": "Weighted Dip", "muscles": normalize_muscles(["Triceps", "Chest", "Shoulders"]), "video": "https://www.youtube.com/embed/oA8Sxv2WeOs", "image": "/images/weighteddip.jpg"},
 	"seated_dip_machine": {"display": "Seated Dip Machine", "muscles": normalize_muscles(["Triceps", "Chest", "-"]), "video": "https://www.youtube.com/embed/Zg0tT27iYuY", "image": "https://strengthlevel.com/images/illustrations/seated-dip.png"},
 	"skull_crusher": {"display": "Skull Crusher", "muscles": normalize_muscles(["Triceps", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/l3rHYPtMUo8", "image": "https://strengthlevel.com/images/illustrations/skull-crusher.png"},
 	"rope_pushdown": {"display": "Rope Pushdown", "muscles": normalize_muscles(["Triceps", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/-xa-6cQaZKY", "image": "https://strengthlevel.com/images/illustrations/rope-pushdown.png"},
@@ -280,6 +291,7 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 
 	# Glutes
 	"hip_thrust": {"display": "Hip Thrust", "muscles": normalize_muscles(["Glutes", "Hamstrings", "-"]), "video": "https://www.youtube.com/embed/pUdIL5x0fWg", "image": "https://strengthlevel.com/images/illustrations/hip-thrust.png"},
+	"smith_machine_hip_thrust": {"display": "Smith Machine Hip Thrust", "muscles": normalize_muscles(["Glutes", "Hamstrings", "-"]), "video": "https://www.youtube.com/embed/pUdIL5x0fWg", "image": "/images/hipthrust.jpg"},
 	"cable_kickback": {"display": "Cable Kickback", "muscles": normalize_muscles(["Glutes", "Hamstrings", "-"]), "video": "https://www.youtube.com/embed/zjVK1sOqFdw", "image": "https://strengthlevel.com/images/illustrations/cable-kickback.png"},
 	"abductor_machine": {"display": "Abductor Machine", "muscles": normalize_muscles(["Glutes", "-", "-"]), "video": "https://www.youtube.com/embed/G_8LItOiZ0Q", "image": "https://strengthlevel.com/images/illustrations/hip-abduction.png"},
 	"adductor_machine": {"display": "Adductor Machine", "muscles": normalize_muscles(["Glutes", "-", "-"]), "video": "https://www.youtube.com/embed/CjAVezAggkI", "image": "https://strengthlevel.com/images/illustrations/hip-adduction.png"},
@@ -288,6 +300,7 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"standing_calf_raise": {"display": "Standing Calf Raise", "muscles": normalize_muscles(["Calves", "-", "-"]), "video": "https://www.youtube.com/embed/g_E7_q1z2bo", "image": "https://strengthlevel.com/images/illustrations/standing-calf-raise.png"},
 	"seated_calf_raise": {"display": "Seated Calf Raise", "muscles": normalize_muscles(["Calves", "-", "-"]), "video": "https://www.youtube.com/embed/2Q-HQ3mnePg", "image": "https://strengthlevel.com/images/illustrations/seated-calf-raise.png"},
 	"leg_press_calf_raise": {"display": "Leg Press Calf Raise", "muscles": normalize_muscles(["Calves", "-", "-"]), "video": "https://www.youtube.com/embed/KxEYX_cuesM", "image": "https://strengthlevel.com/images/illustrations/leg-press-calf-raise.png"},
+	"calf_press_machine": {"display": "Calf Press Machine", "muscles": normalize_muscles(["Calves", "-", "-"]), "video": "https://www.youtube.com/embed/KxEYX_cuesM", "image": "/images/calfpressmachine.jpg"},
 	"donkey_calf_raise": {"display": "Donkey Calf Raise", "muscles": normalize_muscles(["Calves", "-", "-"]), "video": "https://www.youtube.com/embed/r30EoMPSNns", "image": "https://strengthlevel.com/images/illustrations/donkey-calf-raise.png"},
 
 	# Abs
@@ -298,6 +311,7 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"knee_raise": {"display": "Knee Raise", "muscles": normalize_muscles(["Abs", "-", "-"]), "video": "https://www.youtube.com/embed/RD_A-Z15ER4", "image": "https://strengthlevel.com/images/illustrations/knee-raise.png"},
 	"russian_twist": {"display": "Russian Twist", "muscles": normalize_muscles(["Abs", "Back", "-"]), "video": "https://www.youtube.com/embed/99T1EfpMwPA", "image": "https://strengthlevel.com/images/illustrations/russian-twist.png"},
 	"rotary_torso_machine": {"display": "Rotary Torso Machine", "muscles": normalize_muscles(["Abs", "Back", "-"]), "video": "https://www.youtube.com/embed/h5naeryzGjE", "image": "https://strengthlevel.com/images/illustrations/rotary-torso.png"},
+	"ab_crunch_machine": {"display": "Ab Crunch Machine", "muscles": normalize_muscles(["Abs", "-", "-"]), "video": "https://www.youtube.com/embed/NnVhqMQRvmM", "image": "/images/abcrunchmachine.jpg"},
 	# Generic detections (for display purposes only)
 	"chinning_dipping": {"display": "Chinning Dipping", "muscles": [], "video": "", "image": ""},
 	"leg_raise_tower": {"display": "Leg Raise Tower", "muscles": [], "video": "", "image": ""},
@@ -1347,7 +1361,7 @@ def recognize_exercise():
 					"content": [
 						{
 							"type": "text",
-							"text": "What exercise is this? Respond with ONLY the exercise name in English (e.g. 'bench press', 'squat', 'deadlift'). Make your best guess. If you see any person or movement, identify it as an exercise. Only say 'unknown exercise' if the image is completely blank or shows no person at all."
+							"text": "What exercise is being performed in this image? Respond with ONLY the exercise name in English (e.g. 'bench press', 'squat', 'deadlift', 'bicep curl'). Always make your best guess - even if you're not 100% sure, give the most likely exercise name. Only respond with 'unknown exercise' if the image is completely blank, shows no person, or shows something that is clearly not a fitness exercise at all."
 						},
 						{
 							"type": "image_url",
