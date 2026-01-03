@@ -20,9 +20,7 @@ except ImportError:
 
 from flask import Flask, jsonify, render_template, request, send_from_directory, redirect, url_for, flash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from flask_mail import Mail, Message
 from flask_cors import CORS
-import secrets
 
 try:
 	from supabase import create_client, Client
@@ -146,15 +144,7 @@ CORS(app, resources={
 	r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}
 })
 
-# Flask-Mail setup
-app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
-app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'true').lower() in ['true', 'on', '1']
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', '')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', '')
-app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@gymvision.ai')
-
-mail = Mail(app)
+# Flask-Mail removed - using Supabase for email verification
 
 # Flask-Login setup
 login_manager = LoginManager()
@@ -216,7 +206,8 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"close_grip_pulldown": {"display": "Close Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/IjoFCmLX7z0", "image": "https://strengthlevel.com/images/illustrations/close-grip-pulldown.png"},
 	"reverse_grip_pulldown": {"display": "Reverse Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/scy-QV06nuA", "image": "/images/reversegrippulldown.jpg"},
 	"straight_arm_pulldown": {"display": "Straight Arm Pulldown", "muscles": normalize_muscles(["Back", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/G9uNaXGTJ4w", "image": "https://strengthlevel.com/images/illustrations/straight-arm-pulldown.png"},
-"seated_row": {"display": "Seated Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/UCXxvVItLoM", "image": "https://strengthlevel.com/images/illustrations/seated-row.png"},
+	"seated_row": {"display": "Seated Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/UCXxvVItLoM", "image": "https://strengthlevel.com/images/illustrations/seated-row.png"},
+	"seated_machine_row": {"display": "Seated Machine Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/TeFo51Q_Nsc", "image": "/images/seatedmachinerow.jpg"},
 	"t_bar_row": {"display": "T-Bar Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/yPis7nlbqdY", "image": "https://strengthlevel.com/images/illustrations/t-bar-row.png"},
 	"chest_supported_t_bar_row": {"display": "Chest Supported T-Bar Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/0UBRfiO4zDs", "image": "/images/chestsupportedtbarrow.jpg"},
 	"bent_over_row": {"display": "Bent Over Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/6FZHJGzMFEc", "image": "https://strengthlevel.com/images/illustrations/bent-over-row.png"},
@@ -282,16 +273,21 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"smith_machine_incline_bench_press": {"display": "Smith Machine Incline Bench Press", "muscles": normalize_muscles(["Chest", "Shoulders", "Triceps"]), "video": "https://www.youtube.com/embed/8urE8Z8AMQ4", "image": "https://strengthlevel.com/images/illustrations/incline-bench-press.png"},
 	"smith_machine_decline_bench_press": {"display": "Smith Machine Decline Bench Press", "muscles": normalize_muscles(["Chest", "Triceps", "Shoulders"]), "video": "https://www.youtube.com/embed/R1Cwq8rJ_bI", "image": "https://strengthlevel.com/images/illustrations/decline-bench-press.png"},
 	"smith_machine_shoulder_press": {"display": "Smith Machine Shoulder Press", "muscles": normalize_muscles(["Shoulders", "Triceps", "-"]), "video": "https://www.youtube.com/embed/OLqZDUUD2b0", "image": "https://strengthlevel.com/images/illustrations/machine-shoulder-press.png"},
+	"smith_machine_step_up": {"display": "Smith Machine Step Up", "muscles": normalize_muscles(["Quads", "Glutes", "-"]), "video": "https://www.youtube.com/embed/qYFlvmFu2wE", "image": "/images/smithmachinestepup.jpg"},
+	"cable_step_up": {"display": "Cable Step Up", "muscles": normalize_muscles(["Quads", "Glutes", "-"]), "video": "https://www.youtube.com/embed/IHIvl5uQzSs", "image": "/images/cablestepup.jpg"},
 	"goblet_squat": {"display": "Goblet Squat", "muscles": normalize_muscles(["Quads", "Glutes", "Hamstrings"]), "video": "https://www.youtube.com/embed/pEGfGwp6IEA", "image": "https://strengthlevel.com/images/illustrations/goblet-squat.png"},
 
 	# Hamstrings
 	"lying_leg_curl": {"display": "Lying Leg Curl", "muscles": normalize_muscles(["Hamstrings", "Glutes", "-"]), "video": "https://www.youtube.com/embed/SbSNUXPRkc8", "image": "https://strengthlevel.com/images/illustrations/lying-leg-curl.png"},
 	"seated_leg_curl_machine": {"display": "Seated Leg Curl Machine", "muscles": normalize_muscles(["Hamstrings", "Glutes", "-"]), "video": "https://www.youtube.com/embed/Orxowest56U", "image": "https://strengthlevel.com/images/illustrations/seated-leg-curl.png"},
+	"stiff_leg_deadlift": {"display": "Stiff Leg Deadlift", "muscles": normalize_muscles(["Hamstrings", "Glutes", "Back"]), "video": "https://www.youtube.com/embed/CN_7cz3P-1U", "image": "/images/stifflegdeadlift.jpg"},
 	"good_morning": {"display": "Good Morning", "muscles": normalize_muscles(["Hamstrings", "Glutes", "Back"]), "video": "https://www.youtube.com/embed/dEJ0FTm-CEk", "image": "https://strengthlevel.com/images/illustrations/good-morning.png"},
 
 	# Glutes
 	"hip_thrust": {"display": "Hip Thrust", "muscles": normalize_muscles(["Glutes", "Hamstrings", "-"]), "video": "https://www.youtube.com/embed/pUdIL5x0fWg", "image": "https://strengthlevel.com/images/illustrations/hip-thrust.png"},
+	"hip_thrust_machine": {"display": "Hip Thrust Machine", "muscles": normalize_muscles(["Glutes", "Hamstrings", "-"]), "video": "https://www.youtube.com/embed/ZSPmIyX9RZs", "image": "/images/hipthrustmachine.jpg"},
 	"smith_machine_hip_thrust": {"display": "Smith Machine Hip Thrust", "muscles": normalize_muscles(["Glutes", "Hamstrings", "-"]), "video": "https://www.youtube.com/embed/CXGJ36cQyWo", "image": "/images/smithmachinehipthrust.jpg"},
+	"smith_machine_donkey_kick": {"display": "Smith Machine Donkey Kick", "muscles": normalize_muscles(["Glutes", "-", "-"]), "video": "https://www.youtube.com/embed/TptGEG-CcQM", "image": "/images/smithmachinedonkeykick.jpg"},
 	"cable_kickback": {"display": "Cable Kickback", "muscles": normalize_muscles(["Glutes", "Hamstrings", "-"]), "video": "https://www.youtube.com/embed/zjVK1sOqFdw", "image": "https://strengthlevel.com/images/illustrations/cable-kickback.png"},
 	"abductor_machine": {"display": "Abductor Machine", "muscles": normalize_muscles(["Glutes", "-", "-"]), "video": "https://www.youtube.com/embed/G_8LItOiZ0Q", "image": "https://strengthlevel.com/images/illustrations/hip-abduction.png"},
 	"adductor_machine": {"display": "Adductor Machine", "muscles": normalize_muscles(["Glutes", "-", "-"]), "video": "https://www.youtube.com/embed/CjAVezAggkI", "image": "https://strengthlevel.com/images/illustrations/hip-adduction.png"},
@@ -351,6 +347,7 @@ ALIASES: Dict[str, str] = {
 	"pull_up": "pull_up",
 	"chin_up": "chin_up",
 	"seated_row": "seated_row",
+	"seated_machine_row": "seated_machine_row",
 	"t_bar_row": "t_bar_row",
 	"bent_over_row": "bent_over_row",
 	"one_arm_dumbbell_row": "one_arm_dumbbell_row",
@@ -359,6 +356,8 @@ ALIASES: Dict[str, str] = {
 	"deadlift": "deadlift",
 	"romanian_deadlift": "romanian_deadlift",
 	"sumo_deadlift": "sumo_deadlift",
+	"stiff_leg_deadlift": "stiff_leg_deadlift",
+	"stiff_legged_deadlift": "stiff_leg_deadlift",
 
 	# Shoulders
 	"shoulder_press_machine": "shoulder_press_machine",
@@ -424,6 +423,8 @@ ALIASES: Dict[str, str] = {
 	"smith_machine_flat_bench_press": "smith_machine_bench_press",
 	"smith_machine_incline_bench_press": "smith_machine_incline_bench_press",
 	"smith_machine_decline_bench_press": "smith_machine_decline_bench_press",
+	"smith_machine_step_up": "smith_machine_step_up",
+	"cable_step_up": "cable_step_up",
 	"goblet_squat": "goblet_squat",
 
 	# Hamstrings
@@ -438,6 +439,8 @@ ALIASES: Dict[str, str] = {
 	"hip_thrust": "hip_thrust",
 	"hip_thruster": "hip_thrust",
 	"hip_truster": "hip_thrust",
+	"hip_thrust_machine": "hip_thrust_machine",
+	"smith_machine_donkey_kick": "smith_machine_donkey_kick",
 	"cable_kickback": "cable_kickback",
 	"hip_abductor_machine": "abductor_machine",
 	"hip_abductor": "abductor_machine",
@@ -499,15 +502,7 @@ def init_db():
 	except sqlite3.OperationalError:
 		pass  # Column already exists
 	
-	cursor.execute("""
-		CREATE TABLE IF NOT EXISTS verification_codes (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			email TEXT NOT NULL,
-			code TEXT NOT NULL,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			expires_at TIMESTAMP
-		)
-	""")
+	# verification_codes table removed - using Supabase for email verification
 	conn.commit()
 	conn.close()
 	print("[INFO] Database initialized")
@@ -520,58 +515,7 @@ def get_db_connection():
 	return conn
 
 
-def generate_verification_code() -> str:
-	"""Generate a 6-digit verification code."""
-	return ''.join([str(secrets.randbelow(10)) for _ in range(6)])
-
-
-def send_verification_email(email: str, code: str) -> bool:
-	"""Send verification code via email."""
-	# Check if email is configured
-	if not app.config.get('MAIL_USERNAME') or not app.config.get('MAIL_PASSWORD'):
-		print(f"[WARNING] Email not configured. MAIL_USERNAME or MAIL_PASSWORD is empty.")
-		print(f"[WARNING] Set environment variables: MAIL_USERNAME and MAIL_PASSWORD")
-		return False
-	
-	try:
-		msg = Message(
-			subject='GymVision AI - Email Verification',
-			recipients=[email],
-			body=f'''Welcome to GymVision AI!
-
-Please verify your email address by entering this code:
-
-{code}
-
-This code will expire in 10 minutes.
-
-If you didn't create an account, please ignore this email.
-
-Best regards,
-GymVision AI Team''',
-			html=f'''<html>
-<body style="font-family: Arial, sans-serif; background-color: #0f0f10; color: #f5f6f7; padding: 20px;">
-	<div style="max-width: 600px; margin: 0 auto; background-color: #1a1a1c; padding: 30px; border-radius: 12px;">
-		<h1 style="color: #8b5cf6;">Welcome to GymVision AI!</h1>
-		<p>Please verify your email address by entering this code:</p>
-		<div style="background-color: #252528; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
-			<h2 style="color: #8b5cf6; font-size: 32px; letter-spacing: 8px; margin: 0;">{code}</h2>
-		</div>
-		<p style="color: #888; font-size: 14px;">This code will expire in 10 minutes.</p>
-		<p style="color: #888; font-size: 14px;">If you didn't create an account, please ignore this email.</p>
-		<p style="margin-top: 30px; color: #888;">Best regards,<br>GymVision AI Team</p>
-	</div>
-</body>
-</html>'''
-		)
-		mail.send(msg)
-		print(f"[INFO] Verification email sent to {email}")
-		return True
-	except Exception as e:
-		print(f"[ERROR] Failed to send verification email: {e}")
-		import traceback
-		traceback.print_exc()
-		return False
+# Email verification functions removed - using Supabase for email verification
 
 
 @login_manager.user_loader
@@ -608,19 +552,12 @@ def login():
 		
 		conn = get_db_connection()
 		user = conn.execute(
-			"SELECT id, email, username, password_hash, email_verified FROM users WHERE email = ?", (email,)
+			"SELECT id, email, username, password_hash FROM users WHERE email = ?", (email,)
 		).fetchone()
 		conn.close()
 		
 		if user and check_password_hash(user["password_hash"], password):
-			# Check if email is verified
-			if not user["email_verified"]:
-				return jsonify({
-					"error": "Email not verified. Please verify your email first.",
-					"needs_verification": True,
-					"email": user["email"]
-				}), 403
-			
+			# Email verification now handled by Supabase
 			user_obj = User(user["id"], user["email"], user["username"])
 			login_user(user_obj, remember=True)
 			return jsonify({"success": True, "message": "Logged in successfully"})
@@ -637,77 +574,9 @@ def login():
 	return render_template("login.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
 
 
-@app.route("/register", methods=["GET", "POST"])
+@app.route("/register", methods=["GET"])
 def register():
-	"""Registration page and handler."""
-	if request.method == "POST":
-		data = request.get_json() or {}
-		email = data.get("email", "").strip().lower()
-		username = data.get("username", "").strip()
-		password = data.get("password", "")
-		
-		if not email or not username or not password:
-			return jsonify({"error": "Email, username, and password are required"}), 400
-		
-		if len(password) < 6:
-			return jsonify({"error": "Password must be at least 6 characters"}), 400
-		
-		if len(username) < 3:
-			return jsonify({"error": "Username must be at least 3 characters"}), 400
-		
-		conn = get_db_connection()
-		try:
-			# Check if email or username already exists
-			existing = conn.execute(
-				"SELECT id FROM users WHERE email = ? OR username = ?", (email, username)
-			).fetchone()
-			if existing:
-				conn.close()
-				return jsonify({"error": "Email or username already exists"}), 400
-			
-			# Create new user (not verified yet)
-			password_hash = generate_password_hash(password)
-			cursor = conn.execute(
-				"INSERT INTO users (email, username, password_hash, email_verified) VALUES (?, ?, ?, 0)",
-				(email, username, password_hash)
-			)
-			conn.commit()
-			user_id = cursor.lastrowid
-			
-			# Generate and save verification code
-			code = generate_verification_code()
-			from datetime import timedelta
-			expires_at = (datetime.now() + timedelta(minutes=10)).isoformat()
-			conn.execute(
-				"INSERT INTO verification_codes (email, code, expires_at) VALUES (?, ?, ?)",
-				(email, code, expires_at)
-			)
-			conn.commit()
-			conn.close()
-			
-			# Send verification email
-			email_sent = send_verification_email(email, code)
-			if email_sent:
-				return jsonify({
-					"success": True,
-					"message": "Account created. Please check your email for verification code.",
-					"email": email
-				})
-			else:
-				# For development: return code in response if email fails
-				# TODO: Remove this in production!
-				print(f"[DEBUG] Email failed. Verification code for {email}: {code}")
-				return jsonify({
-					"success": True,
-					"message": f"Account created. Email could not be sent. Your verification code is: {code}",
-					"email": email,
-					"code": code  # Only for development!
-				})
-		except sqlite3.IntegrityError:
-			conn.close()
-			return jsonify({"error": "Email or username already exists"}), 400
-	
-	# GET request - show register page
+	"""Registration page - registration now handled by Supabase in frontend."""
 	if current_user.is_authenticated:
 		return redirect(url_for("index"))
 	# Load Supabase config from environment variables (safe to expose - these are public anon keys)
@@ -717,104 +586,7 @@ def register():
 	return render_template("register.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
 
 
-@app.route("/verify", methods=["GET", "POST"])
-def verify_email():
-	"""Email verification page and handler."""
-	if request.method == "POST":
-		data = request.get_json() or {}
-		email = data.get("email", "").strip().lower()
-		code = data.get("code", "").strip()
-		
-		if not email or not code:
-			return jsonify({"error": "Email and code are required"}), 400
-		
-		conn = get_db_connection()
-		# Check if code is valid and not expired
-		verification = conn.execute(
-			"SELECT * FROM verification_codes WHERE email = ? AND code = ? AND expires_at > datetime('now') ORDER BY created_at DESC LIMIT 1",
-			(email, code)
-		).fetchone()
-		
-		if not verification:
-			conn.close()
-			return jsonify({"error": "Invalid or expired verification code"}), 400
-		
-		# Mark email as verified
-		conn.execute(
-			"UPDATE users SET email_verified = 1 WHERE email = ?",
-			(email,)
-		)
-		# Delete used verification code
-		conn.execute(
-			"DELETE FROM verification_codes WHERE email = ? AND code = ?",
-			(email, code)
-		)
-		conn.commit()
-		
-		# Get user and auto-login
-		user = conn.execute(
-			"SELECT id, email, username FROM users WHERE email = ?", (email,)
-		).fetchone()
-		conn.close()
-		
-		if user:
-			user_obj = User(user["id"], user["email"], user["username"])
-			login_user(user_obj, remember=True)
-			return jsonify({"success": True, "message": "Email verified successfully"})
-		else:
-			return jsonify({"error": "User not found"}), 404
-	
-	# GET request - show verification page
-	email = request.args.get("email", "")
-	return render_template("verify.html", email=email)
-
-
-@app.route("/resend-code", methods=["POST"])
-def resend_verification_code():
-	"""Resend verification code."""
-	data = request.get_json() or {}
-	email = data.get("email", "").strip().lower()
-	
-	if not email:
-		return jsonify({"error": "Email is required"}), 400
-	
-	conn = get_db_connection()
-	# Check if user exists and is not verified
-	user = conn.execute(
-		"SELECT id, email_verified FROM users WHERE email = ?", (email,)
-	).fetchone()
-	
-	if not user:
-		conn.close()
-		return jsonify({"error": "User not found"}), 404
-	
-	if user["email_verified"]:
-		conn.close()
-		return jsonify({"error": "Email already verified"}), 400
-	
-	# Generate new code
-	code = generate_verification_code()
-	from datetime import timedelta
-	expires_at = (datetime.now() + timedelta(minutes=10)).isoformat()
-	conn.execute(
-		"INSERT INTO verification_codes (email, code, expires_at) VALUES (?, ?, ?)",
-		(email, code, expires_at)
-	)
-	conn.commit()
-	conn.close()
-	
-	# Send email
-	email_sent = send_verification_email(email, code)
-	if email_sent:
-		return jsonify({"success": True, "message": "Verification code sent to your email"})
-	else:
-		# For development: return code in response if email fails
-		print(f"[DEBUG] Email failed. Verification code for {email}: {code}")
-		return jsonify({
-			"success": True,
-			"message": f"Email could not be sent. Your verification code is: {code}",
-			"code": code  # Only for development!
-		})
+# /verify and /resend-code endpoints removed - using Supabase for email verification
 
 
 @app.route("/logout", methods=["POST"])
@@ -1470,10 +1242,13 @@ def exercises_list():
 	# Public endpoint - exercises are not sensitive data
 	exercises = []
 	for key, meta in MACHINE_METADATA.items():
+		# Remove duplicates from muscles array (safety check)
+		muscles = meta.get("muscles", [])
+		unique_muscles = list(dict.fromkeys(muscles))  # Preserves order while removing duplicates
 		exercises.append({
 			"key": key,
 			"display": meta.get("display", key.replace("_", " ").title()),
-			"muscles": meta.get("muscles", []),
+			"muscles": unique_muscles,
 			"image": image_url_for_key(key, meta) or meta.get("image"),
 		})
 	return jsonify({"exercises": exercises})
