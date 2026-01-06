@@ -8,48 +8,82 @@ env/
 venv/
 ENV/
 .venv
+*.egg-info/
+dist/
+build/
 
-# Database
-*.db
-gymvision.db
+# Flask
+instance/
+.webassets-cache
 
 # Environment variables
 .env
 .env.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+gymvision.db
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
 
+# Node modules (if any)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Capacitor / iOS
+ios/App/App/public/
+ios/App/Pods/
+ios/App/.swiftpm/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/
+*.xcuserstate
+*.xcuserdatad
+
+# Android
+android/.gradle/
+android/app/build/
+android/.idea/
+android/local.properties
+
+# Model files (too large for git)
+*.pt
+*.pth
+*.h5
+*.onnx
+*.pb
+best.pt
+best1.pt
+best2.pt
+best3.pt
+best4.pt
+
+# Images (if large)
+# Uncomment if images folder is too large:
+# images/
+# www/static/images/
+
 # Logs
 *.log
+logs/
 
 # Temporary files
 tmp/
 temp/
+*.tmp
 
-# Node
-node_modules/
-npm-debug.log
-
-# Capacitor
-ios/Pods/
-android/.gradle/
-android/app/build/
-
-# ML Models (too large for git)
-*.pt
-*.h5
-*.pkl
-
-# Build files
-dist/
-build/
-*.egg-info/
+# Documentation (optional - uncomment if you don't want docs in git)
+# *.md
+# !README.md
 

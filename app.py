@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import json
 import sqlite3
+import requests
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -1080,19 +1081,75 @@ def vision_detect():
 # /predict endpoint removed - now using /api/vision-detect with OpenAI Vision
 
 
+def extract_exercise_from_caption(caption):
+	"""
+	Extract exercise name from BLIP caption.
+	Caption examples:
+	- "a person doing bench press"
+	- "bench press exercise"
+	- "a man performing a bench press"
+	"""
+	import re
+	caption_lower = caption.lower()
+	
+	# List of common exercise keywords (from MACHINE_METADATA)
+	exercise_keywords = [
+		"bench press", "incline bench press", "decline bench press", "dumbbell bench press",
+		"dumbbell fly", "cable crossover", "pec deck", "chest press", "push up",
+		"incline dumbbell press", "decline dumbbell press", "cable fly", "incline cable fly",
+		"lat pulldown", "pull up", "cable row", "barbell row", "t-bar row", "seated row",
+		"seated machine row", "one arm row", "cable row", "face pull", "rear delt fly",
+		"shoulder press", "dumbbell shoulder press", "lateral raise", "front raise",
+		"rear delt raise", "arnold press", "upright row", "shrug",
+		"bicep curl", "dumbbell curl", "barbell curl", "hammer curl", "cable curl",
+		"concentration curl", "preacher curl", "tricep extension", "tricep pushdown",
+		"overhead extension", "dips", "close grip bench press", "skull crusher",
+		"squat", "leg press", "leg extension", "leg curl", "hack squat", "bulgarian split squat",
+		"lunges", "deadlift", "romanian deadlift", "stiff leg deadlift", "good morning",
+		"hip thrust", "hip thrust machine", "smith machine hip thrust", "smith machine donkey kick",
+		"cable kickback", "abductor", "adductor", "cable step up", "smith machine step up",
+		"calf raise", "standing calf raise", "seated calf raise", "leg press calf raise",
+		"calf press machine", "donkey calf raise",
+		"crunch", "cable crunch", "decline sit up", "hanging leg raise", "knee raise",
+		"russian twist", "rotary torso machine", "ab crunch machine"
+	]
+	
+	# Find matching exercise in caption (longest match first)
+	exercise_keywords.sort(key=len, reverse=True)
+	for exercise in exercise_keywords:
+		if exercise in caption_lower:
+			return exercise
+	
+	# If no match, try to extract first 2-3 words after "doing" or "performing"
+	patterns = [
+		r"doing\s+([a-z\s]+?)(?:\s+exercise|\s+with|\s+on|\.|$)",
+		r"performing\s+([a-z\s]+?)(?:\s+exercise|\s+with|\s+on|\.|$)",
+		r"([a-z\s]+?)\s+exercise",
+		r"a\s+([a-z\s]+?)(?:\s+exercise|\s+machine|\.|$)",
+	]
+	
+	for pattern in patterns:
+		match = re.search(pattern, caption_lower)
+		if match:
+			extracted = match.group(1).strip()
+			# Take first 2-3 words
+			words = extracted.split()[:3]
+			if len(words) >= 2:
+				return " ".join(words)
+	
+	# Fallback: return first few words of caption
+	words = caption_lower.split()[:3]
+	return " ".join(words) if words else "unknown exercise"
+
+
 @app.route("/api/recognize-exercise", methods=["POST"])
 def recognize_exercise():
 	"""
 	Exercise recognition endpoint: image → exercise name.
-	Same pattern as vision-detect - just call OpenAI Vision directly.
+	Uses Hugging Face BLIP-2 for image captioning (FREE alternative to OpenAI Vision).
 	"""
-	import base64
-	
 	try:
-		if not OPENAI_AVAILABLE:
-			return jsonify({"exercise": "unknown exercise"}), 200
-		
-		# Get image file (same as vision-detect)
+		# Get image file
 		file = request.files.get("image")
 		if not file:
 			print("[ERROR] No file in request")
@@ -1100,13 +1157,7 @@ def recognize_exercise():
 		
 		print(f"[DEBUG] File received: {file.filename}, content_type: {file.content_type}")
 		
-		# Get OpenAI API key
-		api_key = os.getenv("OPENAI_API_KEY")
-		if not api_key:
-			print("[ERROR] OPENAI_API_KEY not set")
-			return jsonify({"exercise": "unknown exercise"}), 200
-		
-		# Read image and encode (same as vision-detect)
+		# Read image bytes
 		image_bytes = file.read()
 		if not image_bytes:
 			print("[ERROR] Image bytes is empty")
@@ -1114,16 +1165,119 @@ def recognize_exercise():
 		
 		print(f"[DEBUG] Image size: {len(image_bytes)} bytes")
 		
+		# Get Hugging Face API token
+		hf_token = os.getenv("HUGGINGFACE_API_TOKEN")
+		if not hf_token:
+			print("[ERROR] HUGGINGFACE_API_TOKEN not set")
+			# Fallback to OpenAI if available (for backwards compatibility)
+			if OPENAI_AVAILABLE:
+				print("[INFO] Falling back to OpenAI (Hugging Face token not set)")
+				return _recognize_exercise_openai(image_bytes, file.content_type)
+			return jsonify({"exercise": "unknown exercise"}), 200
+		
+		# Call Hugging Face BLIP-2 Image Captioning
+		headers = {"Authorization": f"Bearer {hf_token}"}
+		api_url = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
+		
+		try:
+			response = requests.post(
+				api_url,
+				headers=headers,
+				data=image_bytes,
+				timeout=30
+			)
+			
+			if response.status_code != 200:
+				print(f"[ERROR] Hugging Face API error: {response.status_code} - {response.text}")
+				# Fallback to OpenAI if available
+				if OPENAI_AVAILABLE:
+					print("[INFO] Falling back to OpenAI (Hugging Face API error)")
+					return _recognize_exercise_openai(image_bytes, file.content_type)
+				return jsonify({"exercise": "unknown exercise"}), 200
+			
+			result = response.json()
+			
+			# Extract caption from response
+			# Response format: [{"generated_text": "a person doing bench press"}]
+			if isinstance(result, list) and len(result) > 0:
+				caption = result[0].get("generated_text", "")
+			elif isinstance(result, dict):
+				caption = result.get("generated_text", "")
+			else:
+				caption = str(result)
+			
+			print(f"[DEBUG] Hugging Face caption: '{caption}'")
+			
+			# Extract exercise name from caption
+			exercise_name = extract_exercise_from_caption(caption)
+			
+			# Clean up exercise name
+			exercise_name = exercise_name.lower().strip()
+			exercise_name = exercise_name.strip('"\'.,;:!?')
+			
+			# Remove common phrases
+			exercise_name = exercise_name.replace("a person doing ", "")
+			exercise_name = exercise_name.replace("person doing ", "")
+			exercise_name = exercise_name.replace("doing ", "")
+			exercise_name = exercise_name.replace("exercise", "").strip()
+			exercise_name = exercise_name.replace("a ", "").strip()
+			
+			# Normalize whitespace
+			exercise_name = " ".join(exercise_name.split())
+			
+			if not exercise_name or len(exercise_name) < 2:
+				exercise_name = "unknown exercise"
+			
+			print(f"[DEBUG] Final exercise: '{exercise_name}'")
+			return jsonify({"exercise": exercise_name}), 200
+			
+		except requests.exceptions.Timeout:
+			print("[ERROR] Hugging Face API timeout")
+			# Fallback to OpenAI if available
+			if OPENAI_AVAILABLE:
+				print("[INFO] Falling back to OpenAI (Hugging Face timeout)")
+				return _recognize_exercise_openai(image_bytes, file.content_type)
+			return jsonify({"exercise": "unknown exercise"}), 200
+		except requests.exceptions.RequestException as e:
+			print(f"[ERROR] Hugging Face API request error: {e}")
+			# Fallback to OpenAI if available
+			if OPENAI_AVAILABLE:
+				print("[INFO] Falling back to OpenAI (Hugging Face request error)")
+				return _recognize_exercise_openai(image_bytes, file.content_type)
+			return jsonify({"exercise": "unknown exercise"}), 200
+		
+	except Exception as e:
+		print(f"[ERROR] Exercise recognition error: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"exercise": "unknown exercise"}), 200
+
+
+def _recognize_exercise_openai(image_bytes, content_type):
+	"""
+	Fallback to OpenAI Vision if Hugging Face is not available.
+	This maintains backwards compatibility.
+	"""
+	import base64
+	
+	if not OPENAI_AVAILABLE:
+		return jsonify({"exercise": "unknown exercise"}), 200
+	
+	try:
+		api_key = os.getenv("OPENAI_API_KEY")
+		if not api_key:
+			return jsonify({"exercise": "unknown exercise"}), 200
+		
 		image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 		
-		# Determine format (same as vision-detect)
+		# Determine format
 		image_format = "jpeg"
-		if file.content_type and "png" in file.content_type:
+		if content_type and "png" in content_type:
 			image_format = "png"
-		elif file.content_type and "webp" in file.content_type:
+		elif content_type and "webp" in content_type:
 			image_format = "webp"
 		
-		# Call OpenAI Vision - FORCE it to always give an exercise
+		# Call OpenAI Vision
 		client = OpenAI(api_key=api_key)
 		response = client.chat.completions.create(
 			model="gpt-4o-mini",
@@ -1143,63 +1297,41 @@ def recognize_exercise():
 				}
 			],
 			max_tokens=50,
-			temperature=0.3  # Lower temperature for more consistent responses
+			temperature=0.3
 		)
 		
-		# Extract response
 		if response.choices and len(response.choices) > 0:
 			response_content = response.choices[0].message.content
 			if response_content:
 				raw_response = response_content.strip()
-				print(f"[DEBUG] OpenAI raw response: '{raw_response}'")
-				
 				exercise_name = raw_response.lower()
-				
-				# Clean up - remove common prefixes and phrases
 				exercise_name = exercise_name.strip('"\'.,;:!?')
-				exercise_name = exercise_name.replace("dit is een ", "").replace("dit is ", "")
 				exercise_name = exercise_name.replace("this is a ", "").replace("this is ", "")
 				exercise_name = exercise_name.replace("looks like ", "").replace("appears to be ", "")
 				exercise_name = exercise_name.replace("i see a ", "").replace("i see ", "")
 				exercise_name = exercise_name.replace("it's a ", "").replace("it is a ", "")
-				exercise_name = exercise_name.replace("probably a ", "").replace("likely a ", "")
-				exercise_name = " ".join(exercise_name.split())  # Normalize whitespace
+				exercise_name = " ".join(exercise_name.split())
 				
-				# ONLY mark as unknown if EXPLICITLY stated
-				# Accept everything else, even if weird
-				if exercise_name == "unknown exercise" or exercise_name == "unknown":
-					# Try one more time with a different prompt if we get unknown
-					print("[DEBUG] Got 'unknown', trying again with different prompt...")
-					# For now, just return unknown - but we could retry here
+				if exercise_name == "unknown exercise" or exercise_name == "unknown" or len(exercise_name.strip()) < 2:
 					exercise_name = "unknown exercise"
-				elif len(exercise_name.strip()) < 2:
-					# Too short, but still try to use it
-					exercise_name = "unknown exercise"
-				else:
-					# We have something - use it!
-					# Don't mark as unknown even if it's weird
-					pass
 				
-				print(f"[DEBUG] Final exercise: '{exercise_name}'")
 				return jsonify({"exercise": exercise_name}), 200
 		
-		print("[DEBUG] No response from OpenAI")
 		return jsonify({"exercise": "unknown exercise"}), 200
-		
 	except Exception as e:
-		print(f"[ERROR] Exercise recognition error: {e}")
-		import traceback
-		traceback.print_exc()
+		print(f"[ERROR] OpenAI fallback error: {e}")
 		return jsonify({"exercise": "unknown exercise"}), 200
 
 
 @app.route("/health", methods=["GET"])
 def health():
 	"""Health check endpoint to test if backend is working."""
+	hf_token = os.getenv("HUGGINGFACE_API_TOKEN")
 	return jsonify({
 		"status": "ok",
 		"openai_available": OPENAI_AVAILABLE,
-		"groq_available": GROQ_AVAILABLE
+		"groq_available": GROQ_AVAILABLE,
+		"huggingface_available": hf_token is not None
 	}), 200
 
 @app.route("/favicon.ico")
