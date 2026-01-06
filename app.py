@@ -1176,8 +1176,9 @@ def recognize_exercise():
 			return jsonify({"exercise": "unknown exercise"}), 200
 		
 		# Call Hugging Face BLIP-2 Image Captioning
+		# Note: Using new router endpoint (api-inference.huggingface.co is deprecated)
 		headers = {"Authorization": f"Bearer {hf_token}"}
-		api_url = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
+		api_url = "https://router.huggingface.co/models/Salesforce/blip-image-captioning-base"
 		
 		try:
 			response = requests.post(
