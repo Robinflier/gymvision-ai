@@ -894,15 +894,124 @@ def vision_detect():
 # /predict endpoint removed - now using /api/vision-detect with OpenAI Vision
 
 
+def get_user_credits(user_id: str) -> dict:
+	"""Get user credits from Supabase, reset if new month."""
+	if not SUPABASE_AVAILABLE:
+		return {"credits_remaining": 10, "last_reset_month": None}
+	
+	SUPABASE_URL = os.getenv("SUPABASE_URL")
+	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+	
+	if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+		return {"credits_remaining": 10, "last_reset_month": None}
+	
+	try:
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		
+		# Get current month
+		now = datetime.now()
+		current_month = f"{now.year}-{now.month:02d}"
+		
+		# Check if user has credits record
+		credits_data = supabase_client.table("user_credits").select("*").eq("user_id", user_id).execute()
+		
+		if credits_data.data and len(credits_data.data) > 0:
+			record = credits_data.data[0]
+			last_reset_month = record.get("last_reset_month")
+			
+			# Reset if new month
+			if last_reset_month != current_month:
+				supabase_client.table("user_credits").update({
+					"credits_remaining": 10,
+					"last_reset_month": current_month
+				}).eq("user_id", user_id).execute()
+				return {"credits_remaining": 10, "last_reset_month": current_month}
+			else:
+				return {
+					"credits_remaining": record.get("credits_remaining", 10),
+					"last_reset_month": last_reset_month
+				}
+		else:
+			# Create new record
+			supabase_client.table("user_credits").insert({
+				"user_id": user_id,
+				"credits_remaining": 10,
+				"last_reset_month": current_month
+			}).execute()
+			return {"credits_remaining": 10, "last_reset_month": current_month}
+	except Exception as e:
+		print(f"[ERROR] Error getting user credits: {e}")
+		return {"credits_remaining": 10, "last_reset_month": None}
+
+
+def decrement_user_credits(user_id: str) -> bool:
+	"""Decrement user credits by 1. Returns True if successful, False if no credits."""
+	if not SUPABASE_AVAILABLE:
+		return True  # Allow if Supabase not available
+	
+	SUPABASE_URL = os.getenv("SUPABASE_URL")
+	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+	
+	if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+		return True  # Allow if Supabase not configured
+	
+	try:
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		
+		# Get current credits
+		credits_info = get_user_credits(user_id)
+		credits_remaining = credits_info["credits_remaining"]
+		
+		if credits_remaining <= 0:
+			return False
+		
+		# Decrement
+		supabase_client.table("user_credits").update({
+			"credits_remaining": credits_remaining - 1
+		}).eq("user_id", user_id).execute()
+		
+		return True
+	except Exception as e:
+		print(f"[ERROR] Error decrementing user credits: {e}")
+		return True  # Allow on error to not break the app
+
+
 @app.route("/api/recognize-exercise", methods=["POST"])
 def recognize_exercise():
 	"""
 	Exercise recognition endpoint: image → exercise name.
-	Same pattern as vision-detect - just call OpenAI Vision directly.
+	Checks user credits before processing.
 	"""
 	import base64
 	
 	try:
+		# Check authentication and credits
+		access_token = request.headers.get("Authorization", "").replace("Bearer ", "")
+		user_id = None
+		
+		if access_token and SUPABASE_AVAILABLE:
+			try:
+				SUPABASE_URL = os.getenv("SUPABASE_URL")
+				SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+				if SUPABASE_URL and SUPABASE_KEY:
+					supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+					user_response = supabase_client.auth.get_user(access_token)
+					if user_response.user:
+						user_id = user_response.user.id
+			except Exception as e:
+				print(f"[DEBUG] Could not verify user token: {e}")
+		
+		# Check credits if user is authenticated
+		if user_id:
+			credits_info = get_user_credits(user_id)
+			credits_remaining = credits_info["credits_remaining"]
+			
+			if credits_remaining <= 0:
+				return jsonify({
+					"error": "no_credits",
+					"message": "You have no credits left this month. Credits reset on the 1st of each month."
+				}), 403
+		
 		if not OPENAI_AVAILABLE:
 			return jsonify({"exercise": "unknown exercise"}), 200
 		
@@ -995,6 +1104,17 @@ def recognize_exercise():
 					pass
 				
 				print(f"[DEBUG] Final exercise: '{exercise_name}'")
+				
+				# Decrement credits after successful AI call
+				if user_id:
+					decrement_user_credits(user_id)
+					# Get updated credits for response
+					credits_info = get_user_credits(user_id)
+					return jsonify({
+						"exercise": exercise_name,
+						"credits_remaining": credits_info["credits_remaining"]
+					}), 200
+				
 				return jsonify({"exercise": exercise_name}), 200
 		
 		print("[DEBUG] No response from OpenAI")
@@ -1005,6 +1125,41 @@ def recognize_exercise():
 		import traceback
 		traceback.print_exc()
 		return jsonify({"exercise": "unknown exercise"}), 200
+
+
+@app.route("/api/user-credits", methods=["GET"])
+def get_user_credits_endpoint():
+	"""Get current user's credits."""
+	access_token = request.headers.get("Authorization", "").replace("Bearer ", "")
+	if not access_token:
+		return jsonify({"error": "Authentication required"}), 401
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"credits_remaining": 10, "last_reset_month": None}), 200
+	
+	SUPABASE_URL = os.getenv("SUPABASE_URL")
+	SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
+	
+	if not SUPABASE_URL or not SUPABASE_KEY:
+		return jsonify({"credits_remaining": 10, "last_reset_month": None}), 200
+	
+	try:
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+		
+		user_id = user_response.user.id
+		credits_info = get_user_credits(user_id)
+		
+		return jsonify({
+			"credits_remaining": credits_info["credits_remaining"],
+			"last_reset_month": credits_info["last_reset_month"]
+		}), 200
+	except Exception as e:
+		print(f"[ERROR] Error getting user credits: {e}")
+		return jsonify({"credits_remaining": 10, "last_reset_month": None}), 200
 
 
 @app.route("/health", methods=["GET"])

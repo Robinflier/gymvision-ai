@@ -56,54 +56,6 @@ async function initSupabase() {
 	return supabaseClient;
 }
 
-// ========== CREDITS MANAGEMENT ==========
-async function loadCreditsBalance() {
-	const supabase = await initSupabase();
-	if (!supabase) return;
-	
-	const { data: { session } } = await supabase.auth.getSession();
-	if (!session) return;
-	
-	try {
-		const response = await fetch(getApiUrl('/api/credits/balance'), {
-			headers: {
-				'Authorization': `Bearer ${session.access_token}`
-			}
-		});
-		
-		if (response.ok) {
-			const credits = await response.json();
-			updateCreditsDisplay(credits);
-		}
-	} catch (error) {
-		console.error('Failed to load credits:', error);
-	}
-}
-
-function updateCreditsDisplay(credits) {
-	// Try to find existing credits display element
-	let creditsElement = document.getElementById('credits-display');
-	
-	if (!creditsElement) {
-		// Create credits display element if it doesn't exist
-		creditsElement = document.createElement('div');
-		creditsElement.id = 'credits-display';
-		creditsElement.className = 'credits-display';
-		creditsElement.style.cssText = 'position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.7); color: white; padding: 8px 12px; border-radius: 8px; font-size: 14px; z-index: 1000;';
-		
-		// Add to body
-		document.body.appendChild(creditsElement);
-	}
-	
-	// Update content
-	const freeRemaining = credits.free_credits_remaining || 0;
-	const paid = credits.paid_credits || 0;
-	const total = credits.total_credits || 0;
-	
-	creditsElement.textContent = `💳 ${total} credits`;
-	creditsElement.title = `${freeRemaining} gratis + ${paid} betaald deze maand`;
-}
-
 // ========== STATE MANAGEMENT ==========
 // Default to workouts as the "home" screen
 let currentTab = 'workouts';
@@ -234,6 +186,75 @@ function isBodyweightExercise(exercise) {
 }
 
 // Helper function to fetch user from backend with Authorization header
+async function getUserCredits() {
+	/**Get user credits from backend."""
+	try {
+		const session = await supabaseClient.auth.getSession();
+		if (!session.data.session) {
+			return { credits_remaining: 10, last_reset_month: null };
+		}
+		
+		const apiUrl = getApiUrl('/api/user-credits');
+		const res = await fetch(apiUrl, {
+			method: 'GET',
+			headers: {
+				'Authorization': `Bearer ${session.data.session.access_token}`
+			}
+		});
+		
+		if (res.ok) {
+			const data = await res.json();
+			return {
+				credits_remaining: data.credits_remaining || 10,
+				last_reset_month: data.last_reset_month
+			};
+		}
+	} catch (e) {
+		console.error('[CREDITS] Error fetching credits:', e);
+	}
+	return { credits_remaining: 10, last_reset_month: null };
+}
+
+function showCreditsMessage(creditsRemaining) {
+	/**Show credits message briefly during AI detect."""
+	const message = `${creditsRemaining} credit${creditsRemaining !== 1 ? 's' : ''} left this month`;
+	
+	// Create or update credits display
+	let creditsDisplay = document.getElementById('ai-credits-display');
+	if (!creditsDisplay) {
+		creditsDisplay = document.createElement('div');
+		creditsDisplay.id = 'ai-credits-display';
+		creditsDisplay.style.cssText = `
+			position: fixed;
+			top: 20px;
+			right: 20px;
+			background: rgba(0, 0, 0, 0.8);
+			color: white;
+			padding: 8px 16px;
+			border-radius: 8px;
+			font-size: 14px;
+			z-index: 10000;
+			transition: opacity 0.3s;
+		`;
+		document.body.appendChild(creditsDisplay);
+	}
+	
+	creditsDisplay.textContent = message;
+	creditsDisplay.style.opacity = '1';
+	
+	// Hide after 3 seconds
+	setTimeout(() => {
+		if (creditsDisplay) {
+			creditsDisplay.style.opacity = '0';
+			setTimeout(() => {
+				if (creditsDisplay && creditsDisplay.parentNode) {
+					creditsDisplay.parentNode.removeChild(creditsDisplay);
+				}
+			}, 300);
+		}
+	}, 3000);
+}
+
 async function fetchUser() {
 	if (!supabaseClient) {
 		await initSupabase();
@@ -1163,8 +1184,6 @@ window.logout = logout;
 
 // ========== NAVIGATION ==========
 function initNavigation() {
-	// Load credits balance when user is logged in
-	loadCreditsBalance();
 	const navButtons = document.querySelectorAll('.nav-btn');
 	navButtons.forEach(btn => {
 			const tab = btn.dataset.tab;
@@ -1645,21 +1664,25 @@ function initExerciseSelector() {
 				const file = e.target.files[0];
 				if (!file) return;
 				
+				// Get credits before starting
+				const creditsInfo = await getUserCredits();
+				if (creditsInfo.credits_remaining <= 0) {
+					alert('You have no credits left this month. Credits reset on the 1st of each month.');
+					return;
+				}
+				
+				// Show credits message
+				showCreditsMessage(creditsInfo.credits_remaining);
+				
 				aiDetectBtn.disabled = true;
 				aiDetectBtn.textContent = 'Analyzing...';
 				
 				try {
-					// Get Supabase session for authentication
-					const supabase = await initSupabase();
-					if (!supabase) {
-						alert('Please log in to use AI detect');
-						return;
-					}
-					
-					const { data: { session } } = await supabase.auth.getSession();
-					if (!session) {
-						alert('Please log in to use AI detect');
-						return;
+					// Get auth token for request
+					const session = await supabaseClient.auth.getSession();
+					const headers = {};
+					if (session.data.session) {
+						headers['Authorization'] = `Bearer ${session.data.session.access_token}`;
 					}
 					
 					const formData = new FormData();
@@ -1671,24 +1694,20 @@ function initExerciseSelector() {
 					
 					const res = await fetch(apiUrl, {
 						method: 'POST',
-						headers: {
-							'Authorization': `Bearer ${session.access_token}`
-						},
+						headers: headers,
 						body: formData
 					});
 					
 					console.log('[AI Detect] Response status:', res.status, res.statusText);
 					
-					// Handle no credits (403)
-					if (res.status === 403) {
-						const errorData = await res.json();
-						alert(errorData.error || 'No credits available. You\'ve used all 10 free credits this month.');
-						// Reload credits display
-						loadCreditsBalance();
-						return;
-					}
-					
 					if (!res.ok) {
+						if (res.status === 403) {
+							const errorData = await res.json();
+							if (errorData.error === 'no_credits') {
+								alert('You have no credits left this month. Credits reset on the 1st of each month.');
+								return;
+							}
+						}
 						const errorText = await res.text();
 						console.error('[AI Detect] Error response:', errorText);
 						throw new Error(`Server error: ${res.status} ${res.statusText}`);
@@ -1707,6 +1726,11 @@ function initExerciseSelector() {
 					}
 					
 					console.log('[AI Detect] Parsed response:', JSON.stringify(data));
+					
+					// Update credits display if provided
+					if (data.credits_remaining !== undefined) {
+						showCreditsMessage(data.credits_remaining);
+					}
 					
 					// Extract exercise name - be VERY lenient, accept anything
 					let exerciseName = '';
@@ -1739,11 +1763,6 @@ function initExerciseSelector() {
 					// Find match
 					const matchingExercise = findExerciseByName(exerciseName);
 					console.log('[AI Detect] Match found?', matchingExercise ? matchingExercise.display : 'NO MATCH');
-					
-					// Update credits display if credits_remaining is in response
-					if (data.credits_remaining !== undefined) {
-						loadCreditsBalance();
-					}
 					
 					if (matchingExercise) {
 						console.log('[AI Detect] Adding exercise:', matchingExercise.display);
@@ -6073,21 +6092,25 @@ function openAIDetectChat() {
 			// Show user message with image preview
 			addAIDetectChatMessage('user', 'Welke oefening is dit?', file);
 			
+			// Check credits before starting
+			const creditsInfo = await getUserCredits();
+			if (creditsInfo.credits_remaining <= 0) {
+				addAIDetectChatMessage('bot', 'You have no credits left this month. Credits reset on the 1st of each month.', null);
+				return;
+			}
+			
+			// Show credits message
+			showCreditsMessage(creditsInfo.credits_remaining);
+			
 			// Show loading message
 			const loadingId = addAIDetectChatMessage('bot', 'Even nadenken...', null, true);
 			
 			try {
-				// Get Supabase session for authentication
-				const supabase = await initSupabase();
-				if (!supabase) {
-					addAIDetectChatMessage('bot', 'Je moet ingelogd zijn om AI detect te gebruiken. Log in en probeer het opnieuw.', null);
-					return;
-				}
-				
-				const { data: { session } } = await supabase.auth.getSession();
-				if (!session) {
-					addAIDetectChatMessage('bot', 'Je moet ingelogd zijn om AI detect te gebruiken. Log in en probeer het opnieuw.', null);
-					return;
+				// Get auth token for request
+				const session = await supabaseClient.auth.getSession();
+				const headers = {};
+				if (session.data.session) {
+					headers['Authorization'] = `Bearer ${session.data.session.access_token}`;
 				}
 				
 				// Send to backend - use new OpenAI Vision endpoint
@@ -6099,24 +6122,20 @@ function openAIDetectChat() {
 				
 				const res = await fetch(apiUrl, {
 					method: 'POST',
-					headers: {
-						'Authorization': `Bearer ${session.access_token}`
-					},
+					headers: headers,
 					body: formData
 				});
 				
 				console.log('[AI Detect] Response status:', res.status, res.statusText);
 				
-				// Handle no credits (403)
-				if (res.status === 403) {
-					const errorData = await res.json();
-					addAIDetectChatMessage('bot', errorData.error || 'Je hebt geen credits meer. Je hebt alle 10 gratis credits deze maand gebruikt.', null);
-					// Reload credits display
-					loadCreditsBalance();
-					return;
-				}
-				
 				if (!res.ok) {
+					if (res.status === 403) {
+						const errorData = await res.json();
+						if (errorData.error === 'no_credits') {
+							addAIDetectChatMessage('bot', 'You have no credits left this month. Credits reset on the 1st of each month.', null);
+							return;
+						}
+					}
 					const errorText = await res.text();
 					console.error('[AI Detect] Error response:', errorText);
 					throw new Error(`Server error: ${res.status} ${res.statusText}`);
@@ -6125,14 +6144,14 @@ function openAIDetectChat() {
 				const data = await res.json();
 				console.log('[AI Detect] Response data:', data);
 				
+				// Update credits display if provided
+				if (data.credits_remaining !== undefined) {
+					showCreditsMessage(data.credits_remaining);
+				}
+				
 				// Remove loading message
 				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
 				if (loadingEl) loadingEl.remove();
-				
-				// Update credits display if credits_remaining is in response
-				if (data.credits_remaining !== undefined) {
-					loadCreditsBalance();
-				}
 				
 				// Handle /api/recognize-exercise response
 				if (data.exercise) {

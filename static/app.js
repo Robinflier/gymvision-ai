@@ -186,6 +186,75 @@ function isBodyweightExercise(exercise) {
 }
 
 // Helper function to fetch user from backend with Authorization header
+async function getUserCredits() {
+	/**Get user credits from backend."""
+	try {
+		const session = await supabaseClient.auth.getSession();
+		if (!session.data.session) {
+			return { credits_remaining: 10, last_reset_month: null };
+		}
+		
+		const apiUrl = getApiUrl('/api/user-credits');
+		const res = await fetch(apiUrl, {
+			method: 'GET',
+			headers: {
+				'Authorization': `Bearer ${session.data.session.access_token}`
+			}
+		});
+		
+		if (res.ok) {
+			const data = await res.json();
+			return {
+				credits_remaining: data.credits_remaining || 10,
+				last_reset_month: data.last_reset_month
+			};
+		}
+	} catch (e) {
+		console.error('[CREDITS] Error fetching credits:', e);
+	}
+	return { credits_remaining: 10, last_reset_month: null };
+}
+
+function showCreditsMessage(creditsRemaining) {
+	/**Show credits message briefly during AI detect."""
+	const message = `${creditsRemaining} credit${creditsRemaining !== 1 ? 's' : ''} left this month`;
+	
+	// Create or update credits display
+	let creditsDisplay = document.getElementById('ai-credits-display');
+	if (!creditsDisplay) {
+		creditsDisplay = document.createElement('div');
+		creditsDisplay.id = 'ai-credits-display';
+		creditsDisplay.style.cssText = `
+			position: fixed;
+			top: 20px;
+			right: 20px;
+			background: rgba(0, 0, 0, 0.8);
+			color: white;
+			padding: 8px 16px;
+			border-radius: 8px;
+			font-size: 14px;
+			z-index: 10000;
+			transition: opacity 0.3s;
+		`;
+		document.body.appendChild(creditsDisplay);
+	}
+	
+	creditsDisplay.textContent = message;
+	creditsDisplay.style.opacity = '1';
+	
+	// Hide after 3 seconds
+	setTimeout(() => {
+		if (creditsDisplay) {
+			creditsDisplay.style.opacity = '0';
+			setTimeout(() => {
+				if (creditsDisplay && creditsDisplay.parentNode) {
+					creditsDisplay.parentNode.removeChild(creditsDisplay);
+				}
+			}, 300);
+		}
+	}, 3000);
+}
+
 async function fetchUser() {
 	if (!supabaseClient) {
 		await initSupabase();
@@ -1595,10 +1664,27 @@ function initExerciseSelector() {
 				const file = e.target.files[0];
 				if (!file) return;
 				
+				// Get credits before starting
+				const creditsInfo = await getUserCredits();
+				if (creditsInfo.credits_remaining <= 0) {
+					alert('You have no credits left this month. Credits reset on the 1st of each month.');
+					return;
+				}
+				
+				// Show credits message
+				showCreditsMessage(creditsInfo.credits_remaining);
+				
 				aiDetectBtn.disabled = true;
 				aiDetectBtn.textContent = 'Analyzing...';
 				
 				try {
+					// Get auth token for request
+					const session = await supabaseClient.auth.getSession();
+					const headers = {};
+					if (session.data.session) {
+						headers['Authorization'] = `Bearer ${session.data.session.access_token}`;
+					}
+					
 					const formData = new FormData();
 					formData.append('image', file);
 					
@@ -1608,12 +1694,20 @@ function initExerciseSelector() {
 					
 					const res = await fetch(apiUrl, {
 						method: 'POST',
+						headers: headers,
 						body: formData
 					});
 					
 					console.log('[AI Detect] Response status:', res.status, res.statusText);
 					
 					if (!res.ok) {
+						if (res.status === 403) {
+							const errorData = await res.json();
+							if (errorData.error === 'no_credits') {
+								alert('You have no credits left this month. Credits reset on the 1st of each month.');
+								return;
+							}
+						}
 						const errorText = await res.text();
 						console.error('[AI Detect] Error response:', errorText);
 						throw new Error(`Server error: ${res.status} ${res.statusText}`);
@@ -1632,6 +1726,11 @@ function initExerciseSelector() {
 					}
 					
 					console.log('[AI Detect] Parsed response:', JSON.stringify(data));
+					
+					// Update credits display if provided
+					if (data.credits_remaining !== undefined) {
+						showCreditsMessage(data.credits_remaining);
+					}
 					
 					// Extract exercise name - be VERY lenient, accept anything
 					let exerciseName = '';
@@ -5993,10 +6092,27 @@ function openAIDetectChat() {
 			// Show user message with image preview
 			addAIDetectChatMessage('user', 'Welke oefening is dit?', file);
 			
+			// Check credits before starting
+			const creditsInfo = await getUserCredits();
+			if (creditsInfo.credits_remaining <= 0) {
+				addAIDetectChatMessage('bot', 'You have no credits left this month. Credits reset on the 1st of each month.', null);
+				return;
+			}
+			
+			// Show credits message
+			showCreditsMessage(creditsInfo.credits_remaining);
+			
 			// Show loading message
 			const loadingId = addAIDetectChatMessage('bot', 'Even nadenken...', null, true);
 			
 			try {
+				// Get auth token for request
+				const session = await supabaseClient.auth.getSession();
+				const headers = {};
+				if (session.data.session) {
+					headers['Authorization'] = `Bearer ${session.data.session.access_token}`;
+				}
+				
 				// Send to backend - use new OpenAI Vision endpoint
 				const formData = new FormData();
 				formData.append('image', file);
@@ -6006,12 +6122,20 @@ function openAIDetectChat() {
 				
 				const res = await fetch(apiUrl, {
 					method: 'POST',
+					headers: headers,
 					body: formData
 				});
 				
 				console.log('[AI Detect] Response status:', res.status, res.statusText);
 				
 				if (!res.ok) {
+					if (res.status === 403) {
+						const errorData = await res.json();
+						if (errorData.error === 'no_credits') {
+							addAIDetectChatMessage('bot', 'You have no credits left this month. Credits reset on the 1st of each month.', null);
+							return;
+						}
+					}
 					const errorText = await res.text();
 					console.error('[AI Detect] Error response:', errorText);
 					throw new Error(`Server error: ${res.status} ${res.statusText}`);
@@ -6019,6 +6143,11 @@ function openAIDetectChat() {
 				
 				const data = await res.json();
 				console.log('[AI Detect] Response data:', data);
+				
+				// Update credits display if provided
+				if (data.credits_remaining !== undefined) {
+					showCreditsMessage(data.credits_remaining);
+				}
 				
 				// Remove loading message
 				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
