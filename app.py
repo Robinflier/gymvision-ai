@@ -985,6 +985,11 @@ def decrement_user_credits(user_id: str) -> int:
 		print(f"[ERROR] Error decrementing user credits: {e}")
 		import traceback
 		traceback.print_exc()
+		# If table doesn't exist, return current credits (don't decrement)
+		if "Could not find" in str(e) or "PGRST204" in str(e):
+			print("[ERROR] user_credits table does not exist! Please run create_credits_table.sql in Supabase SQL Editor.")
+			credits_info = get_user_credits(user_id)
+			return credits_info.get("credits_remaining", 10)
 		return -1  # Return -1 on error
 
 
