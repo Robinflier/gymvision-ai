@@ -1152,33 +1152,38 @@ def recognize_exercise():
 		# Get image file
 		file = request.files.get("image")
 		if not file:
-			print("[ERROR] No file in request")
+			print("[ERROR] No file in request", flush=True)
 			return jsonify({"exercise": "unknown exercise"}), 200
 		
-		print(f"[DEBUG] File received: {file.filename}, content_type: {file.content_type}")
+		print(f"[INFO] Exercise recognition request: {file.filename}, content_type: {file.content_type}", flush=True)
 		
 		# Read image bytes
 		image_bytes = file.read()
 		if not image_bytes:
-			print("[ERROR] Image bytes is empty")
+			print("[ERROR] Image bytes is empty", flush=True)
 			return jsonify({"exercise": "unknown exercise"}), 200
 		
-		print(f"[DEBUG] Image size: {len(image_bytes)} bytes")
+		print(f"[INFO] Image size: {len(image_bytes)} bytes", flush=True)
 		
 		# Get Hugging Face API token
 		hf_token = os.getenv("HUGGINGFACE_API_TOKEN")
 		if not hf_token:
-			print("[ERROR] HUGGINGFACE_API_TOKEN not set")
+			print("[ERROR] HUGGINGFACE_API_TOKEN not set", flush=True)
 			# Fallback to OpenAI if available (for backwards compatibility)
 			if OPENAI_AVAILABLE:
-				print("[INFO] Falling back to OpenAI (Hugging Face token not set)")
+				print("[INFO] Falling back to OpenAI (Hugging Face token not set)", flush=True)
 				return _recognize_exercise_openai(image_bytes, file.content_type)
 			return jsonify({"exercise": "unknown exercise"}), 200
 		
+		print(f"[INFO] Using Hugging Face for exercise recognition (token present: {bool(hf_token)})", flush=True)
+		
 		# Call Hugging Face BLIP-2 Image Captioning
-		# Note: Using new router endpoint (api-inference.huggingface.co is deprecated)
+		# Try router endpoint first, fallback to old endpoint if needed
 		headers = {"Authorization": f"Bearer {hf_token}"}
-		api_url = "https://router.huggingface.co/models/Salesforce/blip-image-captioning-base"
+		
+		# Try new router endpoint first
+		api_url = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
+		print(f"[INFO] Calling Hugging Face API: {api_url}", flush=True)
 		
 		try:
 			response = requests.post(
@@ -1189,10 +1194,11 @@ def recognize_exercise():
 			)
 			
 			if response.status_code != 200:
-				print(f"[ERROR] Hugging Face API error: {response.status_code} - {response.text}")
+				error_text = response.text[:500] if response.text else "No error text"
+				print(f"[ERROR] Hugging Face API error: {response.status_code} - {error_text}", flush=True)
 				# Fallback to OpenAI if available
 				if OPENAI_AVAILABLE:
-					print("[INFO] Falling back to OpenAI (Hugging Face API error)")
+					print("[INFO] Falling back to OpenAI (Hugging Face API error)", flush=True)
 					return _recognize_exercise_openai(image_bytes, file.content_type)
 				return jsonify({"exercise": "unknown exercise"}), 200
 			
@@ -1207,7 +1213,7 @@ def recognize_exercise():
 			else:
 				caption = str(result)
 			
-			print(f"[DEBUG] Hugging Face caption: '{caption}'")
+			print(f"[SUCCESS] Hugging Face caption: '{caption}'", flush=True)
 			
 			# Extract exercise name from caption
 			exercise_name = extract_exercise_from_caption(caption)
@@ -1229,26 +1235,26 @@ def recognize_exercise():
 			if not exercise_name or len(exercise_name) < 2:
 				exercise_name = "unknown exercise"
 			
-			print(f"[DEBUG] Final exercise: '{exercise_name}'")
+			print(f"[SUCCESS] Hugging Face exercise detected: '{exercise_name}'", flush=True)
 			return jsonify({"exercise": exercise_name}), 200
 			
 		except requests.exceptions.Timeout:
-			print("[ERROR] Hugging Face API timeout")
+			print("[ERROR] Hugging Face API timeout", flush=True)
 			# Fallback to OpenAI if available
 			if OPENAI_AVAILABLE:
-				print("[INFO] Falling back to OpenAI (Hugging Face timeout)")
+				print("[INFO] Falling back to OpenAI (Hugging Face timeout)", flush=True)
 				return _recognize_exercise_openai(image_bytes, file.content_type)
 			return jsonify({"exercise": "unknown exercise"}), 200
 		except requests.exceptions.RequestException as e:
-			print(f"[ERROR] Hugging Face API request error: {e}")
+			print(f"[ERROR] Hugging Face API request error: {e}", flush=True)
 			# Fallback to OpenAI if available
 			if OPENAI_AVAILABLE:
-				print("[INFO] Falling back to OpenAI (Hugging Face request error)")
+				print("[INFO] Falling back to OpenAI (Hugging Face request error)", flush=True)
 				return _recognize_exercise_openai(image_bytes, file.content_type)
 			return jsonify({"exercise": "unknown exercise"}), 200
 		
 	except Exception as e:
-		print(f"[ERROR] Exercise recognition error: {e}")
+		print(f"[ERROR] Exercise recognition error: {e}", flush=True)
 		import traceback
 		traceback.print_exc()
 		return jsonify({"exercise": "unknown exercise"}), 200
@@ -1305,6 +1311,7 @@ def _recognize_exercise_openai(image_bytes, content_type):
 			response_content = response.choices[0].message.content
 			if response_content:
 				raw_response = response_content.strip()
+				print(f"[INFO] OpenAI fallback response: '{raw_response}'", flush=True)
 				exercise_name = raw_response.lower()
 				exercise_name = exercise_name.strip('"\'.,;:!?')
 				exercise_name = exercise_name.replace("this is a ", "").replace("this is ", "")
@@ -1316,11 +1323,12 @@ def _recognize_exercise_openai(image_bytes, content_type):
 				if exercise_name == "unknown exercise" or exercise_name == "unknown" or len(exercise_name.strip()) < 2:
 					exercise_name = "unknown exercise"
 				
+				print(f"[INFO] OpenAI fallback final exercise: '{exercise_name}'", flush=True)
 				return jsonify({"exercise": exercise_name}), 200
 		
 		return jsonify({"exercise": "unknown exercise"}), 200
 	except Exception as e:
-		print(f"[ERROR] OpenAI fallback error: {e}")
+		print(f"[ERROR] OpenAI fallback error: {e}", flush=True)
 		return jsonify({"exercise": "unknown exercise"}), 200
 
 
