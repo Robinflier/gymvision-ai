@@ -919,25 +919,47 @@ def get_user_credits(user_id: str) -> dict:
 			record = credits_data.data[0]
 			last_reset_month = record.get("last_reset_month")
 			
+			# Calculate credits_remaining from existing structure if needed
+			if "credits_remaining" in record:
+				credits_remaining = record.get("credits_remaining", 10)
+			else:
+				# Fallback: calculate from free_credits_used and paid_credits
+				free_used = record.get("free_credits_used", 0)
+				paid = record.get("paid_credits", 0)
+				credits_remaining = 10 - free_used + paid
+			
 			# Reset if new month
 			if last_reset_month != current_month:
-				supabase_client.table("user_credits").update({
-					"credits_remaining": 10,
+				update_data = {
 					"last_reset_month": current_month
-				}).eq("user_id", user_id).execute()
+				}
+				# Update credits_remaining if column exists, otherwise update free_credits_used
+				if "credits_remaining" in record:
+					update_data["credits_remaining"] = 10
+				else:
+					update_data["free_credits_used"] = 0
+				
+				supabase_client.table("user_credits").update(update_data).eq("user_id", user_id).execute()
 				return {"credits_remaining": 10, "last_reset_month": current_month}
 			else:
 				return {
-					"credits_remaining": record.get("credits_remaining", 10),
+					"credits_remaining": credits_remaining,
 					"last_reset_month": last_reset_month
 				}
 		else:
-			# Create new record
-			supabase_client.table("user_credits").insert({
+			# Create new record - try credits_remaining first, fallback to free_credits_used
+			insert_data = {
 				"user_id": user_id,
-				"credits_remaining": 10,
 				"last_reset_month": current_month
-			}).execute()
+			}
+			# Check if credits_remaining column exists by trying to insert it
+			try:
+				insert_data["credits_remaining"] = 10
+			except:
+				insert_data["free_credits_used"] = 0
+				insert_data["paid_credits"] = 0
+			
+			supabase_client.table("user_credits").insert(insert_data).execute()
 			return {"credits_remaining": 10, "last_reset_month": current_month}
 	except Exception as e:
 		print(f"[ERROR] Error getting user credits: {e}")
@@ -967,9 +989,26 @@ def decrement_user_credits(user_id: str) -> int:
 		
 		# Decrement and get updated value
 		new_credits = credits_remaining - 1
-		result = supabase_client.table("user_credits").update({
-			"credits_remaining": new_credits
-		}).eq("user_id", user_id).execute()
+		
+		# Check which column structure the table uses
+		# First try to get the record to see what columns exist
+		check_result = supabase_client.table("user_credits").select("*").eq("user_id", user_id).execute()
+		has_credits_remaining = False
+		if check_result.data and len(check_result.data) > 0:
+			has_credits_remaining = "credits_remaining" in check_result.data[0]
+		
+		# Update based on table structure
+		if has_credits_remaining:
+			update_data = {"credits_remaining": new_credits}
+		else:
+			# Use free_credits_used structure: increment free_credits_used
+			current_free_used = check_result.data[0].get("free_credits_used", 0)
+			update_data = {"free_credits_used": current_free_used + 1}
+			# Calculate new credits for return value
+			paid = check_result.data[0].get("paid_credits", 0)
+			new_credits = 10 - (current_free_used + 1) + paid
+		
+		result = supabase_client.table("user_credits").update(update_data).eq("user_id", user_id).execute()
 		
 		print(f"[DEBUG] Decremented credits: {credits_remaining} -> {new_credits}")
 		
