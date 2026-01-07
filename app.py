@@ -207,7 +207,7 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"close_grip_pulldown": {"display": "Close Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/IjoFCmLX7z0", "image": "https://strengthlevel.com/images/illustrations/close-grip-pulldown.png"},
 	"reverse_grip_pulldown": {"display": "Reverse Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/scy-QV06nuA", "image": "/images/reversegrippulldown.jpg"},
 	"straight_arm_pulldown": {"display": "Straight Arm Pulldown", "muscles": normalize_muscles(["Back", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/G9uNaXGTJ4w", "image": "https://strengthlevel.com/images/illustrations/straight-arm-pulldown.png"},
-	"seated_row": {"display": "Seated Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/UCXxvVItLoM", "image": "https://strengthlevel.com/images/illustrations/seated-row.png"},
+"seated_row": {"display": "Seated Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/UCXxvVItLoM", "image": "https://strengthlevel.com/images/illustrations/seated-row.png"},
 	"seated_machine_row": {"display": "Seated Machine Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/TeFo51Q_Nsc", "image": "/images/seatedmachinerow.jpg"},
 	"t_bar_row": {"display": "T-Bar Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/yPis7nlbqdY", "image": "https://strengthlevel.com/images/illustrations/t-bar-row.png"},
 	"chest_supported_t_bar_row": {"display": "Chest Supported T-Bar Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/0UBRfiO4zDs", "image": "/images/chestsupportedtbarrow.jpg"},
@@ -1178,40 +1178,76 @@ def recognize_exercise():
 		print(f"[INFO] Using Hugging Face for exercise recognition (token present: {bool(hf_token)})", flush=True)
 		
 		# Call Hugging Face BLIP-2 Image Captioning
-		# Try router endpoint first, fallback to old endpoint if needed
+		# Note: api-inference.huggingface.co is deprecated (410 error)
+		# Try multiple endpoint formats to find working one
 		headers = {"Authorization": f"Bearer {hf_token}"}
 		
-		# Try new router endpoint first
-		api_url = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base"
-		print(f"[INFO] Calling Hugging Face API: {api_url}", flush=True)
+		# List of endpoints to try (in order)
+		endpoints_to_try = [
+			"https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base",
+			"https://inference.huggingface.co/models/Salesforce/blip-image-captioning-base",
+			"https://router.huggingface.co/models/Salesforce/blip-image-captioning-base",
+		]
 		
+		response = None
+		last_error = None
+		
+		for api_url in endpoints_to_try:
+			print(f"[INFO] Trying Hugging Face endpoint: {api_url}", flush=True)
+			try:
+				response = requests.post(
+					api_url,
+					headers=headers,
+					data=image_bytes,
+					timeout=30
+				)
+				
+				if response.status_code == 200:
+					print(f"[SUCCESS] Endpoint worked: {api_url}", flush=True)
+					break
+				elif response.status_code == 410:
+					# Deprecated endpoint, try next
+					print(f"[INFO] Endpoint deprecated (410), trying next...", flush=True)
+					last_error = f"410 - Deprecated endpoint"
+					continue
+				else:
+					error_text = response.text[:500] if response.text else "No error text"
+					print(f"[ERROR] Endpoint error {response.status_code}: {error_text[:100]}", flush=True)
+					last_error = f"{response.status_code} - {error_text[:100]}"
+					continue
+					
+			except requests.exceptions.RequestException as e:
+				print(f"[ERROR] Request exception for {api_url}: {e}", flush=True)
+				last_error = str(e)
+				continue
+		
+		# If all endpoints failed, fallback to OpenAI
+		if not response or response.status_code != 200:
+			print(f"[ERROR] All Hugging Face endpoints failed. Last error: {last_error}", flush=True)
+			if OPENAI_AVAILABLE:
+				print("[INFO] Falling back to OpenAI (all Hugging Face endpoints failed)", flush=True)
+				return _recognize_exercise_openai(image_bytes, file.content_type)
+			return jsonify({"exercise": "unknown exercise"}), 200
+		
+		# Parse response
 		try:
-			response = requests.post(
-				api_url,
-				headers=headers,
-				data=image_bytes,
-				timeout=30
-			)
-			
-			if response.status_code != 200:
-				error_text = response.text[:500] if response.text else "No error text"
-				print(f"[ERROR] Hugging Face API error: {response.status_code} - {error_text}", flush=True)
-				# Fallback to OpenAI if available
-				if OPENAI_AVAILABLE:
-					print("[INFO] Falling back to OpenAI (Hugging Face API error)", flush=True)
-					return _recognize_exercise_openai(image_bytes, file.content_type)
-				return jsonify({"exercise": "unknown exercise"}), 200
-			
 			result = response.json()
-			
-			# Extract caption from response
-			# Response format: [{"generated_text": "a person doing bench press"}]
-			if isinstance(result, list) and len(result) > 0:
-				caption = result[0].get("generated_text", "")
-			elif isinstance(result, dict):
-				caption = result.get("generated_text", "")
-			else:
-				caption = str(result)
+		except json.JSONDecodeError:
+			error_text = response.text[:500] if response.text else "No response text"
+			print(f"[ERROR] Hugging Face API returned invalid JSON: {error_text}", flush=True)
+			if OPENAI_AVAILABLE:
+				print("[INFO] Falling back to OpenAI (Hugging Face invalid response)", flush=True)
+				return _recognize_exercise_openai(image_bytes, file.content_type)
+			return jsonify({"exercise": "unknown exercise"}), 200
+		
+		# Extract caption from response
+		# Response format: [{"generated_text": "a person doing bench press"}]
+		if isinstance(result, list) and len(result) > 0:
+			caption = result[0].get("generated_text", "")
+		elif isinstance(result, dict):
+			caption = result.get("generated_text", "")
+		else:
+			caption = str(result)
 			
 			print(f"[SUCCESS] Hugging Face caption: '{caption}'", flush=True)
 			
