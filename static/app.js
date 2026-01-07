@@ -56,6 +56,54 @@ async function initSupabase() {
 	return supabaseClient;
 }
 
+// ========== CREDITS MANAGEMENT ==========
+async function loadCreditsBalance() {
+	const supabase = await initSupabase();
+	if (!supabase) return;
+	
+	const { data: { session } } = await supabase.auth.getSession();
+	if (!session) return;
+	
+	try {
+		const response = await fetch(getApiUrl('/api/credits/balance'), {
+			headers: {
+				'Authorization': `Bearer ${session.access_token}`
+			}
+		});
+		
+		if (response.ok) {
+			const credits = await response.json();
+			updateCreditsDisplay(credits);
+		}
+	} catch (error) {
+		console.error('Failed to load credits:', error);
+	}
+}
+
+function updateCreditsDisplay(credits) {
+	// Try to find existing credits display element
+	let creditsElement = document.getElementById('credits-display');
+	
+	if (!creditsElement) {
+		// Create credits display element if it doesn't exist
+		creditsElement = document.createElement('div');
+		creditsElement.id = 'credits-display';
+		creditsElement.className = 'credits-display';
+		creditsElement.style.cssText = 'position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.7); color: white; padding: 8px 12px; border-radius: 8px; font-size: 14px; z-index: 1000;';
+		
+		// Add to body
+		document.body.appendChild(creditsElement);
+	}
+	
+	// Update content
+	const freeRemaining = credits.free_credits_remaining || 0;
+	const paid = credits.paid_credits || 0;
+	const total = credits.total_credits || 0;
+	
+	creditsElement.textContent = `💳 ${total} credits`;
+	creditsElement.title = `${freeRemaining} gratis + ${paid} betaald deze maand`;
+}
+
 // ========== STATE MANAGEMENT ==========
 // Default to workouts as the "home" screen
 let currentTab = 'workouts';
@@ -63,14 +111,24 @@ let currentExercise = null;
 let allExercises = [];
 let currentWorkout = null;
 let editingWorkoutId = null;
+let isSavingWorkout = false; // Prevent duplicate saves
 let workoutTimer = null;
 let workoutStartTime = null;
 const WORKOUT_DRAFT_KEY = 'currentWorkoutDraft';
 const DEFAULT_SET_COUNT = 3;
 
+// Track if exercise selector is already initialized to prevent duplicate initialization
+let exerciseSelectorInitialized = false;
+
 // ========== WEIGHT UNIT CONVERSION ==========
 function getWeightUnit() {
-	return localStorage.getItem('settings-weight-unit') || 'lbs';
+	// Default to 'kg' for new users, but check if value exists first
+	const saved = localStorage.getItem('settings-weight-unit');
+	if (saved === null || saved === undefined) {
+		// No value set yet - default to 'kg' for new accounts
+		return 'kg';
+	}
+	return saved;
 }
 
 function isKg() {
@@ -158,13 +216,19 @@ function getLastExerciseData(exerciseKey) {
 function isBodyweightExercise(exercise) {
 	const key = (exercise.key || '').toLowerCase();
 	const display = (exercise.display || '').toLowerCase();
+	
+	// Weighted exercises are NOT bodyweight
+	if (key.includes('weighted') || display.includes('weighted')) {
+		return false;
+	}
+	
 	const bodyweightKeys = [
 		'push_up', 'pull_up', 'chin_up', 'dips', 'diamond_push_up',
 		'crunch', 'decline_sit_up', 'hanging_leg_raise', 'knee_raise'
 	];
 	return bodyweightKeys.includes(key) || 
 	       display.includes('push-up') || display.includes('pull-up') || 
-	       display.includes('chin-up') || display.includes('dip') && !display.includes('machine') ||
+	       display.includes('chin-up') || (display.includes('dip') && !display.includes('machine')) ||
 	       (display.includes('crunch') && !display.includes('cable')) || display.includes('sit-up') || 
 	       display.includes('leg raise') || display.includes('knee raise');
 }
@@ -293,57 +357,59 @@ function reinitializeButtonListeners() {
 document.addEventListener('DOMContentLoaded', async () => {
 	try {
 		console.log('[INIT] Starting app initialization...');
+		console.log('[INIT] Platform:', window.Capacitor?.isNativePlatform() ? 'NATIVE' : 'WEB');
+		
+		// Hide loading overlay after a short delay to prevent flash
+		const loadingOverlay = document.getElementById('app-loading-overlay');
+		const hideLoadingOverlay = () => {
+			if (loadingOverlay) {
+				setTimeout(() => {
+					loadingOverlay.style.display = 'none';
+				}, 100);
+			}
+		};
+		
+		// Wait for Capacitor to be ready (if in native app)
+		if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+			console.log('[INIT] Waiting for Capacitor to be ready...');
+			await new Promise(resolve => setTimeout(resolve, 200));
+		}
 		
 		// IMMEDIATE: Force WebView focus (iOS fix)
 		forceWebViewFocus();
 		
-	await initSupabase();
+		// Initialize Supabase
+		await initSupabase();
 		console.log('[INIT] Supabase initialized:', !!supabaseClient);
 	
-	// PUBLIC PAGES MUST NOT REQUIRE AUTH
-	if (isPublicPage()) {
-			console.log('[INIT] Public page detected');
-		initLoginForm();
-		initRegisterForm();
-		
-		// Check if already logged in on public pages - redirect to home
-		// Wait a bit for session to be restored
-		await new Promise(resolve => setTimeout(resolve, 100));
+		// Check session FIRST - simple and reliable
+		let hasSession = false;
+		try {
 		if (supabaseClient) {
-			const { data: { session } } = await supabaseClient.auth.getSession();
-			if (session) {
-				// Already logged in, redirect to home
-				window.location.href = '/';
-				return;
+				const { data: { session }, error } = await supabaseClient.auth.getSession();
+				hasSession = !!(session && !error);
+				console.log('[INIT] Session check result:', hasSession ? 'FOUND' : 'NOT FOUND');
+			} else {
+				console.log('[INIT] No Supabase client available');
 			}
+		} catch (e) {
+			console.error('[INIT] Session check error:', e);
+			hasSession = false;
 		}
+		
+		// If no session, show login screen and stop
+		if (!hasSession) {
+			console.log('[INIT] No session - showing login screen');
+			showLoginScreen();
+			hideLoadingOverlay();
 		return;
 	}
 	
-	// PRIVATE PAGES - Wait for auth check to complete
-		console.log('[INIT] Private page - checking authentication...');
-	const ok = await requireLogin();
-		console.log('[INIT] Auth check result:', ok);
-		
-		if (!ok) {
-			console.error('[INIT] Authentication failed - redirecting to login');
-			// Force redirect to login page
-			window.location.href = '/login';
-			return;
-		}
-		
-		// Verify session is actually valid
-		const { data: { session } } = await supabaseClient.auth.getSession();
-		if (!session) {
-			console.error('[INIT] No session found after requireLogin - redirecting to login');
-			window.location.href = '/login';
-			return;
-		}
-		console.log('[INIT] Session verified:', session.user?.email);
+		// Session exists - initialize app
+		console.log('[INIT] Session found - initializing app...');
 	
-	// Init app features (SAFE now - user is authenticated)
-		console.log('[INIT] Initializing app features...');
-	initLogout(); // Initialize logout button
+		// Init app features
+		initLogout();
 	initNavigation();
 	initTabs();
 	initFileUpload();
@@ -356,15 +422,35 @@ document.addEventListener('DOMContentLoaded', async () => {
 	initVision();
 		initExerciseVideoModal();
 	initExerciseCard();
-		loadStreak();
-		loadRecentScans();
-		loadExercises();
-		loadWorkouts();
-		updateWorkoutStartButton();
 		
-		// Schedule daily and weekly notifications
-		await scheduleDailyNotifications();
-		await scheduleWeeklyNotifications();
+		// Load data
+		try {
+	loadStreak();
+	loadRecentScans();
+			await loadExercises();
+			await loadWorkouts();
+	updateWorkoutStartButton();
+		} catch (e) {
+			console.error('[INIT] Error loading data:', e);
+		}
+		
+		// Show workouts tab
+		try {
+			await switchTab('workouts');
+		} catch (e) {
+			console.error('[INIT] Error switching to workouts:', e);
+		}
+		
+		// Hide loading overlay now that everything is loaded
+		hideLoadingOverlay();
+		
+		// Schedule notifications (don't block on errors)
+		try {
+			await scheduleDailyNotifications();
+			await scheduleWeeklyNotifications();
+		} catch (e) {
+			console.error('[INIT] Error scheduling notifications:', e);
+		}
 		
 		// AFTER INIT: Force focus again and re-init buttons (iOS safety net)
 		setTimeout(() => {
@@ -380,6 +466,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 					forceWebViewFocus();
 					reinitializeButtonListeners();
 				}, 100);
+				
+				// Update rest timer display if it's running (timer continues automatically)
+				if (restTimerRunning && restTimerStartTime) {
+					// Timer will automatically update via setInterval, just ensure display is correct
+					const elapsed = Math.floor((Date.now() - restTimerStartTime) / 1000);
+					const remaining = Math.max(0, restTimerInitialSeconds - elapsed);
+					restTimerSeconds = remaining;
+					updateRestTimerDisplay();
+					
+					// Update button text if overlay is visible
+					const overlay = document.getElementById('rest-timer-overlay');
+					if (overlay && !overlay.classList.contains('hidden')) {
+						const startBtn = document.getElementById('rest-timer-start');
+						if (startBtn) startBtn.textContent = 'Pause';
+					}
+					
+					// If timer finished while in background, show completion
+					if (remaining === 0) {
+						stopRestTimer();
+						showRestTimerComplete();
+					}
+				}
 			}
 		});
 		
@@ -501,10 +609,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 					e.preventDefault();
 					e.stopPropagation();
 					console.log('[FIX] Save workout clicked');
-					if (window.saveWorkout) {
+					if (window.saveWorkout && !isSavingWorkout) {
 						window.saveWorkout();
-					} else if (typeof saveWorkout === 'function') {
-						saveWorkout();
 					}
 					return false;
 				};
@@ -548,8 +654,11 @@ function initLoginForm() {
 	const form = document.getElementById('login-form');
 	if (!form) return;
 	
-	const errorEl = document.getElementById('error-message');
-	const submitBtn = document.getElementById('submit-btn');
+	// Initialize register link
+	initRegisterLink();
+	
+	const errorEl = document.getElementById('login-error-message') || document.getElementById('error-message');
+	const submitBtn = document.getElementById('login-submit-btn') || document.getElementById('submit-btn');
 	
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault();
@@ -560,8 +669,8 @@ function initLoginForm() {
 		}
 		if (errorEl) errorEl.classList.remove('show');
 		
-		const email = document.getElementById('email')?.value;
-		const password = document.getElementById('password')?.value;
+		const email = document.getElementById('login-email')?.value || document.getElementById('email')?.value;
+		const password = document.getElementById('login-password')?.value || document.getElementById('password')?.value;
 		
 		if (!email || !password) {
 			if (errorEl) {
@@ -625,15 +734,50 @@ function initLoginForm() {
 		// Verify session exists
 		const { data: { session } } = await supabaseClient.auth.getSession();
 		if (session) {
-			// Redirect to next parameter if exists, otherwise go to home
-			const nextPage = new URLSearchParams(window.location.search).get('next');
-			const redirectTo = nextPage ? decodeURIComponent(nextPage) : '/';
-			window.location.href = redirectTo;
+			console.log('[LOGIN] Login successful, initializing app...');
+			// Hide login content
+			const loginContent = document.getElementById('login-content');
+			if (loginContent) {
+				loginContent.classList.add('hidden');
+			}
+			
+			// Initialize app features
+			initLogout();
+			initNavigation();
+			initTabs();
+			initFileUpload();
+			initManualInput();
+			initExerciseSelector();
+			initWorkoutBuilder();
+			initProgress();
+			initSettings();
+			initRestTimer();
+			initVision();
+			initExerciseVideoModal();
+			initExerciseCard();
+			loadStreak();
+			loadRecentScans();
+			await loadExercises();
+			await migrateLocalStorageWorkouts(); // Migrate any local workouts to Supabase
+			await loadWorkouts();
+			updateWorkoutStartButton();
+			
+			// Show workouts tab
+			switchTab('workouts');
+			
+			// Schedule notifications
+			await scheduleDailyNotifications();
+			await scheduleWeeklyNotifications();
 		} else {
-			// Session not ready yet, but redirect anyway
-			const nextPage = new URLSearchParams(window.location.search).get('next');
-			const redirectTo = nextPage ? decodeURIComponent(nextPage) : '/';
-			window.location.href = redirectTo;
+			console.error('[LOGIN] Session not found after login');
+			if (errorEl) {
+				errorEl.textContent = 'Login failed. Please try again.';
+				errorEl.classList.add('show');
+			}
+			if (submitBtn) {
+				submitBtn.disabled = false;
+				submitBtn.textContent = 'Sign In';
+			}
 		}
 	});
 }
@@ -645,8 +789,11 @@ function initRegisterForm() {
 	const form = document.getElementById('register-form');
 	if (!form) return;
 	
-	const errorEl = document.getElementById('error-message');
-	const submitBtn = document.getElementById('submit-btn');
+	// Initialize back to login link
+	initBackToLoginLink();
+	
+	const errorEl = document.getElementById('register-error-message') || document.getElementById('error-message');
+	const submitBtn = document.getElementById('register-submit-btn') || document.getElementById('submit-btn');
 	
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault();
@@ -657,9 +804,9 @@ function initRegisterForm() {
 		}
 		if (errorEl) errorEl.classList.remove('show');
 		
-		const email = document.getElementById('email')?.value;
-		const password = document.getElementById('password')?.value;
-		const username = document.getElementById('username')?.value; // Optional
+		const email = document.getElementById('register-email')?.value;
+		const password = document.getElementById('register-password')?.value;
+		const username = document.getElementById('register-username')?.value; // Optional
 		
 		if (!email || !password) {
 			if (errorEl) {
@@ -723,9 +870,27 @@ function initRegisterForm() {
 			return;
 		}
 		
+		// Registration successful - set default settings for new account
+		// Notifications: ON (and request permission)
+		localStorage.setItem('settings-notifications', 'true');
+		// Weight unit: kg
+		localStorage.setItem('settings-weight-unit', 'kg');
+		// Rest timer: OFF
+		localStorage.setItem('settings-rest-timer', 'false');
+		
+		// Request notification permission immediately
+		try {
+			await requestNotificationPermission();
+			// Schedule notifications
+			await scheduleDailyNotifications();
+			await scheduleWeeklyNotifications();
+		} catch (e) {
+			// Ignore permission errors for now
+		}
+		
 		// Registration successful
 		alert('Account created! Please log in.');
-		window.location.href = '/login';
+		showLoginScreen();
 	});
 }
 
@@ -784,7 +949,7 @@ async function requireLogin() {
 		if (!supabaseClient) {
 			console.error('[AUTH] Supabase client initialization failed');
 			authCheckComplete = false;
-			window.location.href = '/login';
+			showLoginScreen();
 			return false;
 		}
 		
@@ -794,16 +959,15 @@ async function requireLogin() {
 		if (error) {
 			console.error('[AUTH] Session check error:', error);
 			authCheckComplete = false;
-			window.location.href = '/login';
+			showLoginScreen();
 			return false;
 		}
 		
 		if (!session) {
 			console.log('[AUTH] No session found - redirecting to login');
-			// Not logged in, redirect to login with next parameter
-			const currentPath = window.location.pathname;
 			authCheckComplete = false;
-			window.location.href = `/login?next=${encodeURIComponent(currentPath)}`;
+			// Force redirect - use replace to prevent back button issues
+			showLoginScreen();
 			return false;
 		}
 		
@@ -814,7 +978,8 @@ async function requireLogin() {
 		console.error('[AUTH] Fatal error in requireLogin:', error);
 		console.error('[AUTH] Error stack:', error.stack);
 		authCheckComplete = false;
-		// Don't redirect on fatal errors - let the app show error message
+		// Show login screen on error
+		showLoginScreen();
 		return false;
 	} finally {
 		authLoading = false;
@@ -827,25 +992,179 @@ async function getUser() {
 	return session?.user || null;
 }
 
-// Helper: Logout function
-async function logout() {
-	if (!supabaseClient) {
-		await initSupabase();
-	}
-	if (!supabaseClient) return;
+// Helper: Show login screen (content switching, not redirect)
+async function showLoginScreen() {
+	// Clear all app state
+	currentWorkout = null;
+	editingWorkoutId = null;
+	allExercises = [];
+	currentExercise = null;
 	
-	try {
-		await supabaseClient.auth.signOut();
-		localStorage.removeItem('workouts'); // Optional: clear workouts on logout
-		window.location.href = '/login';
-	} catch (e) {
-		console.error('Logout failed:', e);
-		window.location.href = '/login';
+	// Stop any timers
+	if (workoutTimer) {
+		clearInterval(workoutTimer);
+		workoutTimer = null;
+	}
+	workoutStartTime = null;
+	
+	// Reset supabase client
+	supabaseClient = null;
+	
+	// Hide ALL content sections (explicit for WebView)
+	const allContent = document.querySelectorAll('.content');
+	allContent.forEach(content => {
+		content.classList.add('hidden');
+		content.style.display = 'none';
+	});
+	
+	// Hide navigation bar on login screen
+	const navbar = document.querySelector('.navbar');
+	if (navbar) {
+		navbar.style.display = 'none';
+	}
+	
+	// Show login content (explicit for WebView)
+	const loginContent = document.getElementById('login-content');
+	if (loginContent) {
+		loginContent.classList.remove('hidden');
+		loginContent.style.display = '';
+		// Force reflow in WebView
+		if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+			loginContent.offsetHeight;
+		}
+		// Reset all form states
+		const loginSubmitBtn = document.getElementById('login-submit-btn') || document.getElementById('submit-btn');
+		if (loginSubmitBtn) {
+			loginSubmitBtn.disabled = false;
+			loginSubmitBtn.textContent = 'Sign In';
+		}
+		const loginEmail = document.getElementById('login-email') || document.getElementById('email');
+		const loginPassword = document.getElementById('login-password') || document.getElementById('password');
+		if (loginEmail) loginEmail.value = '';
+		if (loginPassword) loginPassword.value = '';
+		
+		// Initialize form after delay
+		setTimeout(() => {
+			initLoginForm();
+			initRegisterLink();
+		}, 150);
 	}
 }
 
+// Initialize register link
+function initRegisterLink() {
+	const registerLink = document.getElementById('show-register-link');
+	if (registerLink) {
+		// Remove old listeners
+		const newLink = registerLink.cloneNode(true);
+		registerLink.parentNode.replaceChild(newLink, registerLink);
+		
+		newLink.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			// Show register content
+			const loginContent = document.getElementById('login-content');
+			const registerContent = document.getElementById('register-content');
+			if (loginContent) {
+				loginContent.classList.add('hidden');
+				loginContent.style.display = 'none';
+			}
+			if (registerContent) {
+				registerContent.classList.remove('hidden');
+				registerContent.style.display = '';
+				// Reset register form states
+				const registerSubmitBtn = document.getElementById('register-submit-btn') || document.getElementById('submit-btn');
+				if (registerSubmitBtn) {
+					registerSubmitBtn.disabled = false;
+					registerSubmitBtn.textContent = 'Sign Up';
+				}
+				const registerEmail = document.getElementById('register-email');
+				const registerUsername = document.getElementById('register-username');
+				const registerPassword = document.getElementById('register-password');
+				if (registerEmail) registerEmail.value = '';
+				if (registerUsername) registerUsername.value = '';
+				if (registerPassword) registerPassword.value = '';
+				// Initialize register form
+				initRegisterForm();
+				initBackToLoginLink();
+			}
+		});
+	}
+}
+
+// Initialize back to login link
+function initBackToLoginLink() {
+	const backLink = document.getElementById('show-login-link');
+	if (backLink) {
+		// Remove old listeners
+		const newLink = backLink.cloneNode(true);
+		backLink.parentNode.replaceChild(newLink, backLink);
+		
+		newLink.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			// Show login content
+			const loginContent = document.getElementById('login-content');
+			const registerContent = document.getElementById('register-content');
+			if (registerContent) {
+				registerContent.classList.add('hidden');
+				registerContent.style.display = 'none';
+			}
+			if (loginContent) {
+				loginContent.classList.remove('hidden');
+				loginContent.style.display = '';
+				// Reset login form states
+				const loginSubmitBtn = document.getElementById('login-submit-btn') || document.getElementById('submit-btn');
+				if (loginSubmitBtn) {
+					loginSubmitBtn.disabled = false;
+					loginSubmitBtn.textContent = 'Sign In';
+				}
+				const loginEmail = document.getElementById('login-email') || document.getElementById('email');
+				const loginPassword = document.getElementById('login-password') || document.getElementById('password');
+				if (loginEmail) loginEmail.value = '';
+				if (loginPassword) loginPassword.value = '';
+				initLoginForm();
+				initRegisterLink();
+			}
+		});
+	}
+}
+
+// Helper: Logout function
+async function logout() {
+	try {
+		// Clear all data
+		localStorage.clear();
+		
+		// Sign out from Supabase
+		if (supabaseClient) {
+	try {
+		await supabaseClient.auth.signOut();
+	} catch (e) {
+				// Ignore sign out errors
+			}
+		}
+		
+		// Reset client
+		supabaseClient = null;
+		
+		// Show login screen
+		showLoginScreen();
+	} catch (e) {
+		// On any error, just clear and show login
+		localStorage.clear();
+		supabaseClient = null;
+		showLoginScreen();
+	}
+}
+
+// Make logout globally accessible
+window.logout = logout;
+
 // ========== NAVIGATION ==========
 function initNavigation() {
+	// Load credits balance when user is logged in
+	loadCreditsBalance();
 	const navButtons = document.querySelectorAll('.nav-btn');
 	navButtons.forEach(btn => {
 			const tab = btn.dataset.tab;
@@ -869,8 +1188,36 @@ function initNavigation() {
 }
 
 // Make switchTab globally available
-window.switchTab = function(tab) {
-	console.log('[NAV] switchTab called (global):', tab);
+window.switchTab = async function(tab) {
+	// If already on login screen, ignore
+	const loginContent = document.getElementById('login-content');
+	if (loginContent && !loginContent.classList.contains('hidden')) {
+		return;
+	}
+	
+	// Check auth
+	if (supabaseClient) {
+		try {
+			const { data: { session }, error } = await supabaseClient.auth.getSession();
+			if (!session || error) {
+				showLoginScreen();
+				return;
+			}
+		} catch (e) {
+			showLoginScreen();
+			return;
+		}
+	} else {
+		showLoginScreen();
+		return;
+	}
+	
+	// Show navigation bar (user is logged in)
+	const navbar = document.querySelector('.navbar');
+	if (navbar) {
+		navbar.style.display = '';
+	}
+	
 	// Update nav buttons
 	document.querySelectorAll('.nav-btn').forEach(btn => {
 		btn.classList.toggle('active', btn.dataset.tab === tab);
@@ -879,6 +1226,7 @@ window.switchTab = function(tab) {
 	// Hide all content
 	document.querySelectorAll('.content').forEach(content => {
 		content.classList.add('hidden');
+		content.style.display = 'none';
 	});
 	
 	// Show selected content
@@ -886,16 +1234,18 @@ window.switchTab = function(tab) {
 	const content = document.getElementById(contentId);
 	if (content) {
 		content.classList.remove('hidden');
+		content.style.display = ''; // Reset display style
 		currentTab = tab;
 		
-		// Load tab-specific data
+		// Load tab-specific data (only if user is logged in)
 		if (tab === 'workouts') {
-			loadWorkouts();
+			await loadWorkouts();
 			updateWorkoutStartButton();
 		} else if (tab === 'progress') {
-			loadProgress();
+			await loadProgress();
 		} else if (tab === 'settings') {
-			loadSettings();
+			// Settings can be shown even if user data fails to load
+			await loadSettings();
 		}
 	}
 }
@@ -1250,6 +1600,12 @@ async function selectExercise(key) {
 
 // ========== EXERCISE SELECTOR ==========
 function initExerciseSelector() {
+	// Prevent duplicate initialization
+	if (exerciseSelectorInitialized) {
+		console.log('[ExerciseSelector] Already initialized, skipping...');
+		return;
+	}
+	
 	const selector = document.getElementById('exercise-selector');
 	const closeBtn = document.getElementById('exercise-selector-close');
 	const searchInput = document.getElementById('exercise-selector-search');
@@ -1293,6 +1649,19 @@ function initExerciseSelector() {
 				aiDetectBtn.textContent = 'Analyzing...';
 				
 				try {
+					// Get Supabase session for authentication
+					const supabase = await initSupabase();
+					if (!supabase) {
+						alert('Please log in to use AI detect');
+						return;
+					}
+					
+					const { data: { session } } = await supabase.auth.getSession();
+					if (!session) {
+						alert('Please log in to use AI detect');
+						return;
+					}
+					
 					const formData = new FormData();
 					formData.append('image', file);
 					
@@ -1302,10 +1671,22 @@ function initExerciseSelector() {
 					
 					const res = await fetch(apiUrl, {
 						method: 'POST',
+						headers: {
+							'Authorization': `Bearer ${session.access_token}`
+						},
 						body: formData
 					});
 					
 					console.log('[AI Detect] Response status:', res.status, res.statusText);
+					
+					// Handle no credits (403)
+					if (res.status === 403) {
+						const errorData = await res.json();
+						alert(errorData.error || 'No credits available. You\'ve used all 10 free credits this month.');
+						// Reload credits display
+						loadCreditsBalance();
+						return;
+					}
 					
 					if (!res.ok) {
 						const errorText = await res.text();
@@ -1359,6 +1740,11 @@ function initExerciseSelector() {
 					const matchingExercise = findExerciseByName(exerciseName);
 					console.log('[AI Detect] Match found?', matchingExercise ? matchingExercise.display : 'NO MATCH');
 					
+					// Update credits display if credits_remaining is in response
+					if (data.credits_remaining !== undefined) {
+						loadCreditsBalance();
+					}
+					
 					if (matchingExercise) {
 						console.log('[AI Detect] Adding exercise:', matchingExercise.display);
 						// Close selector en voeg toe
@@ -1389,6 +1775,9 @@ function initExerciseSelector() {
 	// Muscle filters
 	const muscles = ['All', 'Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Abs'];
 	if (musclesContainer) {
+		// Clear container first to prevent duplicates when initExerciseSelector is called multiple times
+		musclesContainer.innerHTML = '';
+		
 		muscles.forEach(muscle => {
 			const btn = document.createElement('button');
 			btn.textContent = muscle;
@@ -1467,7 +1856,7 @@ function initExerciseSelector() {
 						: `<div class="exercise-selector-item-image" style="background:rgba(124,92,255,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;">${initial}</div>`}
 				<div class="exercise-selector-item-content">
 					<div style="font-weight: 600;">${ex.display}</div>
-					${ex.muscles && ex.muscles.length > 0 ? `<span>${ex.muscles.join(', ')}</span>` : ''}
+					${ex.muscles && ex.muscles.length > 0 ? `<span>${[...new Set(ex.muscles)].join(', ')}</span>` : ''}
 					</div>
 				</div>
 			`;
@@ -1549,6 +1938,12 @@ function initExerciseSelector() {
 	window.filterExercisesForSelector = (query, muscle) => {
 		filterExercises(query, muscle);
 	};
+	
+	// Mark as initialized to prevent duplicate initialization
+	exerciseSelectorInitialized = true;
+	
+	// Mark as initialized to prevent duplicate initialization
+	exerciseSelectorInitialized = true;
 }
 
 function showExerciseRefinementsInSelector(refinementOptions, selectorEl) {
@@ -1593,7 +1988,7 @@ function showExerciseRefinementsInSelector(refinementOptions, selectorEl) {
 					: `<div class="exercise-selector-item-image" style="background:rgba(124,92,255,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;">${initial}</div>`}
 				<div class="exercise-selector-item-content">
 					<div style="font-weight: 600;">${exerciseName}</div>
-					${muscles && muscles.length ? `<span>${muscles.join(', ')}</span>` : ''}
+					${muscles && muscles.length ? `<span>${[...new Set(muscles)].join(', ')}</span>` : ''}
 				</div>
 			</div>
 		`;
@@ -1686,7 +2081,7 @@ async function classifyForExerciseSelector(file, predictionsContainer, selectorE
 			const labelLower = label.toLowerCase().trim();
 			const isGeneric = labelLower === 'smith machine' || labelLower === 'chinning dipping' || 
 			                  labelLower === 'leg raise tower' || labelLower === 'dumbbell';
-			const subtitleText = isGeneric ? 'Click to see exercises' : (muscles && muscles.length ? muscles.join(', ') : '');
+			const subtitleText = isGeneric ? 'Click to see exercises' : (muscles && muscles.length ? [...new Set(muscles)].join(', ') : '');
 			
 			btn.innerHTML = `
 				<div class="exercise-selector-item-main">
@@ -1884,9 +2279,18 @@ function initWorkoutBuilder() {
 	}
 	
 	if (saveWorkoutBtn) {
-		saveWorkoutBtn.addEventListener('click', () => {
-			saveWorkout();
-		});
+		// Remove any existing listeners first
+		const newBtn = saveWorkoutBtn.cloneNode(true);
+		saveWorkoutBtn.parentNode.replaceChild(newBtn, saveWorkoutBtn);
+		
+		// Add single event listener
+		newBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			if (window.saveWorkout && !isSavingWorkout) {
+				window.saveWorkout();
+			}
+		}, { once: false });
 	}
 
 	if (backWorkoutBtn) {
@@ -2253,10 +2657,10 @@ async function addExerciseToWorkout(exercise) {
 		try {
 		const apiUrl = getApiUrl('/exercise-info');
 		const res = await fetch(apiUrl, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ exercise: exercise.key || exercise })
-		});
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ exercise: exercise.key || exercise })
+			});
 			exerciseData = await res.json();
 		} catch (e) {
 			console.error('Failed to get exercise info:', e);
@@ -2473,7 +2877,10 @@ function renderWorkoutList() {
 		cancelBtn.className = 'btn workout-cancel-btn';
 		cancelBtn.textContent = 'Cancel workout';
 		cancelBtn.onclick = () => {
+			// Ask for confirmation before canceling
+			if (confirm('Are you sure you want to cancel this workout? All unsaved progress will be lost.')) {
 			cancelWorkout();
+			}
 		};
 		addBtn.insertAdjacentElement('afterend', cancelBtn);
 	}
@@ -2489,72 +2896,386 @@ function capitalizeFirstLetter(str) {
 }
 
 // Make saveWorkout globally available
-window.saveWorkout = function() {
+window.saveWorkout = async function() {
 	console.log('[WORKOUT] saveWorkout called (global)');
+	
+	// Prevent duplicate saves - check immediately and set flag synchronously
+	if (isSavingWorkout) {
+		console.log('[WORKOUT] Save already in progress, ignoring duplicate call');
+		return;
+	}
+	
 	if (!currentWorkout) return;
 	
-	const workoutName = document.getElementById('workout-name');
-	if (workoutName) {
-		const nameValue = workoutName.value || 'Workout';
-		const capitalizedName = capitalizeFirstLetter(nameValue);
-		currentWorkout.name = capitalizedName;
-		workoutName.value = capitalizedName; // Update the input field to show capitalized version
+	// Set saving flag IMMEDIATELY (synchronously) before any async operations
+	isSavingWorkout = true;
+	
+	// Disable save button immediately
+	const saveWorkoutBtn = document.getElementById('save-workout');
+	if (saveWorkoutBtn) {
+		saveWorkoutBtn.disabled = true;
+		saveWorkoutBtn.style.opacity = '0.5';
+		saveWorkoutBtn.style.pointerEvents = 'none';
 	}
 	
-	currentWorkout.exercises = (currentWorkout.exercises || []).map(ex => ({
-		...ex,
-		sets: (ex.sets || []).filter(set => set.weight !== '' || set.reps !== '')
-	}));
-	
-	let duration = currentWorkout.duration || 0;
-	if (!editingWorkoutId && workoutStartTime) {
-		duration = Date.now() - workoutStartTime;
-	}
-	currentWorkout.duration = duration;
-	
-	// Save to localStorage for now
-	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-	const payload = {
-				...currentWorkout,
-		id: editingWorkoutId || currentWorkout.id || Date.now(),
-		date: editingWorkoutId ? (currentWorkout.date || new Date().toISOString()) : new Date().toISOString()
-	};
-	
-	if (editingWorkoutId) {
-		const idx = workouts.findIndex(w => w.id === editingWorkoutId);
-		if (idx >= 0) {
-			workouts[idx] = payload;
+	try {
+		// Check if user is logged in
+		if (!supabaseClient) {
+			await initSupabase();
+		}
+		if (!supabaseClient) {
+			alert('Please log in to save workouts');
+			isSavingWorkout = false;
+			const saveWorkoutBtn = document.getElementById('save-workout');
+			if (saveWorkoutBtn) {
+				saveWorkoutBtn.disabled = false;
+				saveWorkoutBtn.style.opacity = '1';
+				saveWorkoutBtn.style.pointerEvents = 'auto';
+			}
+			return;
+		}
+		
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			alert('Please log in to save workouts');
+			isSavingWorkout = false;
+			const saveWorkoutBtn = document.getElementById('save-workout');
+			if (saveWorkoutBtn) {
+				saveWorkoutBtn.disabled = false;
+				saveWorkoutBtn.style.opacity = '1';
+				saveWorkoutBtn.style.pointerEvents = 'auto';
+			}
+			return;
+		}
+		
+		const workoutName = document.getElementById('workout-name');
+		if (workoutName) {
+			const nameValue = workoutName.value || 'Workout';
+			const capitalizedName = capitalizeFirstLetter(nameValue);
+			currentWorkout.name = capitalizedName;
+			workoutName.value = capitalizedName; // Update the input field to show capitalized version
+		}
+		
+		currentWorkout.exercises = (currentWorkout.exercises || []).map(ex => ({
+			...ex,
+			sets: (ex.sets || []).filter(set => set.weight !== '' || set.reps !== '')
+		}));
+		
+		let duration = currentWorkout.duration || 0;
+		if (!editingWorkoutId && workoutStartTime) {
+			duration = Date.now() - workoutStartTime;
+		}
+		currentWorkout.duration = duration;
+		
+		// Calculate total volume
+		const volume = calculateWorkoutVolume(currentWorkout);
+		
+		// Determine workout date - SIMPLE: use originalDate if editing, today if new
+		let workoutDate;
+		if (editingWorkoutId && currentWorkout.originalDate) {
+			// When editing, use the EXACT original date string - NO CONVERSION
+			workoutDate = currentWorkout.originalDate;
+		} else {
+			// New workout - use today's date
+			const today = new Date();
+			const year = today.getFullYear();
+			const month = String(today.getMonth() + 1).padStart(2, '0');
+			const day = String(today.getDate()).padStart(2, '0');
+			workoutDate = `${year}-${month}-${day}`;
+		}
+		
+		// Prepare payload for Supabase
+		const workoutPayload = {
+			user_id: session.user.id,
+			name: currentWorkout.name || 'Workout',
+			date: workoutDate,
+			exercises: currentWorkout.exercises || [],
+			duration: duration,
+			total_volume: volume
+		};
+		
+		if (editingWorkoutId) {
+			// Update existing workout
+			const { data, error } = await supabaseClient
+				.from('workouts')
+				.update(workoutPayload)
+				.eq('id', editingWorkoutId)
+				.eq('user_id', session.user.id)
+				.select()
+				.single();
+			
+			if (error) {
+				console.error('[WORKOUT] Error updating workout:', error);
+				alert('Failed to update workout. Please try again.');
+				isSavingWorkout = false;
+				const saveWorkoutBtn = document.getElementById('save-workout');
+				if (saveWorkoutBtn) {
+					saveWorkoutBtn.disabled = false;
+					saveWorkoutBtn.style.opacity = '1';
+					saveWorkoutBtn.style.pointerEvents = 'auto';
+				}
+				return;
+			}
+			console.log('[WORKOUT] Workout updated successfully:', data);
+		} else {
+			// Insert new workout
+			const { data, error } = await supabaseClient
+				.from('workouts')
+				.insert(workoutPayload)
+				.select()
+				.single();
+			
+			if (error) {
+				console.error('[WORKOUT] Error saving workout:', error);
+				alert('Failed to save workout. Please try again.');
+				isSavingWorkout = false;
+				const saveWorkoutBtn = document.getElementById('save-workout');
+				if (saveWorkoutBtn) {
+					saveWorkoutBtn.disabled = false;
+					saveWorkoutBtn.style.opacity = '1';
+					saveWorkoutBtn.style.pointerEvents = 'auto';
+				}
+				return;
+			}
+			console.log('[WORKOUT] Workout saved successfully:', data);
+		}
+		
+		// Also save to localStorage as backup
+		const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		const payload = {
+			...currentWorkout,
+			id: editingWorkoutId || currentWorkout.id || Date.now(),
+			date: workoutDate
+		};
+		
+		if (editingWorkoutId) {
+			const idx = workouts.findIndex(w => w.id === editingWorkoutId);
+			if (idx >= 0) {
+				workouts[idx] = payload;
+			} else {
+				workouts.push(payload);
+			}
 		} else {
 			workouts.push(payload);
 		}
-	} else {
-		workouts.push(payload);
+		localStorage.setItem('workouts', JSON.stringify(workouts));
+		
+		// Update streak for all workouts (recalculate from actual data)
+		loadStreak();
+		
+		// Update daily notification if user just worked out
+		updateDailyNotificationIfNeeded();
+		
+		editingWorkoutId = null;
+		clearWorkoutDraft();
+		
+		const saveSuccess = document.getElementById('save-success');
+		if (saveSuccess) {
+			saveSuccess.classList.remove('hidden');
+			setTimeout(() => {
+				saveSuccess.classList.add('hidden');
+			}, 2000);
+		}
+		
+		await loadWorkouts();
+		switchTab('workouts');
+	} catch (error) {
+		console.error('[WORKOUT] Unexpected error saving workout:', error);
+		alert('An error occurred while saving the workout. Please try again.');
+	} finally {
+		// Always reset the saving flag and re-enable button
+		isSavingWorkout = false;
+		const saveWorkoutBtn = document.getElementById('save-workout');
+		if (saveWorkoutBtn) {
+			saveWorkoutBtn.disabled = false;
+			saveWorkoutBtn.style.opacity = '1';
+			saveWorkoutBtn.style.pointerEvents = 'auto';
+		}
 	}
-	localStorage.setItem('workouts', JSON.stringify(workouts));
-	
-	// Update streak for all workouts (recalculate from actual data)
-	loadStreak();
-	
-	// Update daily notification if user just worked out
-	updateDailyNotificationIfNeeded();
-	
-	editingWorkoutId = null;
-	clearWorkoutDraft();
-	
-	const saveSuccess = document.getElementById('save-success');
-	if (saveSuccess) {
-		saveSuccess.classList.remove('hidden');
-		setTimeout(() => {
-			saveSuccess.classList.add('hidden');
-		}, 2000);
-	}
-	
-	loadWorkouts(workouts);
-	switchTab('workouts');
 }
 
-function loadWorkouts(prefetchedWorkouts = null) {
-	const workouts = prefetchedWorkouts ?? JSON.parse(localStorage.getItem('workouts') || '[]');
+// Migrate localStorage workouts to Supabase
+async function migrateLocalStorageWorkouts() {
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		return;
+	}
+	
+	const { data: { session } } = await supabaseClient.auth.getSession();
+	if (!session) {
+		return;
+	}
+	
+	// Check if migration already done for this user
+	const migrationKey = `workouts_migrated_${session.user.id}`;
+	if (localStorage.getItem(migrationKey) === 'true') {
+		return; // Already migrated
+	}
+	
+	// Get workouts from localStorage
+	const localWorkouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	if (localWorkouts.length === 0) {
+		// Mark as migrated even if no workouts to avoid checking again
+		localStorage.setItem(migrationKey, 'true');
+		return;
+	}
+	
+	try {
+		// Check if user already has workouts in Supabase
+		const { data: existingWorkouts, error: checkError } = await supabaseClient
+			.from('workouts')
+			.select('id')
+			.eq('user_id', session.user.id)
+			.limit(1);
+		
+		if (checkError) {
+			console.error('[MIGRATION] Error checking existing workouts:', checkError);
+			return;
+		}
+		
+		// If user already has workouts in Supabase, don't migrate (they might have been synced already)
+		if (existingWorkouts && existingWorkouts.length > 0) {
+			console.log('[MIGRATION] User already has workouts in Supabase, skipping migration');
+			localStorage.setItem(migrationKey, 'true');
+			return;
+		}
+		
+		// Migrate each workout
+		const workoutsToMigrate = localWorkouts.map(workout => {
+			// Preserve date as YYYY-MM-DD string to avoid timezone issues
+			let workoutDate;
+			if (workout.date) {
+				if (typeof workout.date === 'string' && workout.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+					// Already a date string, use it directly
+					workoutDate = workout.date;
+				} else {
+					// ISO string or Date object, extract date part using local time
+					const date = new Date(workout.date);
+					const year = date.getFullYear();
+					const month = String(date.getMonth() + 1).padStart(2, '0');
+					const day = String(date.getDate()).padStart(2, '0');
+					workoutDate = `${year}-${month}-${day}`;
+				}
+			} else {
+				// No date, use today
+				const today = new Date();
+				const year = today.getFullYear();
+				const month = String(today.getMonth() + 1).padStart(2, '0');
+				const day = String(today.getDate()).padStart(2, '0');
+				workoutDate = `${year}-${month}-${day}`;
+			}
+			
+			return {
+				user_id: session.user.id,
+				name: workout.name || 'Workout',
+				date: workoutDate,
+				exercises: workout.exercises || [],
+				duration: workout.duration || 0,
+				total_volume: calculateWorkoutVolume(workout) || 0
+			};
+		});
+		
+		if (workoutsToMigrate.length > 0) {
+			const { data, error } = await supabaseClient
+				.from('workouts')
+				.insert(workoutsToMigrate)
+				.select();
+			
+			if (error) {
+				console.error('[MIGRATION] Error migrating workouts:', error);
+				return;
+			}
+			
+			console.log(`[MIGRATION] Successfully migrated ${workoutsToMigrate.length} workouts to Supabase`);
+		}
+		
+		// Mark migration as complete
+		localStorage.setItem(migrationKey, 'true');
+	} catch (error) {
+		console.error('[MIGRATION] Unexpected error during migration:', error);
+	}
+}
+
+async function loadWorkouts(prefetchedWorkouts = null) {
+	// Check if user is logged in
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		showLoginScreen();
+		return;
+	}
+	
+	const { data: { session } } = await supabaseClient.auth.getSession();
+	if (!session) {
+		showLoginScreen();
+		return;
+	}
+	
+	let workouts = [];
+	
+	// If prefetched workouts provided, use those (for backward compatibility)
+	if (prefetchedWorkouts) {
+		workouts = prefetchedWorkouts;
+	} else {
+		// Load from Supabase
+		try {
+			const { data, error } = await supabaseClient
+				.from('workouts')
+				.select('*')
+				.eq('user_id', session.user.id)
+				.order('date', { ascending: false });
+			
+			if (error) {
+				console.error('[WORKOUT] Error loading workouts:', error);
+				// Fallback to localStorage if Supabase fails
+				workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+			} else {
+				// Transform Supabase data to match app format
+				workouts = (data || []).map(workout => {
+					// CRITICAL: Preserve the EXACT date string from Supabase (YYYY-MM-DD)
+					// Store it as both 'date' and 'originalDate' to ensure it's never lost
+					let workoutDate;
+					if (workout.date) {
+						// Supabase returns dates as YYYY-MM-DD strings - use it DIRECTLY
+						if (typeof workout.date === 'string' && workout.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+							workoutDate = workout.date;
+						} else {
+							// Fallback: extract date part (shouldn't happen with Supabase)
+							workoutDate = workout.date.toString().split('T')[0];
+						}
+					} else {
+						// No date, use today
+						const today = new Date();
+						const year = today.getFullYear();
+						const month = String(today.getMonth() + 1).padStart(2, '0');
+						const day = String(today.getDate()).padStart(2, '0');
+						workoutDate = `${year}-${month}-${day}`;
+					}
+					
+					return {
+						id: workout.id,
+						name: workout.name || 'Workout',
+						date: workoutDate, // For display/sorting
+						originalDate: workoutDate, // EXACT original date - NEVER TOUCH THIS
+						exercises: workout.exercises || [],
+						duration: workout.duration || 0,
+						total_volume: workout.total_volume || 0
+					};
+				});
+				
+				// Also sync to localStorage as backup
+				localStorage.setItem('workouts', JSON.stringify(workouts));
+			}
+		} catch (error) {
+			console.error('[WORKOUT] Unexpected error loading workouts:', error);
+			// Fallback to localStorage
+			workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		}
+	}
+	
 	const workoutsList = document.getElementById('workouts-list');
 	const workoutsCount = document.getElementById('workouts-count');
 	
@@ -2571,11 +3292,17 @@ function loadWorkouts(prefetchedWorkouts = null) {
 			return;
 		}
 		
-		const sorted = [...workouts].sort((a, b) => new Date(b.date) - new Date(a.date));
+		// Sort by date string (YYYY-MM-DD) directly to avoid timezone issues
+		const sorted = [...workouts].sort((a, b) => {
+			// Compare date strings directly (YYYY-MM-DD format)
+			return b.date.localeCompare(a.date);
+		});
 		
 		sorted.forEach(workout => {
 			const li = document.createElement('li');
-			const date = new Date(workout.date);
+			// Parse date string (YYYY-MM-DD) to Date object for display
+			// Use noon (12:00) to avoid timezone issues when converting
+			const date = new Date(workout.date + 'T12:00:00');
 			const dateLabel = formatWorkoutDate(date);
 			const durationLabel = formatDurationForCard(workout.duration);
 			const volume = calculateWorkoutVolume(workout);
@@ -3021,17 +3748,77 @@ function formatVolume(volumeKg) {
 	return `${Math.round(volumeKg).toLocaleString()} ${unit}`;
 }
 
-function deleteWorkout(id) {
-	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-	const filtered = workouts.filter(workout => workout.id !== id);
-	localStorage.setItem('workouts', JSON.stringify(filtered));
-	loadWorkouts();
+async function deleteWorkout(id) {
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		alert('Please log in to delete workouts');
+		return;
+	}
+	
+	const { data: { session } } = await supabaseClient.auth.getSession();
+	if (!session) {
+		alert('Please log in to delete workouts');
+		return;
+	}
+	
+	try {
+		// Delete from Supabase
+		const { error } = await supabaseClient
+			.from('workouts')
+			.delete()
+			.eq('id', id)
+			.eq('user_id', session.user.id);
+		
+		if (error) {
+			console.error('[WORKOUT] Error deleting workout:', error);
+			alert('Failed to delete workout. Please try again.');
+			return;
+		}
+		
+		// Also remove from localStorage
+		const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		const filtered = workouts.filter(workout => workout.id !== id);
+		localStorage.setItem('workouts', JSON.stringify(filtered));
+		
+		await loadWorkouts();
+	} catch (error) {
+		console.error('[WORKOUT] Unexpected error deleting workout:', error);
+		alert('An error occurred while deleting the workout. Please try again.');
+	}
 }
 
 function editWorkout(workout) {
 	if (!workout) return;
 	currentWorkout = JSON.parse(JSON.stringify(workout));
 	editingWorkoutId = workout.id;
+	
+	// CRITICAL: Preserve the original date string EXACTLY as it came from Supabase
+	// Store it separately so it's never touched or converted
+	if (workout.originalDate) {
+		currentWorkout.originalDate = workout.originalDate;
+	} else if (workout.date) {
+		// If originalDate not set, extract it from the date field
+		// This handles workouts loaded from Supabase (which stores as YYYY-MM-DD)
+		if (typeof workout.date === 'string' && workout.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+			currentWorkout.originalDate = workout.date;
+		} else {
+			// Fallback: extract date part from ISO string
+			const dateStr = workout.date.toString();
+			if (dateStr.includes('T')) {
+				currentWorkout.originalDate = dateStr.split('T')[0];
+			} else {
+				// Last resort: use local date components
+				const date = new Date(workout.date);
+				const year = date.getFullYear();
+				const month = String(date.getMonth() + 1).padStart(2, '0');
+				const day = String(date.getDate()).padStart(2, '0');
+				currentWorkout.originalDate = `${year}-${month}-${day}`;
+			}
+		}
+	}
+	
 	workoutStartTime = null;
 	if (workoutTimer) {
 		clearInterval(workoutTimer);
@@ -3174,6 +3961,17 @@ function initProgress() {
 }
 
 async function loadProgress() {
+	// Check if user is logged in
+	if (supabaseClient) {
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			showLoginScreen();
+			return;
+		}
+	} else {
+		showLoginScreen();
+		return;
+	}
 	const progress = JSON.parse(localStorage.getItem('progress') || '[]');
 	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
 	
@@ -4002,15 +4800,37 @@ function renderProgressiveOverloadTracker(workouts) {
 // ======================
 // 🚪 LOGOUT
 // ======================
+// Track if logout is already initialized to prevent duplicate listeners
+let logoutInitialized = false;
+
 function initLogout() {
 	const btn = document.getElementById('logout-btn');
 	if (!btn) return;
 	
-	btn.addEventListener('click', async () => {
+	// If already initialized, remove old listener first
+	if (logoutInitialized) {
+		// Clone button to remove all listeners
+		const newBtn = btn.cloneNode(true);
+		btn.parentNode.replaceChild(newBtn, btn);
+		// Update reference
+		const updatedBtn = document.getElementById('logout-btn');
+		if (!updatedBtn) return;
+		updatedBtn.addEventListener('click', handleLogoutClick);
+		return;
+	}
+	
+	// First time initialization
+	btn.addEventListener('click', handleLogoutClick);
+	logoutInitialized = true;
+}
+
+async function handleLogoutClick(e) {
+	e.preventDefault();
+	e.stopPropagation();
+	
 			if (confirm('Are you sure you want to log out?')) {
 			await logout();
 			}
-		});
 	}
 
 // ========== SETTINGS ==========
@@ -4068,8 +4888,8 @@ function initSettingsToggles() {
 	// Weight unit toggle (kg/lbs)
 	const unitToggle = document.getElementById('settings-unit-toggle');
 	if (unitToggle) {
-		// Load saved state (default to lbs = true/right, kg = false/left)
-		const savedUnit = localStorage.getItem('settings-weight-unit') || 'lbs';
+		// Load saved state (default to kg = false/left, lbs = true/right)
+		const savedUnit = getWeightUnit(); // Uses 'kg' as default for new accounts
 		unitToggle.checked = savedUnit === 'lbs'; // Right (purple) = lbs, Left = kg
 		unitToggle.addEventListener('change', (e) => {
 			const unit = e.target.checked ? 'lbs' : 'kg'; // Right (purple) = lbs, Left = kg
@@ -4108,6 +4928,8 @@ let restTimerInterval = null;
 let restTimerSeconds = 0;
 let restTimerRunning = false;
 let scheduledNotificationId = null;
+let restTimerStartTime = null; // Track when timer started for background accuracy
+let restTimerInitialSeconds = 0; // Store initial seconds when timer starts
 
 function initRestTimer() {
 	const overlay = document.getElementById('rest-timer-overlay');
@@ -4148,31 +4970,80 @@ function initRestTimer() {
 }
 
 async function startRestTimer() {
+	// Prevent multiple intervals
+	if (restTimerInterval) {
+		clearInterval(restTimerInterval);
+		restTimerInterval = null;
+	}
+	
 	if (restTimerSeconds === 0) {
 		restTimerSeconds = 60; // Default to 1 minute
+		restTimerInitialSeconds = 60;
+	} else if (restTimerInitialSeconds === 0) {
+		// If initialSeconds is 0 but restTimerSeconds has a value, set it
+		restTimerInitialSeconds = restTimerSeconds;
+	}
+	
+	// If timer is already running, don't reset it - just ensure it continues
+	if (restTimerRunning && restTimerStartTime) {
+		// Timer is already running - don't reset, just ensure interval is active
+		if (!restTimerInterval) {
+			// Restart interval if it was cleared (e.g., after app comes back from background)
+			restTimerInterval = setInterval(() => {
+				if (restTimerRunning && restTimerStartTime) {
+					const elapsed = Math.floor((Date.now() - restTimerStartTime) / 1000);
+					const remaining = Math.max(0, restTimerInitialSeconds - elapsed);
+					restTimerSeconds = remaining;
+					updateRestTimerDisplay();
+					
+					if (remaining === 0) {
+						stopRestTimer();
+						showRestTimerComplete();
+					}
+				}
+			}, 100);
+		}
+		return; // Don't restart timer if it's already running
 	}
 	
 	restTimerRunning = true;
+	restTimerStartTime = Date.now(); // Track start time for accurate timing
+	restTimerInitialSeconds = restTimerSeconds; // Store initial value
 	const startBtn = document.getElementById('rest-timer-start');
 	if (startBtn) startBtn.textContent = 'Pause';
 	
 	// Schedule notification for when timer reaches 00:00 (works even when app is in background)
 	await scheduleRestTimerNotification(restTimerSeconds);
 	
+	// Timer based on elapsed time - always accurate, even in background
 	restTimerInterval = setInterval(() => {
-		if (restTimerSeconds > 0) {
-			restTimerSeconds--;
+		if (restTimerRunning && restTimerStartTime) {
+			// Calculate elapsed time since start
+			const elapsed = Math.floor((Date.now() - restTimerStartTime) / 1000);
+			const remaining = Math.max(0, restTimerInitialSeconds - elapsed);
+			
+			// Always update display (even if value didn't change, for smooth updates)
+			restTimerSeconds = remaining;
 			updateRestTimerDisplay();
-		} else {
-			// Timer finished
-			stopRestTimer();
-			showRestTimerComplete();
+			
+			if (remaining === 0) {
+				// Timer finished
+				stopRestTimer();
+				showRestTimerComplete();
+			}
 		}
-	}, 1000);
+	}, 100); // Check every 100ms for smooth updates, but calculate based on elapsed time
 }
 
 async function pauseRestTimer() {
 	restTimerRunning = false;
+	// Update initial seconds to current remaining time for resume
+	if (restTimerStartTime) {
+		const elapsed = Math.floor((Date.now() - restTimerStartTime) / 1000);
+		restTimerInitialSeconds = Math.max(0, restTimerInitialSeconds - elapsed);
+		restTimerSeconds = restTimerInitialSeconds;
+	}
+	restTimerStartTime = null; // Clear start time
 	const startBtn = document.getElementById('rest-timer-start');
 	if (startBtn) startBtn.textContent = 'Start';
 	
@@ -4187,6 +5058,8 @@ async function pauseRestTimer() {
 
 async function stopRestTimer() {
 	restTimerRunning = false;
+	restTimerStartTime = null; // Clear start time
+	restTimerInitialSeconds = 0;
 	const startBtn = document.getElementById('rest-timer-start');
 	if (startBtn) startBtn.textContent = 'Start';
 	
@@ -4285,15 +5158,40 @@ function showRestTimerComplete() {
 }
 
 // Function to open rest timer (called from workout)
+// IMPORTANT: This only opens the overlay, does NOT start the timer automatically
 function openRestTimer() {
 	const overlay = document.getElementById('rest-timer-overlay');
 	if (!overlay) return;
 	
+	// Don't reset timer if it's already running - just show the overlay
+	if (restTimerRunning && restTimerStartTime) {
+		// Timer is running - just update display with current remaining time
+		const elapsed = Math.floor((Date.now() - restTimerStartTime) / 1000);
+		const remaining = Math.max(0, restTimerInitialSeconds - elapsed);
+		restTimerSeconds = remaining;
+		updateRestTimerDisplay();
+		overlay.classList.remove('hidden');
+		const startBtn = document.getElementById('rest-timer-start');
+		if (startBtn) startBtn.textContent = 'Pause';
+		return;
+	}
+	
+	// Timer is not running - set default if needed
 	overlay.classList.remove('hidden');
 	if (restTimerSeconds === 0) {
 		restTimerSeconds = 60; // Default 1 minute
+		restTimerInitialSeconds = 60;
+	} else {
+		// If timer has a value but initialSeconds is 0, set it
+		if (restTimerInitialSeconds === 0) {
+			restTimerInitialSeconds = restTimerSeconds;
+		}
 	}
 	updateRestTimerDisplay();
+	
+	// Ensure start button shows "Start" (timer should NOT auto-start)
+	const startBtn = document.getElementById('rest-timer-start');
+	if (startBtn) startBtn.textContent = 'Start';
 }
 
 // Check if set is complete and trigger rest timer if enabled
@@ -4649,15 +5547,37 @@ function calculateTotalHours(workouts) {
 }
 
 async function loadSettings() {
+	// Check if user is logged in - but don't redirect, just return if not logged in
+	if (supabaseClient) {
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			// Don't show login screen here - switchTab already handles that
+			// Just show placeholder data
+			const usernameEl = document.getElementById('settings-username');
+			const emailEl = document.getElementById('settings-email');
+			if (usernameEl) usernameEl.textContent = '—';
+			if (emailEl) emailEl.textContent = '—';
+			return;
+		}
+	} else {
+		// No supabase client - show placeholder
+		const usernameEl = document.getElementById('settings-username');
+		const emailEl = document.getElementById('settings-email');
+		if (usernameEl) usernameEl.textContent = '—';
+		if (emailEl) emailEl.textContent = '—';
+		return;
+	}
+	
 	// Load user info from Supabase
 	try {
 		console.log('[SETTINGS] Loading user data...');
 		const user = await getUser();
 		console.log('[SETTINGS] User result:', user ? user.email : 'null');
 		
+		const usernameEl = document.getElementById('settings-username');
+		const emailEl = document.getElementById('settings-email');
+		
 		if (user) {
-				const usernameEl = document.getElementById('settings-username');
-				const emailEl = document.getElementById('settings-email');
 			if (usernameEl) {
 				const username = user.user_metadata?.username || user.email?.split('@')[0] || '—';
 				usernameEl.textContent = username;
@@ -4669,28 +5589,18 @@ async function loadSettings() {
 				console.log('[SETTINGS] Email set:', email);
 			}
 		} else {
-			console.error('[SETTINGS] No user found - checking session...');
-			// Check session directly
-			if (supabaseClient) {
-				const { data: { session }, error } = await supabaseClient.auth.getSession();
-				console.log('[SETTINGS] Session check:', session ? 'exists' : 'null', error ? 'error: ' + error.message : '');
-				if (!session) {
-					console.log('[SETTINGS] No session - redirecting to login');
-					window.location.href = '/login';
-					return;
-				}
-			}
-			}
+			// No user but session exists - show placeholder
+			console.log('[SETTINGS] No user found but session exists - showing placeholder');
+			if (usernameEl) usernameEl.textContent = '—';
+			if (emailEl) emailEl.textContent = '—';
+		}
 	} catch (e) {
 		console.error('[SETTINGS] Failed to load settings:', e);
-		// If error, check if we should redirect
-		if (supabaseClient) {
-			const { data: { session } } = await supabaseClient.auth.getSession();
-			if (!session) {
-				console.log('[SETTINGS] No session after error - redirecting to login');
-				window.location.href = '/login';
-			}
-		}
+		// On error, just show placeholder - don't redirect
+				const usernameEl = document.getElementById('settings-username');
+				const emailEl = document.getElementById('settings-email');
+		if (usernameEl) usernameEl.textContent = '—';
+		if (emailEl) emailEl.textContent = '—';
 	}
 	
 	// Calculate and display dynamic stats
@@ -5022,6 +5932,19 @@ function initExerciseCard() {
 
 // ========== UTILITY FUNCTIONS ==========
 async function loadExercises() {
+	// Check if user is logged in
+	if (supabaseClient) {
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			// Don't show login screen for exercises - they're needed for workout builder
+			// Just return empty array
+			allExercises = [];
+			return;
+		}
+	} else {
+		allExercises = [];
+		return;
+	}
 	try {
 		const apiUrl = getApiUrl('/exercises');
 		const res = await fetch(apiUrl);
@@ -5154,6 +6077,19 @@ function openAIDetectChat() {
 			const loadingId = addAIDetectChatMessage('bot', 'Even nadenken...', null, true);
 			
 			try {
+				// Get Supabase session for authentication
+				const supabase = await initSupabase();
+				if (!supabase) {
+					addAIDetectChatMessage('bot', 'Je moet ingelogd zijn om AI detect te gebruiken. Log in en probeer het opnieuw.', null);
+					return;
+				}
+				
+				const { data: { session } } = await supabase.auth.getSession();
+				if (!session) {
+					addAIDetectChatMessage('bot', 'Je moet ingelogd zijn om AI detect te gebruiken. Log in en probeer het opnieuw.', null);
+					return;
+				}
+				
 				// Send to backend - use new OpenAI Vision endpoint
 				const formData = new FormData();
 				formData.append('image', file);
@@ -5163,10 +6099,22 @@ function openAIDetectChat() {
 				
 				const res = await fetch(apiUrl, {
 					method: 'POST',
+					headers: {
+						'Authorization': `Bearer ${session.access_token}`
+					},
 					body: formData
 				});
 				
 				console.log('[AI Detect] Response status:', res.status, res.statusText);
+				
+				// Handle no credits (403)
+				if (res.status === 403) {
+					const errorData = await res.json();
+					addAIDetectChatMessage('bot', errorData.error || 'Je hebt geen credits meer. Je hebt alle 10 gratis credits deze maand gebruikt.', null);
+					// Reload credits display
+					loadCreditsBalance();
+					return;
+				}
 				
 				if (!res.ok) {
 					const errorText = await res.text();
@@ -5180,6 +6128,11 @@ function openAIDetectChat() {
 				// Remove loading message
 				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
 				if (loadingEl) loadingEl.remove();
+				
+				// Update credits display if credits_remaining is in response
+				if (data.credits_remaining !== undefined) {
+					loadCreditsBalance();
+				}
 				
 				// Handle /api/recognize-exercise response
 				if (data.exercise) {

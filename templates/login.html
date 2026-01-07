@@ -11,6 +11,17 @@
 	<link rel="stylesheet" href="/static/styles.css">
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+	<!-- Supabase library - MUST load before app.js -->
+	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+	<script>
+		// Export createClient for Supabase v2
+		const { createClient } = supabase;
+		window.createClient = createClient;
+		// Supabase config - hardcoded for Capacitor/iOS compatibility
+		// Note: ANON key is safe to expose in frontend (designed to be public)
+		window.SUPABASE_URL = "https://jugdkqzhcbqbjbvktqlz.supabase.co";
+		window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp1Z2RrcXpoY2JxYmpidmt0cWx6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODI2NzIsImV4cCI6MjA4MDI1ODY3Mn0.rqCqBK14sOZvsxNUhIHIxaOnVMvdnNOjx_0YIXy1VIY";
+	</script>
 	<style>
 		.auth-content {
 			flex: 1;
@@ -164,50 +175,8 @@
 		</div>
 	</div>
 	
-	<script>
-		const form = document.getElementById('login-form');
-		const errorEl = document.getElementById('error-message');
-		const submitBtn = document.getElementById('submit-btn');
-		
-		form.addEventListener('submit', async (e) => {
-			e.preventDefault();
-			submitBtn.disabled = true;
-			submitBtn.textContent = 'Signing in...';
-			errorEl.classList.remove('show');
-			
-			const email = document.getElementById('email').value;
-			const password = document.getElementById('password').value;
-			
-			try {
-				const response = await fetch('/login', {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify({ email, password }),
-				});
-				
-				const data = await response.json();
-				
-				if (response.ok) {
-					window.location.href = '/';
-				} else if (data.needs_verification) {
-					// Redirect to verification page if email not verified
-					window.location.href = `/verify?email=${encodeURIComponent(data.email || email)}`;
-				} else {
-					errorEl.textContent = data.error || 'Login failed';
-					errorEl.classList.add('show');
-					submitBtn.disabled = false;
-					submitBtn.textContent = 'Sign In';
-				}
-			} catch (error) {
-				errorEl.textContent = 'Network error. Please try again.';
-				errorEl.classList.add('show');
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Sign In';
-			}
-		});
-	</script>
+	<!-- Main app.js handles all authentication -->
+	<script src="/static/app.js"></script>
 </body>
 </html>
 

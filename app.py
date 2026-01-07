@@ -1142,20 +1142,144 @@ def extract_exercise_from_caption(caption):
 	return " ".join(words) if words else "unknown exercise"
 
 
+def _get_user_id_from_token():
+	"""Helper function to get user_id from Authorization header (Supabase JWT token)."""
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return None
+	
+	access_token = auth_header.replace("Bearer ", "").strip()
+	if not access_token or not SUPABASE_AVAILABLE:
+		return None
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+		if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+			return None
+		
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if user_response.user:
+			return user_response.user.id
+		return None
+	except Exception as e:
+		print(f"[ERROR] Failed to get user from token: {e}", flush=True)
+		return None
+
+
+def _check_and_use_credit(user_id):
+	"""
+	Check if user has credits available and use one.
+	Returns: (can_use, credits_remaining, error_message)
+	"""
+	if not SUPABASE_AVAILABLE or not user_id:
+		return False, 0, "Authentication required"
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+		if not SUPABASE_URL:
+			return False, 0, "Supabase not configured"
+		
+		# Use service role key for admin operations
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY or os.getenv("SUPABASE_ANON_KEY"))
+		
+		# Get current month (YYYY-MM format for comparison)
+		now = datetime.now()
+		current_month = now.strftime("%Y-%m")
+		
+		# Get or create user credits record
+		credits_response = supabase_client.table("user_credits").select("*").eq("user_id", user_id).execute()
+		
+		if credits_response.data and len(credits_response.data) > 0:
+			credits_record = credits_response.data[0]
+			last_reset_month = credits_record.get("last_reset_month", "")
+			
+			# Check if we need to reset (new month)
+			if last_reset_month != current_month:
+				# Reset free credits for new month
+				supabase_client.table("user_credits").update({
+					"free_credits_used": 0,
+					"last_reset_month": current_month
+				}).eq("user_id", user_id).execute()
+				free_credits_used = 0
+			else:
+				free_credits_used = credits_record.get("free_credits_used", 0)
+			
+			paid_credits = credits_record.get("paid_credits", 0)
+			
+			# Check if user has credits available
+			if free_credits_used >= 10 and paid_credits <= 0:
+				return False, 0, "No credits available. You've used all 10 free credits this month."
+			
+			# Use credit (prefer free, then paid)
+			if free_credits_used < 10:
+				# Use free credit
+				new_free_used = free_credits_used + 1
+				supabase_client.table("user_credits").update({
+					"free_credits_used": new_free_used,
+					"last_reset_month": current_month
+				}).eq("user_id", user_id).execute()
+				credits_remaining = (10 - new_free_used) + paid_credits
+				return True, credits_remaining, None
+			else:
+				# Use paid credit
+				if paid_credits > 0:
+					new_paid = paid_credits - 1
+					supabase_client.table("user_credits").update({
+						"paid_credits": new_paid
+					}).eq("user_id", user_id).execute()
+					credits_remaining = new_paid
+					return True, credits_remaining, None
+				else:
+					return False, 0, "No credits available"
+		else:
+			# Create new record with 1 free credit used
+			supabase_client.table("user_credits").insert({
+				"user_id": user_id,
+				"free_credits_used": 1,
+				"paid_credits": 0,
+				"last_reset_month": current_month
+			}).execute()
+			return True, 9, None  # 9 remaining (10 - 1 used)
+			
+	except Exception as e:
+		print(f"[ERROR] Credit check failed: {e}", flush=True)
+		import traceback
+		traceback.print_exc()
+		return False, 0, f"Error checking credits: {str(e)}"
+
+
 @app.route("/api/recognize-exercise", methods=["POST"])
 def recognize_exercise():
 	"""
 	Exercise recognition endpoint: image → exercise name.
-	Uses Hugging Face BLIP-2 for image captioning (FREE alternative to OpenAI Vision).
+	Uses OpenAI Vision with credit system (10 free credits per month per user).
 	"""
 	try:
+		# Get user ID from token
+		user_id = _get_user_id_from_token()
+		if not user_id:
+			return jsonify({"exercise": "unknown exercise", "error": "Authentication required"}), 401
+		
+		# Check and use credit
+		can_use, credits_remaining, error_msg = _check_and_use_credit(user_id)
+		if not can_use:
+			return jsonify({
+				"exercise": "unknown exercise",
+				"error": error_msg or "No credits available",
+				"credits_remaining": 0
+			}), 403
+		
 		# Get image file
 		file = request.files.get("image")
 		if not file:
 			print("[ERROR] No file in request", flush=True)
 			return jsonify({"exercise": "unknown exercise"}), 200
 		
-		print(f"[INFO] Exercise recognition request: {file.filename}, content_type: {file.content_type}", flush=True)
+		print(f"[INFO] Exercise recognition request: {file.filename}, user_id: {user_id}, credits_remaining: {credits_remaining}", flush=True)
 		
 		# Read image bytes
 		image_bytes = file.read()
@@ -1163,131 +1287,14 @@ def recognize_exercise():
 			print("[ERROR] Image bytes is empty", flush=True)
 			return jsonify({"exercise": "unknown exercise"}), 200
 		
-		print(f"[INFO] Image size: {len(image_bytes)} bytes", flush=True)
+		# Use OpenAI Vision
+		response_data, status_code = _recognize_exercise_openai(image_bytes, file.content_type)
 		
-		# Get Hugging Face API token
-		hf_token = os.getenv("HUGGINGFACE_API_TOKEN")
-		if not hf_token:
-			print("[ERROR] HUGGINGFACE_API_TOKEN not set", flush=True)
-			# Fallback to OpenAI if available (for backwards compatibility)
-			if OPENAI_AVAILABLE:
-				print("[INFO] Falling back to OpenAI (Hugging Face token not set)", flush=True)
-				return _recognize_exercise_openai(image_bytes, file.content_type)
-			return jsonify({"exercise": "unknown exercise"}), 200
+		# Add credits_remaining to response
+		if isinstance(response_data, dict):
+			response_data["credits_remaining"] = credits_remaining
 		
-		print(f"[INFO] Using Hugging Face for exercise recognition (token present: {bool(hf_token)})", flush=True)
-		
-		# Call Hugging Face BLIP-2 Image Captioning
-		# Note: api-inference.huggingface.co is deprecated (410 error)
-		# Try multiple endpoint formats to find working one
-		headers = {"Authorization": f"Bearer {hf_token}"}
-		
-		# List of endpoints to try (in order)
-		endpoints_to_try = [
-			"https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-base",
-			"https://inference.huggingface.co/models/Salesforce/blip-image-captioning-base",
-			"https://router.huggingface.co/models/Salesforce/blip-image-captioning-base",
-		]
-		
-		response = None
-		last_error = None
-		
-		for api_url in endpoints_to_try:
-			print(f"[INFO] Trying Hugging Face endpoint: {api_url}", flush=True)
-			try:
-				response = requests.post(
-					api_url,
-					headers=headers,
-					data=image_bytes,
-					timeout=30
-				)
-				
-				if response.status_code == 200:
-					print(f"[SUCCESS] Endpoint worked: {api_url}", flush=True)
-					break
-				elif response.status_code == 410:
-					# Deprecated endpoint, try next
-					print(f"[INFO] Endpoint deprecated (410), trying next...", flush=True)
-					last_error = f"410 - Deprecated endpoint"
-					continue
-				else:
-					error_text = response.text[:500] if response.text else "No error text"
-					print(f"[ERROR] Endpoint error {response.status_code}: {error_text[:100]}", flush=True)
-					last_error = f"{response.status_code} - {error_text[:100]}"
-					continue
-					
-			except requests.exceptions.RequestException as e:
-				print(f"[ERROR] Request exception for {api_url}: {e}", flush=True)
-				last_error = str(e)
-				continue
-		
-		# If all endpoints failed, fallback to OpenAI
-		if not response or response.status_code != 200:
-			print(f"[ERROR] All Hugging Face endpoints failed. Last error: {last_error}", flush=True)
-			if OPENAI_AVAILABLE:
-				print("[INFO] Falling back to OpenAI (all Hugging Face endpoints failed)", flush=True)
-				return _recognize_exercise_openai(image_bytes, file.content_type)
-			return jsonify({"exercise": "unknown exercise"}), 200
-		
-		# Parse response
-		try:
-			result = response.json()
-		except json.JSONDecodeError:
-			error_text = response.text[:500] if response.text else "No response text"
-			print(f"[ERROR] Hugging Face API returned invalid JSON: {error_text}", flush=True)
-			if OPENAI_AVAILABLE:
-				print("[INFO] Falling back to OpenAI (Hugging Face invalid response)", flush=True)
-				return _recognize_exercise_openai(image_bytes, file.content_type)
-			return jsonify({"exercise": "unknown exercise"}), 200
-		
-		# Extract caption from response
-		# Response format: [{"generated_text": "a person doing bench press"}]
-		if isinstance(result, list) and len(result) > 0:
-			caption = result[0].get("generated_text", "")
-		elif isinstance(result, dict):
-			caption = result.get("generated_text", "")
-		else:
-			caption = str(result)
-			
-			print(f"[SUCCESS] Hugging Face caption: '{caption}'", flush=True)
-			
-			# Extract exercise name from caption
-			exercise_name = extract_exercise_from_caption(caption)
-			
-			# Clean up exercise name
-			exercise_name = exercise_name.lower().strip()
-			exercise_name = exercise_name.strip('"\'.,;:!?')
-			
-			# Remove common phrases
-			exercise_name = exercise_name.replace("a person doing ", "")
-			exercise_name = exercise_name.replace("person doing ", "")
-			exercise_name = exercise_name.replace("doing ", "")
-			exercise_name = exercise_name.replace("exercise", "").strip()
-			exercise_name = exercise_name.replace("a ", "").strip()
-			
-			# Normalize whitespace
-			exercise_name = " ".join(exercise_name.split())
-			
-			if not exercise_name or len(exercise_name) < 2:
-				exercise_name = "unknown exercise"
-			
-			print(f"[SUCCESS] Hugging Face exercise detected: '{exercise_name}'", flush=True)
-			return jsonify({"exercise": exercise_name}), 200
-			
-		except requests.exceptions.Timeout:
-			print("[ERROR] Hugging Face API timeout", flush=True)
-			# Fallback to OpenAI if available
-			if OPENAI_AVAILABLE:
-				print("[INFO] Falling back to OpenAI (Hugging Face timeout)", flush=True)
-				return _recognize_exercise_openai(image_bytes, file.content_type)
-			return jsonify({"exercise": "unknown exercise"}), 200
-		except requests.exceptions.RequestException as e:
-			print(f"[ERROR] Hugging Face API request error: {e}", flush=True)
-			# Fallback to OpenAI if available
-			if OPENAI_AVAILABLE:
-				print("[INFO] Falling back to OpenAI (Hugging Face request error)", flush=True)
-				return _recognize_exercise_openai(image_bytes, file.content_type)
-			return jsonify({"exercise": "unknown exercise"}), 200
+		return jsonify(response_data), status_code
 		
 	except Exception as e:
 		print(f"[ERROR] Exercise recognition error: {e}", flush=True)
@@ -1298,18 +1305,19 @@ def recognize_exercise():
 
 def _recognize_exercise_openai(image_bytes, content_type):
 	"""
-	Fallback to OpenAI Vision if Hugging Face is not available.
-	This maintains backwards compatibility.
+	Use OpenAI Vision for exercise recognition.
+	Returns: (response_dict, status_code) tuple
 	"""
 	import base64
 	
 	if not OPENAI_AVAILABLE:
-		return jsonify({"exercise": "unknown exercise"}), 200
+		return {"exercise": "unknown exercise"}, 200
 	
 	try:
 		api_key = os.getenv("OPENAI_API_KEY")
 		if not api_key:
-			return jsonify({"exercise": "unknown exercise"}), 200
+			print("[ERROR] OPENAI_API_KEY not set", flush=True)
+			return {"exercise": "unknown exercise"}, 200
 		
 		image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 		
@@ -1347,7 +1355,7 @@ def _recognize_exercise_openai(image_bytes, content_type):
 			response_content = response.choices[0].message.content
 			if response_content:
 				raw_response = response_content.strip()
-				print(f"[INFO] OpenAI fallback response: '{raw_response}'", flush=True)
+				print(f"[INFO] OpenAI response: '{raw_response}'", flush=True)
 				exercise_name = raw_response.lower()
 				exercise_name = exercise_name.strip('"\'.,;:!?')
 				exercise_name = exercise_name.replace("this is a ", "").replace("this is ", "")
@@ -1359,13 +1367,91 @@ def _recognize_exercise_openai(image_bytes, content_type):
 				if exercise_name == "unknown exercise" or exercise_name == "unknown" or len(exercise_name.strip()) < 2:
 					exercise_name = "unknown exercise"
 				
-				print(f"[INFO] OpenAI fallback final exercise: '{exercise_name}'", flush=True)
-				return jsonify({"exercise": exercise_name}), 200
+				print(f"[INFO] OpenAI final exercise: '{exercise_name}'", flush=True)
+				return {"exercise": exercise_name}, 200
 		
-		return jsonify({"exercise": "unknown exercise"}), 200
+		print("[ERROR] OpenAI returned empty response", flush=True)
+		return {"exercise": "unknown exercise"}, 200
 	except Exception as e:
-		print(f"[ERROR] OpenAI fallback error: {e}", flush=True)
-		return jsonify({"exercise": "unknown exercise"}), 200
+		print(f"[ERROR] OpenAI error: {e}", flush=True)
+		import traceback
+		traceback.print_exc()
+		return {"exercise": "unknown exercise"}, 200
+
+
+@app.route("/api/credits/balance", methods=["GET"])
+def get_credits_balance():
+	"""Get user's credit balance."""
+	user_id = _get_user_id_from_token()
+	if not user_id:
+		return jsonify({"error": "Authentication required"}), 401
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+		if not SUPABASE_URL:
+			return jsonify({"error": "Supabase not configured"}), 500
+		
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY or os.getenv("SUPABASE_ANON_KEY"))
+		
+		# Get current month
+		now = datetime.now()
+		current_month = now.strftime("%Y-%m")
+		
+		# Get user credits
+		credits_response = supabase_client.table("user_credits").select("*").eq("user_id", user_id).execute()
+		
+		if credits_response.data and len(credits_response.data) > 0:
+			credits_record = credits_response.data[0]
+			last_reset_month = credits_record.get("last_reset_month", "")
+			
+			# Check if we need to reset (new month)
+			if last_reset_month != current_month:
+				# Reset free credits for new month
+				supabase_client.table("user_credits").update({
+					"free_credits_used": 0,
+					"last_reset_month": current_month
+				}).eq("user_id", user_id).execute()
+				free_credits_used = 0
+			else:
+				free_credits_used = credits_record.get("free_credits_used", 0)
+			
+			paid_credits = credits_record.get("paid_credits", 0)
+			free_credits_remaining = max(0, 10 - free_credits_used)
+			total_credits = free_credits_remaining + paid_credits
+			
+			return jsonify({
+				"free_credits_used": free_credits_used,
+				"free_credits_remaining": free_credits_remaining,
+				"paid_credits": paid_credits,
+				"total_credits": total_credits,
+				"current_month": current_month
+			}), 200
+		else:
+			# No record yet, create one
+			supabase_client.table("user_credits").insert({
+				"user_id": user_id,
+				"free_credits_used": 0,
+				"paid_credits": 0,
+				"last_reset_month": current_month
+			}).execute()
+			
+			return jsonify({
+				"free_credits_used": 0,
+				"free_credits_remaining": 10,
+				"paid_credits": 0,
+				"total_credits": 10,
+				"current_month": current_month
+			}), 200
+			
+	except Exception as e:
+		print(f"[ERROR] Failed to get credits balance: {e}", flush=True)
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to get credits: {str(e)}"}), 500
 
 
 @app.route("/health", methods=["GET"])

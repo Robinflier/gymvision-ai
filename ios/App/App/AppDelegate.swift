@@ -1,13 +1,19 @@
 import UIKit
 import Capacitor
 
-@UIApplicationMain
+@main
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
+        
+        // Fix for iOS touch events - ensure window is properly configured
+        if window == nil {
+            window = UIWindow(frame: UIScreen.main.bounds)
+        }
+        
         return true
     }
 
@@ -27,6 +33,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        
+        // Force WebView to become first responder (fix for touch events)
+        // This ensures the WebView receives touch events when app becomes active
+        if let window = window, let rootViewController = window.rootViewController {
+            // Force the view to become first responder
+            rootViewController.view.becomeFirstResponder()
+            
+            // Also ensure the window is key
+            window.makeKeyAndVisible()
+        }
     }
 
     func applicationWillTerminate(_ application: UIApplication) {

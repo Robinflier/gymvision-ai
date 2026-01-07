@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+	<title>Sign Up - GymVision AI</title>
+	<link rel="manifest" href="static/manifest.webmanifest">
+	<meta name="theme-color" content="#0f0f10">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+	<link rel="stylesheet" href="static/styles.css">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+	<!-- Supabase library - MUST load before app.js -->
+	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+	<script>
+		// Export createClient for Supabase v2
+		const { createClient } = supabase;
+		window.createClient = createClient;
+		// Supabase config - hardcoded for Capacitor/iOS compatibility
+		// Note: ANON key is safe to expose in frontend (designed to be public)
+		window.SUPABASE_URL = "https://jugdkqzhcbqbjbvktqlz.supabase.co";
+		window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp1Z2RrcXpoY2JxYmpidmt0cWx6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODI2NzIsImV4cCI6MjA4MDI1ODY3Mn0.rqCqBK14sOZvsxNUhIHIxaOnVMvdnNOjx_0YIXy1VIY";
+	</script>
+	<style>
+		.auth-content {
+			flex: 1;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			padding: 20px;
+			overflow-y: auto;
+			-webkit-overflow-scrolling: touch;
+		}
+		.auth-card {
+			background: transparent;
+			border-radius: 20px;
+			padding: 40px 30px;
+			width: 100%;
+			max-width: 400px;
+		}
+		@media (max-width: 480px) {
+			.auth-content {
+				padding: 20px 16px;
+			}
+			.auth-card {
+				padding: 30px 20px;
+				border-radius: 16px;
+			}
+		}
+		.auth-logo {
+			text-align: center;
+			margin-bottom: 30px;
+		}
+		.auth-logo img {
+			width: 200px;
+			height: auto;
+			filter: brightness(0) invert(1);
+		}
+		.auth-title {
+			color: #fff;
+			font-size: 28px;
+			font-weight: 700;
+			text-align: center;
+			margin-bottom: 10px;
+		}
+		.auth-subtitle {
+			color: #888;
+			text-align: center;
+			margin-bottom: 30px;
+			font-size: 14px;
+		}
+		.auth-form-group {
+			margin-bottom: 20px;
+		}
+		.auth-label {
+			color: #fff;
+			font-size: 14px;
+			font-weight: 500;
+			margin-bottom: 8px;
+			display: block;
+		}
+		.auth-input {
+			width: 100%;
+			padding: 14px 16px;
+			background: #252528;
+			border: 1px solid #333;
+			border-radius: 12px;
+			color: #fff;
+			font-size: 16px;
+			font-family: 'Inter', sans-serif;
+			box-sizing: border-box;
+		}
+		.auth-input:focus {
+			outline: none;
+			border-color: #8b5cf6;
+		}
+		.auth-button {
+			width: 100%;
+			padding: 14px;
+			background: #8b5cf6;
+			color: #fff;
+			border: none;
+			border-radius: 12px;
+			font-size: 16px;
+			font-weight: 600;
+			cursor: pointer;
+			margin-top: 10px;
+			font-family: 'Inter', sans-serif;
+			transition: background 0.2s;
+		}
+		.auth-button:hover {
+			background: #7c3aed;
+		}
+		.auth-button:disabled {
+			background: #555;
+			cursor: not-allowed;
+		}
+		.auth-link {
+			text-align: center;
+			margin-top: 20px;
+			color: #888;
+			font-size: 14px;
+		}
+		.auth-link a {
+			color: #8b5cf6;
+			text-decoration: none;
+			font-weight: 500;
+		}
+		.auth-link a:hover {
+			text-decoration: underline;
+		}
+		.auth-error {
+			background: #ef4444;
+			color: #fff;
+			padding: 12px;
+			border-radius: 8px;
+			margin-bottom: 20px;
+			font-size: 14px;
+			display: none;
+		}
+		.auth-error.show {
+			display: block;
+		}
+	</style>
+</head>
+<body>
+	<div class="phone-shell">
+		<div class="content auth-content">
+			<div class="auth-card">
+					<div class="auth-logo">
+						<img src="static/logo.png" alt="GymVision AI" />
+					</div>
+			<h1 class="auth-title">Create Account</h1>
+			<p class="auth-subtitle">Start your fitness journey</p>
+			
+			<div class="auth-error" id="error-message"></div>
+			
+			<form id="register-form">
+				<div class="auth-form-group">
+					<label class="auth-label" for="email">Email</label>
+					<input type="email" id="email" class="auth-input" placeholder="your@email.com" required autocomplete="email">
+				</div>
+				<div class="auth-form-group">
+					<label class="auth-label" for="username">Username</label>
+					<input type="text" id="username" class="auth-input" placeholder="username" required autocomplete="username" minlength="3">
+				</div>
+				<div class="auth-form-group">
+					<label class="auth-label" for="password">Password</label>
+					<input type="password" id="password" class="auth-input" placeholder="••••••••" required autocomplete="new-password" minlength="6">
+				</div>
+				<button type="submit" class="auth-button" id="submit-btn">Sign Up</button>
+			</form>
+			
+			<div class="auth-link">
+				Already have an account? <a href="login.html">Sign in</a>
+			</div>
+			</div>
+		</div>
+	</div>
+	
+	<!-- Main app.js handles all authentication -->
+	<script src="static/app.js"></script>
+</body>
+</html>
+

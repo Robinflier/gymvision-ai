@@ -194,6 +194,11 @@
 	</style>
 </head>
 <body>
+	<div id="app-loading-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#0f0f10;z-index:99999;display:flex;align-items:center;justify-content:center;">
+		<div style="text-align:center;color:#888;">
+			<img src="static/logo.png" alt="GymVision" style="height:60px;width:auto;filter:brightness(0) invert(1);opacity:0.5;" />
+		</div>
+	</div>
 	<div class="phone-shell">
 		<div class="content hidden" id="home-content">
 		<header class="topbar">
@@ -277,7 +282,7 @@
 			</section>
 		</div>
 
-		<div class="content" id="workouts-content">
+		<div class="content hidden" id="workouts-content">
 			<header class="topbar">
 				<div class="brand brand-logo"><img src="static/logo.png" alt="GymVision" /></div>
 				<div class="icons streak">
@@ -332,29 +337,6 @@
 					<div id="streak-count-progress" class="streak-count">0</div>
 				</div>
 			</header>
-			<section class="card progress-chart-card">
-				<div class="progress-chart-header">
-					<h3>Weight Chart</h3>
-					<input type="date" id="progress-date" class="progress-chart-date-input" required>
-				</div>
-				<div class="progress-chart-wrapper" data-unit="kg">
-					<canvas id="progress-chart"></canvas>
-					<div id="progress-empty" class="progress-empty">No data yet</div>
-					<div id="progress-y-labels" class="progress-y-labels"></div>
-					<div id="progress-x-labels" class="progress-x-labels"></div>
-					<div id="progress-tooltip" class="progress-tooltip"></div>
-				</div>
-				<form id="progress-form" class="progress-inline-form">
-					<div class="progress-weight-group">
-						<label for="progress-weight" class="progress-weight-label">Weight</label>
-						<div class="progress-weight-input-wrapper">
-							<input type="number" id="progress-weight" step="0.1" min="0" placeholder="" required>
-							<span class="progress-inline-unit" id="progress-unit-label"></span>
-						</div>
-					</div>
-					<button type="submit" class="btn primary progress-inline-submit">Save</button>
-				</form>
-			</section>
 
 			<section class="card progress-muscle-card">
 				<div class="progress-muscle-header">
@@ -407,6 +389,30 @@
 				</div>
 			</section>
 
+			<section class="card progress-chart-card">
+				<div class="progress-chart-header">
+					<h3>Weight Chart</h3>
+					<input type="date" id="progress-date" class="progress-chart-date-input" required>
+				</div>
+				<div class="progress-chart-wrapper" data-unit="kg">
+					<canvas id="progress-chart"></canvas>
+					<div id="progress-empty" class="progress-empty">No data yet</div>
+					<div id="progress-y-labels" class="progress-y-labels"></div>
+					<div id="progress-x-labels" class="progress-x-labels"></div>
+					<div id="progress-tooltip" class="progress-tooltip"></div>
+				</div>
+				<form id="progress-form" class="progress-inline-form">
+					<div class="progress-weight-group">
+						<label for="progress-weight" class="progress-weight-label">Weight</label>
+						<div class="progress-weight-input-wrapper">
+							<input type="number" id="progress-weight" step="0.1" min="0" placeholder="" required>
+							<span class="progress-inline-unit" id="progress-unit-label"></span>
+						</div>
+					</div>
+					<button type="submit" class="btn primary progress-inline-submit">Save</button>
+				</form>
+			</section>
+
 			
 		</div>
 
@@ -455,12 +461,12 @@
 					<!-- Notifications Toggle -->
 					<div class="settings-option-item">
 						<div class="settings-option-left">
-							<img src="static/images/notification-icon.png" alt="Notifications" class="settings-icon" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+							<img src="static/images/notification-icon.png?v=2" alt="Notifications" class="settings-icon" onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='block';">
 							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:none; width:20px; height:20px; color:#dfe0e6; flex-shrink:0;">
 								<path d="M10 2C8.9 2 8 2.9 8 4V5.58C6.84 6.42 6 7.85 6 9.5V13L4 15V16H16V15L14 13V9.5C14 7.85 13.16 6.42 12 5.58V4C12 2.9 11.1 2 10 2Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
 								<path d="M8 16V17C8 18.1 8.9 19 10 19C11.1 19 12 18.1 12 17V16" stroke="currentColor" stroke-width="1.5" fill="none"/>
 							</svg>
-							<span class="settings-option-label">Get Notifications</span>
+							<span class="settings-option-label">Notifications</span>
 						</div>
 						<div class="settings-option-right">
 							<label class="settings-toggle">
@@ -476,7 +482,7 @@
 					<!-- Unit Toggle (kg/lbs) -->
 					<div class="settings-option-item">
 						<div class="settings-option-left">
-							<img src="static/images/weight-icon.png" alt="Weight Unit" class="settings-icon" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+							<img src="static/images/weight-icon.png?v=2" alt="Weight Unit" class="settings-icon" onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='block';">
 							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:none; width:20px; height:20px; color:#dfe0e6; flex-shrink:0;">
 								<circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.5" fill="none"/>
 								<path d="M10 4V16M4 10H16" stroke="currentColor" stroke-width="1.5" fill="none"/>
@@ -698,7 +704,7 @@
 			</div>
 		</div>
 
-	<footer class="navbar" id="main-navbar">
+	<footer class="navbar" id="main-navbar" style="display: none;">
 			<button class="nav-btn active" data-tab="workouts" onclick="console.log('Nav workouts clicked'); if(window.switchTab){window.switchTab('workouts');} return false;" ontouchstart="console.log('Nav workouts touched'); if(window.switchTab){window.switchTab('workouts');} return false;" style="touch-action:manipulation;-webkit-touch-callout:none;">
 				<img src="static/nav/dumbell.png" alt="Workouts" class="nav-icon" />
 				<span>Workouts</span>

@@ -56,6 +56,54 @@ async function initSupabase() {
 	return supabaseClient;
 }
 
+// ========== CREDITS MANAGEMENT ==========
+async function loadCreditsBalance() {
+	const supabase = await initSupabase();
+	if (!supabase) return;
+	
+	const { data: { session } } = await supabase.auth.getSession();
+	if (!session) return;
+	
+	try {
+		const response = await fetch(getApiUrl('/api/credits/balance'), {
+			headers: {
+				'Authorization': `Bearer ${session.access_token}`
+			}
+		});
+		
+		if (response.ok) {
+			const credits = await response.json();
+			updateCreditsDisplay(credits);
+		}
+	} catch (error) {
+		console.error('Failed to load credits:', error);
+	}
+}
+
+function updateCreditsDisplay(credits) {
+	// Try to find existing credits display element
+	let creditsElement = document.getElementById('credits-display');
+	
+	if (!creditsElement) {
+		// Create credits display element if it doesn't exist
+		creditsElement = document.createElement('div');
+		creditsElement.id = 'credits-display';
+		creditsElement.className = 'credits-display';
+		creditsElement.style.cssText = 'position: fixed; top: 10px; right: 10px; background: rgba(0,0,0,0.7); color: white; padding: 8px 12px; border-radius: 8px; font-size: 14px; z-index: 1000;';
+		
+		// Add to body
+		document.body.appendChild(creditsElement);
+	}
+	
+	// Update content
+	const freeRemaining = credits.free_credits_remaining || 0;
+	const paid = credits.paid_credits || 0;
+	const total = credits.total_credits || 0;
+	
+	creditsElement.textContent = `💳 ${total} credits`;
+	creditsElement.title = `${freeRemaining} gratis + ${paid} betaald deze maand`;
+}
+
 // ========== STATE MANAGEMENT ==========
 // Default to workouts as the "home" screen
 let currentTab = 'workouts';
@@ -63,10 +111,69 @@ let currentExercise = null;
 let allExercises = [];
 let currentWorkout = null;
 let editingWorkoutId = null;
+let isSavingWorkout = false; // Prevent duplicate saves
 let workoutTimer = null;
 let workoutStartTime = null;
 const WORKOUT_DRAFT_KEY = 'currentWorkoutDraft';
 const DEFAULT_SET_COUNT = 3;
+
+// Track if exercise selector is already initialized to prevent duplicate initialization
+let exerciseSelectorInitialized = false;
+
+// ========== WEIGHT UNIT CONVERSION ==========
+function getWeightUnit() {
+	// Default to 'kg' for new users, but check if value exists first
+	const saved = localStorage.getItem('settings-weight-unit');
+	if (saved === null || saved === undefined) {
+		// No value set yet - default to 'kg' for new accounts
+		return 'kg';
+	}
+	return saved;
+}
+
+function isKg() {
+	return getWeightUnit() === 'kg';
+}
+
+function isLbs() {
+	return getWeightUnit() === 'lbs';
+}
+
+// Convert kg to lbs (for display/input)
+function kgToLbs(kg) {
+	if (kg == null || kg === '') return '';
+	return (Number(kg) * 2.20462).toFixed(1);
+}
+
+// Convert lbs to kg (for storage)
+function lbsToKg(lbs) {
+	if (lbs == null || lbs === '') return '';
+	return (Number(lbs) / 2.20462).toFixed(1);
+}
+
+// Convert weight for display based on current unit
+function convertWeightForDisplay(weightKg) {
+	if (weightKg == null || weightKg === '') return '';
+	const weight = Number(weightKg);
+	if (isLbs()) {
+		return kgToLbs(weight); // Returns with 1 decimal (e.g., "10.0")
+	}
+	return Math.round(weight).toString(); // kg: no decimals (e.g., "10")
+}
+
+// Convert weight for storage (always store as kg)
+function convertWeightForStorage(weight, currentUnit) {
+	if (weight == null || weight === '') return '';
+	if (currentUnit === 'lbs') {
+		return Number(lbsToKg(weight));
+	}
+	return Number(weight);
+}
+
+// Get weight unit label
+function getWeightUnitLabel() {
+	return isKg() ? 'Kg' : 'Lbs';
+}
 
 function createDefaultSets(count = DEFAULT_SET_COUNT) {
 	return Array.from({ length: count }, () => ({ weight: '', reps: '' }));
@@ -109,13 +216,19 @@ function getLastExerciseData(exerciseKey) {
 function isBodyweightExercise(exercise) {
 	const key = (exercise.key || '').toLowerCase();
 	const display = (exercise.display || '').toLowerCase();
+	
+	// Weighted exercises are NOT bodyweight
+	if (key.includes('weighted') || display.includes('weighted')) {
+		return false;
+	}
+	
 	const bodyweightKeys = [
 		'push_up', 'pull_up', 'chin_up', 'dips', 'diamond_push_up',
 		'crunch', 'decline_sit_up', 'hanging_leg_raise', 'knee_raise'
 	];
 	return bodyweightKeys.includes(key) || 
 	       display.includes('push-up') || display.includes('pull-up') || 
-	       display.includes('chin-up') || display.includes('dip') && !display.includes('machine') ||
+	       display.includes('chin-up') || (display.includes('dip') && !display.includes('machine')) ||
 	       (display.includes('crunch') && !display.includes('cable')) || display.includes('sit-up') || 
 	       display.includes('leg raise') || display.includes('knee raise');
 }
@@ -151,34 +264,152 @@ async function fetchUser() {
 // ======================
 // 🧠 MAIN APP ENTRY
 // ======================
-document.addEventListener('DOMContentLoaded', async () => {
-	await initSupabase();
+// ========== WEBVIEW FOCUS & TOUCH FIX ==========
+// Force WebView to receive touch events (iOS/Capacitor fix)
+function forceWebViewFocus() {
+	console.log('[FOCUS] Forcing WebView focus...');
 	
-	// PUBLIC PAGES MUST NOT REQUIRE AUTH
-	if (isPublicPage()) {
-		initLoginForm();
-		initRegisterForm();
-		
-		// Check if already logged in on public pages - redirect to home
-		// Wait a bit for session to be restored
-		await new Promise(resolve => setTimeout(resolve, 100));
-		if (supabaseClient) {
-			const { data: { session } } = await supabaseClient.auth.getSession();
-			if (session) {
-				// Already logged in, redirect to home
-				window.location.href = '/';
-				return;
-			}
+	// Force focus on body/document
+	if (document.body) {
+		document.body.focus();
+		document.body.click(); // Trigger focus
+	}
+	
+	// Force window focus
+	window.focus();
+	
+	// Remove any blocking overlays
+	const blockingOverlays = document.querySelectorAll('[style*="pointer-events: none"], [style*="pointer-events:none"]');
+	blockingOverlays.forEach(el => {
+		el.style.pointerEvents = 'auto';
+		console.log('[FOCUS] Removed blocking overlay:', el);
+	});
+	
+	// Ensure all interactive elements are touchable
+	const interactiveElements = document.querySelectorAll('button, a, input, select, textarea, [onclick]');
+	interactiveElements.forEach(el => {
+		el.style.touchAction = 'manipulation';
+		el.style.webkitTouchCallout = 'none';
+		el.style.webkitUserSelect = 'none';
+		el.style.userSelect = 'none';
+	});
+	
+	console.log('[FOCUS] WebView focus forced, interactive elements:', interactiveElements.length);
+}
+
+// Re-initialize all button listeners (safety net)
+function reinitializeButtonListeners() {
+	console.log('[BTNS] Re-initializing button listeners...');
+	
+	// Re-init workout buttons
+	const aiWorkoutBtn = document.getElementById('ai-workout-btn');
+	const manualWorkoutBtn = document.getElementById('manual-workout-btn');
+	
+	if (aiWorkoutBtn) {
+		// Remove old listeners and add new
+		const newBtn = aiWorkoutBtn.cloneNode(true);
+		aiWorkoutBtn.parentNode.replaceChild(newBtn, aiWorkoutBtn);
+		newBtn.addEventListener('click', () => {
+			console.log('[BTNS] AI Workout button clicked');
+			startAIWorkout();
+		});
+		newBtn.addEventListener('touchend', (e) => {
+			e.preventDefault();
+			console.log('[BTNS] AI Workout button touched');
+			startAIWorkout();
+		});
+	}
+	
+	if (manualWorkoutBtn) {
+		const newBtn = manualWorkoutBtn.cloneNode(true);
+		manualWorkoutBtn.parentNode.replaceChild(newBtn, manualWorkoutBtn);
+		newBtn.addEventListener('click', () => {
+			console.log('[BTNS] Manual Workout button clicked');
+			startNewWorkout();
+		});
+		newBtn.addEventListener('touchend', (e) => {
+			e.preventDefault();
+			console.log('[BTNS] Manual Workout button touched');
+			startNewWorkout();
+		});
+	}
+	
+	// Re-init navigation
+	const navButtons = document.querySelectorAll('.nav-btn');
+	navButtons.forEach(btn => {
+		const tab = btn.dataset.tab;
+		if (tab) {
+			btn.addEventListener('click', () => {
+				console.log('[BTNS] Nav button clicked:', tab);
+				switchTab(tab);
+			});
+			btn.addEventListener('touchend', (e) => {
+				e.preventDefault();
+				console.log('[BTNS] Nav button touched:', tab);
+				switchTab(tab);
+			});
 		}
+	});
+	
+	console.log('[BTNS] Button listeners re-initialized');
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+	try {
+		console.log('[INIT] Starting app initialization...');
+		console.log('[INIT] Platform:', window.Capacitor?.isNativePlatform() ? 'NATIVE' : 'WEB');
+		
+		// Hide loading overlay after a short delay to prevent flash
+		const loadingOverlay = document.getElementById('app-loading-overlay');
+		const hideLoadingOverlay = () => {
+			if (loadingOverlay) {
+				setTimeout(() => {
+					loadingOverlay.style.display = 'none';
+				}, 100);
+			}
+		};
+		
+		// Wait for Capacitor to be ready (if in native app)
+		if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+			console.log('[INIT] Waiting for Capacitor to be ready...');
+			await new Promise(resolve => setTimeout(resolve, 200));
+		}
+		
+		// IMMEDIATE: Force WebView focus (iOS fix)
+		forceWebViewFocus();
+		
+		// Initialize Supabase
+		await initSupabase();
+		console.log('[INIT] Supabase initialized:', !!supabaseClient);
+	
+		// Check session FIRST - simple and reliable
+		let hasSession = false;
+		try {
+		if (supabaseClient) {
+				const { data: { session }, error } = await supabaseClient.auth.getSession();
+				hasSession = !!(session && !error);
+				console.log('[INIT] Session check result:', hasSession ? 'FOUND' : 'NOT FOUND');
+			} else {
+				console.log('[INIT] No Supabase client available');
+			}
+		} catch (e) {
+			console.error('[INIT] Session check error:', e);
+			hasSession = false;
+		}
+		
+		// If no session, show login screen and stop
+		if (!hasSession) {
+			console.log('[INIT] No session - showing login screen');
+			showLoginScreen();
+			hideLoadingOverlay();
 		return;
 	}
 	
-	// PRIVATE PAGES - Wait for auth check to complete
-	const ok = await requireLogin();
-	if (!ok) return;
+		// Session exists - initialize app
+		console.log('[INIT] Session found - initializing app...');
 	
-	// Init app features (SAFE now - user is authenticated)
-	initLogout(); // Initialize logout button
+		// Init app features
+		initLogout();
 	initNavigation();
 	initTabs();
 	initFileUpload();
@@ -187,14 +418,233 @@ document.addEventListener('DOMContentLoaded', async () => {
 	initWorkoutBuilder();
 	initProgress();
 	initSettings();
+		initRestTimer();
 	initVision();
 		initExerciseVideoModal();
 	initExerciseCard();
+		
+		// Load data
+		try {
 	loadStreak();
 	loadRecentScans();
-	loadExercises();
-	loadWorkouts();
+			await loadExercises();
+			await loadWorkouts();
 	updateWorkoutStartButton();
+		} catch (e) {
+			console.error('[INIT] Error loading data:', e);
+		}
+		
+		// Show workouts tab
+		try {
+			await switchTab('workouts');
+		} catch (e) {
+			console.error('[INIT] Error switching to workouts:', e);
+		}
+		
+		// Hide loading overlay now that everything is loaded
+		hideLoadingOverlay();
+		
+		// Schedule notifications (don't block on errors)
+		try {
+			await scheduleDailyNotifications();
+			await scheduleWeeklyNotifications();
+		} catch (e) {
+			console.error('[INIT] Error scheduling notifications:', e);
+		}
+		
+		// AFTER INIT: Force focus again and re-init buttons (iOS safety net)
+		setTimeout(() => {
+			forceWebViewFocus();
+			reinitializeButtonListeners();
+		}, 500);
+		
+		// Also force focus on visibility change (app comes to foreground)
+		document.addEventListener('visibilitychange', () => {
+			if (!document.hidden) {
+				console.log('[FOCUS] App became visible - forcing focus');
+				setTimeout(() => {
+					forceWebViewFocus();
+					reinitializeButtonListeners();
+				}, 100);
+				
+				// Update rest timer display if it's running (timer continues automatically)
+				if (restTimerRunning && restTimerStartTime) {
+					// Timer will automatically update via setInterval, just ensure display is correct
+					const elapsed = Math.floor((Date.now() - restTimerStartTime) / 1000);
+					const remaining = Math.max(0, restTimerInitialSeconds - elapsed);
+					restTimerSeconds = remaining;
+					updateRestTimerDisplay();
+					
+					// Update button text if overlay is visible
+					const overlay = document.getElementById('rest-timer-overlay');
+					if (overlay && !overlay.classList.contains('hidden')) {
+						const startBtn = document.getElementById('rest-timer-start');
+						if (startBtn) startBtn.textContent = 'Pause';
+					}
+					
+					// If timer finished while in background, show completion
+					if (remaining === 0) {
+						stopRestTimer();
+						showRestTimerComplete();
+					}
+				}
+			}
+		});
+		
+		// Also on window focus (iOS specific)
+		window.addEventListener('focus', () => {
+			console.log('[FOCUS] Window focused - forcing focus');
+			setTimeout(() => {
+				forceWebViewFocus();
+				reinitializeButtonListeners();
+			}, 100);
+		});
+		
+		console.log('[INIT] App initialization complete!');
+		
+		// AGGRESSIVE FIX: Force buttons to work immediately after a delay
+		// This ensures buttons work even if event listeners fail
+		setTimeout(() => {
+			console.log('[FIX] Aggressive button fix - forcing direct handlers');
+			const aiBtn = document.getElementById('ai-workout-btn');
+			const manualBtn = document.getElementById('manual-workout-btn');
+			
+			if (aiBtn) {
+				// Remove all existing listeners and add direct handler
+				const newAiBtn = aiBtn.cloneNode(true);
+				aiBtn.parentNode.replaceChild(newAiBtn, aiBtn);
+				newAiBtn.onclick = function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					console.log('[FIX] AI button clicked (direct handler)');
+					if (window.startAIWorkout) {
+						window.startAIWorkout();
+					} else {
+						console.error('[FIX] startAIWorkout not available!');
+						alert('App not ready. Please wait...');
+					}
+					return false;
+				};
+				newAiBtn.ontouchstart = function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					console.log('[FIX] AI button touched (direct handler)');
+					if (window.startAIWorkout) {
+						window.startAIWorkout();
+					}
+					return false;
+				};
+			}
+			
+			if (manualBtn) {
+				const newManualBtn = manualBtn.cloneNode(true);
+				manualBtn.parentNode.replaceChild(newManualBtn, manualBtn);
+				newManualBtn.onclick = function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					console.log('[FIX] Manual button clicked (direct handler)');
+					if (window.startNewWorkout) {
+						window.startNewWorkout();
+					} else {
+						console.error('[FIX] startNewWorkout not available!');
+						alert('App not ready. Please wait...');
+					}
+					return false;
+				};
+				newManualBtn.ontouchstart = function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					console.log('[FIX] Manual button touched (direct handler)');
+					if (window.startNewWorkout) {
+						window.startNewWorkout();
+					}
+					return false;
+				};
+			}
+			
+			// Also force focus one more time
+			forceWebViewFocus();
+			
+			// AGGRESSIVE FIX: Fix ALL nav buttons
+			console.log('[FIX] Fixing nav buttons...');
+			const navButtons = document.querySelectorAll('.nav-btn');
+			navButtons.forEach(btn => {
+				const tab = btn.dataset.tab;
+				if (tab) {
+					const newBtn = btn.cloneNode(true);
+					btn.parentNode.replaceChild(newBtn, btn);
+					newBtn.onclick = function(e) {
+						e.preventDefault();
+						e.stopPropagation();
+						console.log('[FIX] Nav button clicked (direct):', tab);
+						if (window.switchTab) {
+							window.switchTab(tab);
+						} else {
+							console.error('[FIX] switchTab not available!');
+						}
+						return false;
+					};
+					newBtn.ontouchstart = function(e) {
+						e.preventDefault();
+						e.stopPropagation();
+						console.log('[FIX] Nav button touched (direct):', tab);
+						if (window.switchTab) {
+							window.switchTab(tab);
+						}
+						return false;
+					};
+				}
+			});
+			
+			// AGGRESSIVE FIX: Fix ALL buttons in workout builder
+			console.log('[FIX] Fixing workout builder buttons...');
+			const saveWorkoutBtn = document.getElementById('save-workout');
+			const backWorkoutBtn = document.getElementById('back-to-workouts');
+			const addExerciseBtn = document.querySelector('.workout-add-exercise-btn');
+			
+			if (saveWorkoutBtn) {
+				const newBtn = saveWorkoutBtn.cloneNode(true);
+				saveWorkoutBtn.parentNode.replaceChild(newBtn, saveWorkoutBtn);
+				newBtn.onclick = function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					console.log('[FIX] Save workout clicked');
+					if (window.saveWorkout && !isSavingWorkout) {
+						window.saveWorkout();
+					}
+					return false;
+				};
+			}
+			
+			if (backWorkoutBtn) {
+				const newBtn = backWorkoutBtn.cloneNode(true);
+				backWorkoutBtn.parentNode.replaceChild(newBtn, backWorkoutBtn);
+				newBtn.onclick = function(e) {
+					e.preventDefault();
+					e.stopPropagation();
+					console.log('[FIX] Back to workouts clicked');
+					if (window.switchTab) {
+						window.switchTab('workouts');
+					}
+					return false;
+				};
+			}
+		}, 1000);
+		
+	} catch (error) {
+		console.error('[INIT] Fatal error during app initialization:', error);
+		console.error('[INIT] Error stack:', error.stack);
+		
+		// Show user-friendly error message
+		const errorMsg = document.createElement('div');
+		errorMsg.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#ff4444;color:white;padding:20px;border-radius:10px;z-index:9999;text-align:center;max-width:80%;';
+		errorMsg.innerHTML = `
+			<h3 style="margin:0 0 10px 0;">App Error</h3>
+			<p style="margin:0 0 15px 0;">Er is een fout opgetreden. Check de console voor details.</p>
+			<button onclick="location.reload()" style="background:white;color:#ff4444;border:none;padding:10px 20px;border-radius:5px;cursor:pointer;">Herlaad App</button>
+		`;
+		document.body.appendChild(errorMsg);
+	}
 });
 
 // ======================
@@ -204,8 +654,11 @@ function initLoginForm() {
 	const form = document.getElementById('login-form');
 	if (!form) return;
 	
-	const errorEl = document.getElementById('error-message');
-	const submitBtn = document.getElementById('submit-btn');
+	// Initialize register link
+	initRegisterLink();
+	
+	const errorEl = document.getElementById('login-error-message') || document.getElementById('error-message');
+	const submitBtn = document.getElementById('login-submit-btn') || document.getElementById('submit-btn');
 	
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault();
@@ -216,8 +669,8 @@ function initLoginForm() {
 		}
 		if (errorEl) errorEl.classList.remove('show');
 		
-		const email = document.getElementById('email')?.value;
-		const password = document.getElementById('password')?.value;
+		const email = document.getElementById('login-email')?.value || document.getElementById('email')?.value;
+		const password = document.getElementById('login-password')?.value || document.getElementById('password')?.value;
 		
 		if (!email || !password) {
 			if (errorEl) {
@@ -281,15 +734,50 @@ function initLoginForm() {
 		// Verify session exists
 		const { data: { session } } = await supabaseClient.auth.getSession();
 		if (session) {
-			// Redirect to next parameter if exists, otherwise go to home
-			const nextPage = new URLSearchParams(window.location.search).get('next');
-			const redirectTo = nextPage ? decodeURIComponent(nextPage) : '/';
-			window.location.href = redirectTo;
+			console.log('[LOGIN] Login successful, initializing app...');
+			// Hide login content
+			const loginContent = document.getElementById('login-content');
+			if (loginContent) {
+				loginContent.classList.add('hidden');
+			}
+			
+			// Initialize app features
+			initLogout();
+			initNavigation();
+			initTabs();
+			initFileUpload();
+			initManualInput();
+			initExerciseSelector();
+			initWorkoutBuilder();
+			initProgress();
+			initSettings();
+			initRestTimer();
+			initVision();
+			initExerciseVideoModal();
+			initExerciseCard();
+			loadStreak();
+			loadRecentScans();
+			await loadExercises();
+			await migrateLocalStorageWorkouts(); // Migrate any local workouts to Supabase
+			await loadWorkouts();
+			updateWorkoutStartButton();
+			
+			// Show workouts tab
+			switchTab('workouts');
+			
+			// Schedule notifications
+			await scheduleDailyNotifications();
+			await scheduleWeeklyNotifications();
 		} else {
-			// Session not ready yet, but redirect anyway
-			const nextPage = new URLSearchParams(window.location.search).get('next');
-			const redirectTo = nextPage ? decodeURIComponent(nextPage) : '/';
-			window.location.href = redirectTo;
+			console.error('[LOGIN] Session not found after login');
+			if (errorEl) {
+				errorEl.textContent = 'Login failed. Please try again.';
+				errorEl.classList.add('show');
+			}
+			if (submitBtn) {
+				submitBtn.disabled = false;
+				submitBtn.textContent = 'Sign In';
+			}
 		}
 	});
 }
@@ -301,8 +789,11 @@ function initRegisterForm() {
 	const form = document.getElementById('register-form');
 	if (!form) return;
 	
-	const errorEl = document.getElementById('error-message');
-	const submitBtn = document.getElementById('submit-btn');
+	// Initialize back to login link
+	initBackToLoginLink();
+	
+	const errorEl = document.getElementById('register-error-message') || document.getElementById('error-message');
+	const submitBtn = document.getElementById('register-submit-btn') || document.getElementById('submit-btn');
 	
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault();
@@ -313,9 +804,9 @@ function initRegisterForm() {
 		}
 		if (errorEl) errorEl.classList.remove('show');
 		
-		const email = document.getElementById('email')?.value;
-		const password = document.getElementById('password')?.value;
-		const username = document.getElementById('username')?.value; // Optional
+		const email = document.getElementById('register-email')?.value;
+		const password = document.getElementById('register-password')?.value;
+		const username = document.getElementById('register-username')?.value; // Optional
 		
 		if (!email || !password) {
 			if (errorEl) {
@@ -379,9 +870,27 @@ function initRegisterForm() {
 			return;
 		}
 		
+		// Registration successful - set default settings for new account
+		// Notifications: ON (and request permission)
+		localStorage.setItem('settings-notifications', 'true');
+		// Weight unit: kg
+		localStorage.setItem('settings-weight-unit', 'kg');
+		// Rest timer: OFF
+		localStorage.setItem('settings-rest-timer', 'false');
+		
+		// Request notification permission immediately
+		try {
+			await requestNotificationPermission();
+			// Schedule notifications
+			await scheduleDailyNotifications();
+			await scheduleWeeklyNotifications();
+		} catch (e) {
+			// Ignore permission errors for now
+		}
+		
 		// Registration successful
 		alert('Account created! Please log in.');
-		window.location.href = '/login';
+		showLoginScreen();
 	});
 }
 
@@ -431,34 +940,47 @@ async function requireLogin() {
 	authLoading = true;
 	
 	try {
+		console.log('[AUTH] Starting login check...');
+		
 		if (!supabaseClient) {
+			console.log('[AUTH] Supabase client not initialized, initializing...');
 			await initSupabase();
 		}
 		if (!supabaseClient) {
+			console.error('[AUTH] Supabase client initialization failed');
 			authCheckComplete = false;
-			window.location.href = '/login';
+			showLoginScreen();
 			return false;
 		}
 		
+		console.log('[AUTH] Getting session...');
 		const { data: { session }, error } = await supabaseClient.auth.getSession();
 		
 		if (error) {
-			console.error('Session check error:', error);
+			console.error('[AUTH] Session check error:', error);
 			authCheckComplete = false;
-			window.location.href = '/login';
+			showLoginScreen();
 			return false;
 		}
 		
 		if (!session) {
-			// Not logged in, redirect to login with next parameter
-			const currentPath = window.location.pathname;
+			console.log('[AUTH] No session found - redirecting to login');
 			authCheckComplete = false;
-			window.location.href = `/login?next=${encodeURIComponent(currentPath)}`;
+			// Force redirect - use replace to prevent back button issues
+			showLoginScreen();
 			return false;
 		}
 		
+		console.log('[AUTH] Session found - user authenticated:', session.user?.email);
 		authCheckComplete = true;
 		return true;
+	} catch (error) {
+		console.error('[AUTH] Fatal error in requireLogin:', error);
+		console.error('[AUTH] Error stack:', error.stack);
+		authCheckComplete = false;
+		// Show login screen on error
+		showLoginScreen();
+		return false;
 	} finally {
 		authLoading = false;
 	}
@@ -470,35 +992,232 @@ async function getUser() {
 	return session?.user || null;
 }
 
-// Helper: Logout function
-async function logout() {
-	if (!supabaseClient) {
-		await initSupabase();
-	}
-	if (!supabaseClient) return;
+// Helper: Show login screen (content switching, not redirect)
+async function showLoginScreen() {
+	// Clear all app state
+	currentWorkout = null;
+	editingWorkoutId = null;
+	allExercises = [];
+	currentExercise = null;
 	
-	try {
-		await supabaseClient.auth.signOut();
-		localStorage.removeItem('workouts'); // Optional: clear workouts on logout
-		window.location.href = '/login';
-	} catch (e) {
-		console.error('Logout failed:', e);
-		window.location.href = '/login';
+	// Stop any timers
+	if (workoutTimer) {
+		clearInterval(workoutTimer);
+		workoutTimer = null;
+	}
+	workoutStartTime = null;
+	
+	// Reset supabase client
+	supabaseClient = null;
+	
+	// Hide ALL content sections (explicit for WebView)
+	const allContent = document.querySelectorAll('.content');
+	allContent.forEach(content => {
+		content.classList.add('hidden');
+		content.style.display = 'none';
+	});
+	
+	// Hide navigation bar on login screen
+	const navbar = document.querySelector('.navbar');
+	if (navbar) {
+		navbar.style.display = 'none';
+	}
+	
+	// Show login content (explicit for WebView)
+	const loginContent = document.getElementById('login-content');
+	if (loginContent) {
+		loginContent.classList.remove('hidden');
+		loginContent.style.display = '';
+		// Force reflow in WebView
+		if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+			loginContent.offsetHeight;
+		}
+		// Reset all form states
+		const loginSubmitBtn = document.getElementById('login-submit-btn') || document.getElementById('submit-btn');
+		if (loginSubmitBtn) {
+			loginSubmitBtn.disabled = false;
+			loginSubmitBtn.textContent = 'Sign In';
+		}
+		const loginEmail = document.getElementById('login-email') || document.getElementById('email');
+		const loginPassword = document.getElementById('login-password') || document.getElementById('password');
+		if (loginEmail) loginEmail.value = '';
+		if (loginPassword) loginPassword.value = '';
+		
+		// Initialize form after delay
+		setTimeout(() => {
+			initLoginForm();
+			initRegisterLink();
+		}, 150);
 	}
 }
+
+// Initialize register link
+function initRegisterLink() {
+	const registerLink = document.getElementById('show-register-link');
+	if (registerLink) {
+		// Remove old listeners
+		const newLink = registerLink.cloneNode(true);
+		registerLink.parentNode.replaceChild(newLink, registerLink);
+		
+		newLink.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			// Show register content
+			const loginContent = document.getElementById('login-content');
+			const registerContent = document.getElementById('register-content');
+			if (loginContent) {
+				loginContent.classList.add('hidden');
+				loginContent.style.display = 'none';
+			}
+			if (registerContent) {
+				registerContent.classList.remove('hidden');
+				registerContent.style.display = '';
+				// Reset register form states
+				const registerSubmitBtn = document.getElementById('register-submit-btn') || document.getElementById('submit-btn');
+				if (registerSubmitBtn) {
+					registerSubmitBtn.disabled = false;
+					registerSubmitBtn.textContent = 'Sign Up';
+				}
+				const registerEmail = document.getElementById('register-email');
+				const registerUsername = document.getElementById('register-username');
+				const registerPassword = document.getElementById('register-password');
+				if (registerEmail) registerEmail.value = '';
+				if (registerUsername) registerUsername.value = '';
+				if (registerPassword) registerPassword.value = '';
+				// Initialize register form
+				initRegisterForm();
+				initBackToLoginLink();
+			}
+		});
+	}
+}
+
+// Initialize back to login link
+function initBackToLoginLink() {
+	const backLink = document.getElementById('show-login-link');
+	if (backLink) {
+		// Remove old listeners
+		const newLink = backLink.cloneNode(true);
+		backLink.parentNode.replaceChild(newLink, backLink);
+		
+		newLink.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			// Show login content
+			const loginContent = document.getElementById('login-content');
+			const registerContent = document.getElementById('register-content');
+			if (registerContent) {
+				registerContent.classList.add('hidden');
+				registerContent.style.display = 'none';
+			}
+			if (loginContent) {
+				loginContent.classList.remove('hidden');
+				loginContent.style.display = '';
+				// Reset login form states
+				const loginSubmitBtn = document.getElementById('login-submit-btn') || document.getElementById('submit-btn');
+				if (loginSubmitBtn) {
+					loginSubmitBtn.disabled = false;
+					loginSubmitBtn.textContent = 'Sign In';
+				}
+				const loginEmail = document.getElementById('login-email') || document.getElementById('email');
+				const loginPassword = document.getElementById('login-password') || document.getElementById('password');
+				if (loginEmail) loginEmail.value = '';
+				if (loginPassword) loginPassword.value = '';
+				initLoginForm();
+				initRegisterLink();
+			}
+		});
+	}
+}
+
+// Helper: Logout function
+async function logout() {
+	try {
+		// Clear all data
+		localStorage.clear();
+		
+		// Sign out from Supabase
+		if (supabaseClient) {
+	try {
+		await supabaseClient.auth.signOut();
+	} catch (e) {
+				// Ignore sign out errors
+			}
+		}
+		
+		// Reset client
+		supabaseClient = null;
+		
+		// Show login screen
+		showLoginScreen();
+	} catch (e) {
+		// On any error, just clear and show login
+		localStorage.clear();
+		supabaseClient = null;
+		showLoginScreen();
+	}
+}
+
+// Make logout globally accessible
+window.logout = logout;
 
 // ========== NAVIGATION ==========
 function initNavigation() {
+	// Load credits balance when user is logged in
+	loadCreditsBalance();
 	const navButtons = document.querySelectorAll('.nav-btn');
 	navButtons.forEach(btn => {
-		btn.addEventListener('click', () => {
 			const tab = btn.dataset.tab;
+		if (tab) {
+			btn.addEventListener('click', () => {
+				console.log('[NAV] Nav button clicked:', tab);
 				switchTab(tab);
 		});
+			// Also add touchend for iOS
+			btn.addEventListener('touchend', (e) => {
+				e.preventDefault();
+				console.log('[NAV] Nav button touched:', tab);
+				switchTab(tab);
+			});
+			// Ensure button is touchable
+			btn.style.touchAction = 'manipulation';
+			btn.style.cursor = 'pointer';
+		}
 	});
+	console.log('[NAV] Navigation initialized, buttons:', navButtons.length);
 }
 
-function switchTab(tab) {
+// Make switchTab globally available
+window.switchTab = async function(tab) {
+	// If already on login screen, ignore
+	const loginContent = document.getElementById('login-content');
+	if (loginContent && !loginContent.classList.contains('hidden')) {
+		return;
+	}
+	
+	// Check auth
+	if (supabaseClient) {
+		try {
+			const { data: { session }, error } = await supabaseClient.auth.getSession();
+			if (!session || error) {
+				showLoginScreen();
+				return;
+			}
+		} catch (e) {
+			showLoginScreen();
+			return;
+		}
+	} else {
+		showLoginScreen();
+		return;
+	}
+	
+	// Show navigation bar (user is logged in)
+	const navbar = document.querySelector('.navbar');
+	if (navbar) {
+		navbar.style.display = '';
+	}
+	
 	// Update nav buttons
 	document.querySelectorAll('.nav-btn').forEach(btn => {
 		btn.classList.toggle('active', btn.dataset.tab === tab);
@@ -507,6 +1226,7 @@ function switchTab(tab) {
 	// Hide all content
 	document.querySelectorAll('.content').forEach(content => {
 		content.classList.add('hidden');
+		content.style.display = 'none';
 	});
 	
 	// Show selected content
@@ -514,16 +1234,18 @@ function switchTab(tab) {
 	const content = document.getElementById(contentId);
 	if (content) {
 		content.classList.remove('hidden');
+		content.style.display = ''; // Reset display style
 		currentTab = tab;
 		
-		// Load tab-specific data
+		// Load tab-specific data (only if user is logged in)
 		if (tab === 'workouts') {
-			loadWorkouts();
+			await loadWorkouts();
 			updateWorkoutStartButton();
 		} else if (tab === 'progress') {
-			loadProgress();
+			await loadProgress();
 		} else if (tab === 'settings') {
-			loadSettings();
+			// Settings can be shown even if user data fails to load
+			await loadSettings();
 		}
 	}
 }
@@ -848,7 +1570,8 @@ function initManualInput() {
 
 async function selectExerciseByName(name) {
 	try {
-		const res = await fetch('/exercise-info', {
+		const apiUrl = getApiUrl('/exercise-info');
+		const res = await fetch(apiUrl, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ exercise: name })
@@ -862,7 +1585,8 @@ async function selectExerciseByName(name) {
 
 async function selectExercise(key) {
 	try {
-		const res = await fetch('/exercise-info', {
+		const apiUrl = getApiUrl('/exercise-info');
+		const res = await fetch(apiUrl, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ exercise: key })
@@ -876,6 +1600,12 @@ async function selectExercise(key) {
 
 // ========== EXERCISE SELECTOR ==========
 function initExerciseSelector() {
+	// Prevent duplicate initialization
+	if (exerciseSelectorInitialized) {
+		console.log('[ExerciseSelector] Already initialized, skipping...');
+		return;
+	}
+	
 	const selector = document.getElementById('exercise-selector');
 	const closeBtn = document.getElementById('exercise-selector-close');
 	const searchInput = document.getElementById('exercise-selector-search');
@@ -903,16 +1633,151 @@ function initExerciseSelector() {
 		});
 	}
 
-	// AI detect inside selector - open chat modal
+	// AI detect - SIMPLE - werkt zoals vision-detect
 	if (aiDetectBtn) {
+		const fileInput = document.getElementById('exercise-selector-file');
+		if (fileInput) {
 		aiDetectBtn.addEventListener('click', () => {
-			openAIDetectChat();
-		});
+				fileInput.click();
+			});
+			
+			fileInput.addEventListener('change', async (e) => {
+				const file = e.target.files[0];
+				if (!file) return;
+				
+				aiDetectBtn.disabled = true;
+				aiDetectBtn.textContent = 'Analyzing...';
+				
+				try {
+					// Get Supabase session for authentication
+					const supabase = await initSupabase();
+					if (!supabase) {
+						alert('Please log in to use AI detect');
+						return;
+					}
+					
+					const { data: { session } } = await supabase.auth.getSession();
+					if (!session) {
+						alert('Please log in to use AI detect');
+						return;
+					}
+					
+					const formData = new FormData();
+					formData.append('image', file);
+					
+					const apiUrl = getApiUrl('/api/recognize-exercise');
+					console.log('[AI Detect] Sending to:', apiUrl);
+					console.log('[AI Detect] File:', file.name, file.size, 'bytes');
+					
+					const res = await fetch(apiUrl, {
+						method: 'POST',
+						headers: {
+							'Authorization': `Bearer ${session.access_token}`
+						},
+						body: formData
+					});
+					
+					console.log('[AI Detect] Response status:', res.status, res.statusText);
+					
+					// Handle no credits (403)
+					if (res.status === 403) {
+						const errorData = await res.json();
+						alert(errorData.error || 'No credits available. You\'ve used all 10 free credits this month.');
+						// Reload credits display
+						loadCreditsBalance();
+						return;
+					}
+					
+					if (!res.ok) {
+						const errorText = await res.text();
+						console.error('[AI Detect] Error response:', errorText);
+						throw new Error(`Server error: ${res.status} ${res.statusText}`);
+					}
+					
+					const responseText = await res.text();
+					console.log('[AI Detect] Raw response text:', responseText);
+					
+					let data;
+					try {
+						data = JSON.parse(responseText);
+					} catch (e) {
+						console.error('[AI Detect] Failed to parse JSON:', e);
+						alert('ERROR: Response is not JSON:\n' + responseText.substring(0, 200));
+						return;
+					}
+					
+					console.log('[AI Detect] Parsed response:', JSON.stringify(data));
+					
+					// Extract exercise name - be VERY lenient, accept anything
+					let exerciseName = '';
+					if (data) {
+						// Try multiple ways to get the exercise name
+						exerciseName = data.exercise || data.message || data.text || '';
+						exerciseName = String(exerciseName).toLowerCase().trim();
+					}
+					
+					console.log('[AI Detect] Raw data:', data);
+					console.log('[AI Detect] Exercise name extracted:', exerciseName);
+					console.log('[AI Detect] Exercise name length:', exerciseName.length);
+					
+					// ONLY show error if it's EXPLICITLY "unknown exercise" or completely empty
+					// If the model detected ANYTHING (even if it doesn't match), show it
+					const isExplicitlyUnknown = exerciseName === 'unknown exercise' || 
+					                              exerciseName === 'unknown' ||
+					                              !exerciseName || 
+					                              exerciseName.length < 2;
+					
+					if (isExplicitlyUnknown) {
+						console.log('[AI Detect] Explicitly unknown or empty - showing friendly message');
+						alert('We couldn\'t recognize an exercise in this image.\n\nPlease try a clearer photo of the exercise being performed.');
+						return;
+					}
+					
+					// Model detected something - try to find match, but always show what was detected
+					console.log('[AI Detect] Looking for match for:', exerciseName);
+					
+					// Find match
+					const matchingExercise = findExerciseByName(exerciseName);
+					console.log('[AI Detect] Match found?', matchingExercise ? matchingExercise.display : 'NO MATCH');
+					
+					// Update credits display if credits_remaining is in response
+					if (data.credits_remaining !== undefined) {
+						loadCreditsBalance();
+					}
+					
+					if (matchingExercise) {
+						console.log('[AI Detect] Adding exercise:', matchingExercise.display);
+						// Close selector en voeg toe
+						if (selector) selector.classList.add('hidden');
+						document.body.classList.remove('selector-open');
+						addExerciseToWorkout(matchingExercise);
+					} else {
+						// Model detected something but no match - show detected name (NO ERROR, just info)
+						const displayName = exerciseName.split(' ').map(w => 
+							w.charAt(0).toUpperCase() + w.slice(1)
+						).join(' ');
+						console.log('[AI Detect] No match, showing detected name:', displayName);
+						alert(`Detected: ${displayName}\n\nThis exercise is not in the list. Please select manually.`);
+					}
+					
+				} catch (e) {
+					console.error('AI detect error:', e);
+					alert('We couldn\'t recognize an exercise in this image.\n\nPlease try a clearer photo of the exercise being performed.');
+				} finally {
+					aiDetectBtn.disabled = false;
+					aiDetectBtn.textContent = 'AI-detect';
+					fileInput.value = '';
+				}
+			});
+		}
 	}
 	
 	// Muscle filters
 	const muscles = ['All', 'Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Abs'];
 	if (musclesContainer) {
+		// Clear container first to prevent duplicates when initExerciseSelector is called multiple times
+		musclesContainer.innerHTML = '';
+		
 		muscles.forEach(muscle => {
 			const btn = document.createElement('button');
 			btn.textContent = muscle;
@@ -991,7 +1856,7 @@ function initExerciseSelector() {
 						: `<div class="exercise-selector-item-image" style="background:rgba(124,92,255,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;">${initial}</div>`}
 				<div class="exercise-selector-item-content">
 					<div style="font-weight: 600;">${ex.display}</div>
-					${ex.muscles && ex.muscles.length > 0 ? `<span>${ex.muscles.join(', ')}</span>` : ''}
+					${ex.muscles && ex.muscles.length > 0 ? `<span>${[...new Set(ex.muscles)].join(', ')}</span>` : ''}
 					</div>
 				</div>
 			`;
@@ -1073,6 +1938,12 @@ function initExerciseSelector() {
 	window.filterExercisesForSelector = (query, muscle) => {
 		filterExercises(query, muscle);
 	};
+	
+	// Mark as initialized to prevent duplicate initialization
+	exerciseSelectorInitialized = true;
+	
+	// Mark as initialized to prevent duplicate initialization
+	exerciseSelectorInitialized = true;
 }
 
 function showExerciseRefinementsInSelector(refinementOptions, selectorEl) {
@@ -1117,7 +1988,7 @@ function showExerciseRefinementsInSelector(refinementOptions, selectorEl) {
 					: `<div class="exercise-selector-item-image" style="background:rgba(124,92,255,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;">${initial}</div>`}
 				<div class="exercise-selector-item-content">
 					<div style="font-weight: 600;">${exerciseName}</div>
-					${muscles && muscles.length ? `<span>${muscles.join(', ')}</span>` : ''}
+					${muscles && muscles.length ? `<span>${[...new Set(muscles)].join(', ')}</span>` : ''}
 				</div>
 			</div>
 		`;
@@ -1133,7 +2004,8 @@ function showExerciseRefinementsInSelector(refinementOptions, selectorEl) {
 				let exerciseData = exercise;
 				if (!exerciseData) {
 					try {
-						const res = await fetch('/exercise-info', {
+						const apiUrl = getApiUrl('/exercise-info');
+						const res = await fetch(apiUrl, {
 							method: 'POST',
 							headers: { 'Content-Type': 'application/json' },
 							body: JSON.stringify({ exercise: exerciseName })
@@ -1209,7 +2081,7 @@ async function classifyForExerciseSelector(file, predictionsContainer, selectorE
 			const labelLower = label.toLowerCase().trim();
 			const isGeneric = labelLower === 'smith machine' || labelLower === 'chinning dipping' || 
 			                  labelLower === 'leg raise tower' || labelLower === 'dumbbell';
-			const subtitleText = isGeneric ? 'Click to see exercises' : (muscles && muscles.length ? muscles.join(', ') : '');
+			const subtitleText = isGeneric ? 'Click to see exercises' : (muscles && muscles.length ? [...new Set(muscles)].join(', ') : '');
 			
 			btn.innerHTML = `
 				<div class="exercise-selector-item-main">
@@ -1374,20 +2246,51 @@ function initWorkoutBuilder() {
 	
 	if (aiWorkoutBtn) {
 		aiWorkoutBtn.addEventListener('click', () => {
+			console.log('[WORKOUT] AI Workout button clicked');
 			startAIWorkout();
 		});
+		// Also add touchend for iOS
+		aiWorkoutBtn.addEventListener('touchend', (e) => {
+			e.preventDefault();
+			console.log('[WORKOUT] AI Workout button touched');
+			startAIWorkout();
+		});
+		// Ensure button is touchable
+		aiWorkoutBtn.style.touchAction = 'manipulation';
+		aiWorkoutBtn.style.cursor = 'pointer';
+		aiWorkoutBtn.style.webkitTouchCallout = 'none';
 	}
 	
 	if (manualWorkoutBtn) {
 		manualWorkoutBtn.addEventListener('click', () => {
+			console.log('[WORKOUT] Manual Workout button clicked');
 			startNewWorkout();
 		});
+		// Also add touchend for iOS
+		manualWorkoutBtn.addEventListener('touchend', (e) => {
+			e.preventDefault();
+			console.log('[WORKOUT] Manual Workout button touched');
+			startNewWorkout();
+		});
+		// Ensure button is touchable
+		manualWorkoutBtn.style.touchAction = 'manipulation';
+		manualWorkoutBtn.style.cursor = 'pointer';
+		manualWorkoutBtn.style.webkitTouchCallout = 'none';
 	}
 	
 	if (saveWorkoutBtn) {
-		saveWorkoutBtn.addEventListener('click', () => {
-			saveWorkout();
-		});
+		// Remove any existing listeners first
+		const newBtn = saveWorkoutBtn.cloneNode(true);
+		saveWorkoutBtn.parentNode.replaceChild(newBtn, saveWorkoutBtn);
+		
+		// Add single event listener
+		newBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			if (window.saveWorkout && !isSavingWorkout) {
+				window.saveWorkout();
+			}
+		}, { once: false });
 	}
 
 	if (backWorkoutBtn) {
@@ -1409,7 +2312,9 @@ function initWorkoutBuilder() {
 	updateWorkoutStartButton();
 }
 
-function startAIWorkout() {
+// Make functions globally available for inline onclick handlers
+window.startAIWorkout = function() {
+	console.log('[WORKOUT] startAIWorkout called (global)');
 	isAIWorkoutMode = true;
 	// Clear existing messages and show AI workout welcome
 	const messagesContainer = document.getElementById('vision-chat-messages');
@@ -1437,7 +2342,9 @@ function startAIWorkout() {
 	}
 }
 
-function startNewWorkout(workoutData = null) {
+// Make functions globally available for inline onclick handlers
+window.startNewWorkout = function(workoutData = null) {
+	console.log('[WORKOUT] startNewWorkout called (global)');
 	currentWorkout = {
 		name: workoutData?.name || 'Workout',
 		exercises: workoutData?.exercises || [],
@@ -1667,6 +2574,45 @@ function escapeHtmlAttr(value) {
 	return (value ?? '').toString().replace(/"/g, '&quot;');
 }
 
+// Helper function to find exercise by name (from OpenAI response)
+function findExerciseByName(exerciseName) {
+	if (!exerciseName || !allExercises || allExercises.length === 0) return null;
+	
+	const nameLower = exerciseName.toLowerCase().trim();
+	
+	// Try exact match first (key or display)
+	let match = allExercises.find(ex => {
+		const keyLower = (ex.key || '').toLowerCase().trim();
+		const displayLower = (ex.display || '').toLowerCase().trim();
+		return keyLower === nameLower || displayLower === nameLower;
+	});
+	
+	if (match) return match;
+	
+	// Try partial match - check if name is contained in key or display
+	match = allExercises.find(ex => {
+		const keyLower = (ex.key || '').toLowerCase().replace(/_/g, ' ').trim();
+		const displayLower = (ex.display || '').toLowerCase().trim();
+		return keyLower.includes(nameLower) || displayLower.includes(nameLower) ||
+		       nameLower.includes(keyLower) || nameLower.includes(displayLower);
+	});
+	
+	if (match) return match;
+	
+	// Try fuzzy match - check if key parts match
+	const nameParts = nameLower.split(' ').filter(p => p.length > 2);
+	if (nameParts.length > 0) {
+		match = allExercises.find(ex => {
+			const keyLower = (ex.key || '').toLowerCase().replace(/_/g, ' ');
+			const displayLower = (ex.display || '').toLowerCase();
+			// Check if all name parts are in key or display
+			return nameParts.every(part => keyLower.includes(part) || displayLower.includes(part));
+		});
+	}
+	
+	return match || null;
+}
+
 function findExerciseMetadata(exercise) {
 	if (!exercise) return null;
 	const key = normalizeExerciseKey(exercise.key);
@@ -1709,7 +2655,8 @@ async function addExerciseToWorkout(exercise) {
 	let exerciseData = exercise;
 	if (typeof exercise === 'string' || (exercise && !exercise.display)) {
 		try {
-			const res = await fetch('/exercise-info', {
+		const apiUrl = getApiUrl('/exercise-info');
+		const res = await fetch(apiUrl, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ exercise: exercise.key || exercise })
@@ -1794,7 +2741,7 @@ function renderWorkoutList() {
 		headerRow.className = 'workout-edit-set-row workout-edit-set-header';
 		headerRow.innerHTML = `
 			<div class="set-col">Set</div>
-			${isBodyweight ? '' : '<div class="weight-col">Kg</div>'}
+			${isBodyweight ? '' : `<div class="weight-col">${getWeightUnitLabel()}</div>`}
 			<div class="reps-col">Reps</div>
 			<div class="action-col"></div>
 		`;
@@ -1805,9 +2752,12 @@ function renderWorkoutList() {
 			const prevSet = Array.isArray(ex.previousSets) ? ex.previousSets[setIdx] : null;
 			
 			// For weight placeholder: use set value if it exists, otherwise use previousSet, otherwise 0
-			const weightPlaceholder = (set.weight != null && set.weight !== '') 
+			// Convert to display unit (kg or lbs)
+			const weightKg = (set.weight != null && set.weight !== '') 
 				? set.weight 
 				: (prevSet && prevSet.weight != null && prevSet.weight !== '' ? prevSet.weight : 0);
+			const weightPlaceholder = convertWeightForDisplay(weightKg);
+			const weightDisplayValue = set.weight != null && set.weight !== '' ? convertWeightForDisplay(set.weight) : '';
 			
 			// For reps placeholder: use set value if it exists, otherwise use previousSet, otherwise 0
 			const repsPlaceholder = (set.reps != null && set.reps !== '') 
@@ -1824,7 +2774,7 @@ function renderWorkoutList() {
 				<div class="workout-edit-set-number">${setIdx + 1}</div>
 				</div>
 				${isBodyweight ? '' : `<div class="weight-col">
-					<input type="number" class="workout-edit-set-input weight" placeholder="${weightPlaceholder}" inputmode="decimal" value="${set.weight ?? ''}" aria-label="Set weight (kg)">
+					<input type="number" class="workout-edit-set-input weight" placeholder="${weightPlaceholder}" inputmode="decimal" value="${weightDisplayValue}" aria-label="Set weight (${getWeightUnitLabel().toLowerCase()})">
 				</div>`}
 				<div class="reps-col">
 					<input type="number" class="workout-edit-set-input reps" placeholder="${repsPlaceholder}" inputmode="numeric" value="${set.reps ?? ''}" aria-label="Set reps">
@@ -1842,14 +2792,21 @@ function renderWorkoutList() {
 			
 			if (weightInput) {
 				weightInput.addEventListener('input', (e) => {
-					ex.sets[setIdx].weight = e.target.value ? Number(e.target.value) : '';
+					// Convert input value (in current unit) to kg for storage
+					const currentUnit = getWeightUnit();
+					ex.sets[setIdx].weight = convertWeightForStorage(e.target.value, currentUnit);
 					saveWorkoutDraft();
+					// Auto-trigger rest timer if enabled and set is complete (both weight and reps)
+					checkAndTriggerRestTimer(ex.sets[setIdx], e.target.value, repsInput.value, ex);
 				});
 			}
 			
 				repsInput.addEventListener('input', (e) => {
 				ex.sets[setIdx].reps = e.target.value ? Number(e.target.value) : '';
 				saveWorkoutDraft();
+				// Auto-trigger rest timer if enabled and set is complete (both weight and reps)
+				const weightValue = weightInput ? weightInput.value : '';
+				checkAndTriggerRestTimer(ex.sets[setIdx], weightValue, e.target.value, ex);
 				});
 			
 			deleteBtn.addEventListener('click', () => {
@@ -1920,7 +2877,10 @@ function renderWorkoutList() {
 		cancelBtn.className = 'btn workout-cancel-btn';
 		cancelBtn.textContent = 'Cancel workout';
 		cancelBtn.onclick = () => {
+			// Ask for confirmation before canceling
+			if (confirm('Are you sure you want to cancel this workout? All unsaved progress will be lost.')) {
 			cancelWorkout();
+			}
 		};
 		addBtn.insertAdjacentElement('afterend', cancelBtn);
 	}
@@ -1935,70 +2895,387 @@ function capitalizeFirstLetter(str) {
 	return firstChar.toUpperCase() + str.slice(1);
 }
 
-function saveWorkout() {
+// Make saveWorkout globally available
+window.saveWorkout = async function() {
+	console.log('[WORKOUT] saveWorkout called (global)');
+	
+	// Prevent duplicate saves - check immediately and set flag synchronously
+	if (isSavingWorkout) {
+		console.log('[WORKOUT] Save already in progress, ignoring duplicate call');
+		return;
+	}
+	
 	if (!currentWorkout) return;
 	
-	const workoutName = document.getElementById('workout-name');
-	if (workoutName) {
-		const nameValue = workoutName.value || 'Workout';
-		const capitalizedName = capitalizeFirstLetter(nameValue);
-		currentWorkout.name = capitalizedName;
-		workoutName.value = capitalizedName; // Update the input field to show capitalized version
+	// Set saving flag IMMEDIATELY (synchronously) before any async operations
+	isSavingWorkout = true;
+	
+	// Disable save button immediately
+	const saveWorkoutBtn = document.getElementById('save-workout');
+	if (saveWorkoutBtn) {
+		saveWorkoutBtn.disabled = true;
+		saveWorkoutBtn.style.opacity = '0.5';
+		saveWorkoutBtn.style.pointerEvents = 'none';
 	}
 	
-	currentWorkout.exercises = (currentWorkout.exercises || []).map(ex => ({
-		...ex,
-		sets: (ex.sets || []).filter(set => set.weight !== '' || set.reps !== '')
-	}));
-	
-	let duration = currentWorkout.duration || 0;
-	if (!editingWorkoutId && workoutStartTime) {
-		duration = Date.now() - workoutStartTime;
-	}
-	currentWorkout.duration = duration;
-	
-	// Save to localStorage for now
-	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-	const payload = {
-				...currentWorkout,
-		id: editingWorkoutId || currentWorkout.id || Date.now(),
-		date: editingWorkoutId ? (currentWorkout.date || new Date().toISOString()) : new Date().toISOString()
-	};
-	
-	if (editingWorkoutId) {
-		const idx = workouts.findIndex(w => w.id === editingWorkoutId);
-		if (idx >= 0) {
-			workouts[idx] = payload;
+	try {
+		// Check if user is logged in
+		if (!supabaseClient) {
+			await initSupabase();
+		}
+		if (!supabaseClient) {
+			alert('Please log in to save workouts');
+			isSavingWorkout = false;
+			const saveWorkoutBtn = document.getElementById('save-workout');
+			if (saveWorkoutBtn) {
+				saveWorkoutBtn.disabled = false;
+				saveWorkoutBtn.style.opacity = '1';
+				saveWorkoutBtn.style.pointerEvents = 'auto';
+			}
+			return;
+		}
+		
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			alert('Please log in to save workouts');
+			isSavingWorkout = false;
+			const saveWorkoutBtn = document.getElementById('save-workout');
+			if (saveWorkoutBtn) {
+				saveWorkoutBtn.disabled = false;
+				saveWorkoutBtn.style.opacity = '1';
+				saveWorkoutBtn.style.pointerEvents = 'auto';
+			}
+			return;
+		}
+		
+		const workoutName = document.getElementById('workout-name');
+		if (workoutName) {
+			const nameValue = workoutName.value || 'Workout';
+			const capitalizedName = capitalizeFirstLetter(nameValue);
+			currentWorkout.name = capitalizedName;
+			workoutName.value = capitalizedName; // Update the input field to show capitalized version
+		}
+		
+		currentWorkout.exercises = (currentWorkout.exercises || []).map(ex => ({
+			...ex,
+			sets: (ex.sets || []).filter(set => set.weight !== '' || set.reps !== '')
+		}));
+		
+		let duration = currentWorkout.duration || 0;
+		if (!editingWorkoutId && workoutStartTime) {
+			duration = Date.now() - workoutStartTime;
+		}
+		currentWorkout.duration = duration;
+		
+		// Calculate total volume
+		const volume = calculateWorkoutVolume(currentWorkout);
+		
+		// Determine workout date - SIMPLE: use originalDate if editing, today if new
+		let workoutDate;
+		if (editingWorkoutId && currentWorkout.originalDate) {
+			// When editing, use the EXACT original date string - NO CONVERSION
+			workoutDate = currentWorkout.originalDate;
+		} else {
+			// New workout - use today's date
+			const today = new Date();
+			const year = today.getFullYear();
+			const month = String(today.getMonth() + 1).padStart(2, '0');
+			const day = String(today.getDate()).padStart(2, '0');
+			workoutDate = `${year}-${month}-${day}`;
+		}
+		
+		// Prepare payload for Supabase
+		const workoutPayload = {
+			user_id: session.user.id,
+			name: currentWorkout.name || 'Workout',
+			date: workoutDate,
+			exercises: currentWorkout.exercises || [],
+			duration: duration,
+			total_volume: volume
+		};
+		
+		if (editingWorkoutId) {
+			// Update existing workout
+			const { data, error } = await supabaseClient
+				.from('workouts')
+				.update(workoutPayload)
+				.eq('id', editingWorkoutId)
+				.eq('user_id', session.user.id)
+				.select()
+				.single();
+			
+			if (error) {
+				console.error('[WORKOUT] Error updating workout:', error);
+				alert('Failed to update workout. Please try again.');
+				isSavingWorkout = false;
+				const saveWorkoutBtn = document.getElementById('save-workout');
+				if (saveWorkoutBtn) {
+					saveWorkoutBtn.disabled = false;
+					saveWorkoutBtn.style.opacity = '1';
+					saveWorkoutBtn.style.pointerEvents = 'auto';
+				}
+				return;
+			}
+			console.log('[WORKOUT] Workout updated successfully:', data);
+		} else {
+			// Insert new workout
+			const { data, error } = await supabaseClient
+				.from('workouts')
+				.insert(workoutPayload)
+				.select()
+				.single();
+			
+			if (error) {
+				console.error('[WORKOUT] Error saving workout:', error);
+				alert('Failed to save workout. Please try again.');
+				isSavingWorkout = false;
+				const saveWorkoutBtn = document.getElementById('save-workout');
+				if (saveWorkoutBtn) {
+					saveWorkoutBtn.disabled = false;
+					saveWorkoutBtn.style.opacity = '1';
+					saveWorkoutBtn.style.pointerEvents = 'auto';
+				}
+				return;
+			}
+			console.log('[WORKOUT] Workout saved successfully:', data);
+		}
+		
+		// Also save to localStorage as backup
+		const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		const payload = {
+			...currentWorkout,
+			id: editingWorkoutId || currentWorkout.id || Date.now(),
+			date: workoutDate
+		};
+		
+		if (editingWorkoutId) {
+			const idx = workouts.findIndex(w => w.id === editingWorkoutId);
+			if (idx >= 0) {
+				workouts[idx] = payload;
+			} else {
+				workouts.push(payload);
+			}
 		} else {
 			workouts.push(payload);
 		}
-	} else {
-		workouts.push(payload);
+		localStorage.setItem('workouts', JSON.stringify(workouts));
+		
+		// Update streak for all workouts (recalculate from actual data)
+		loadStreak();
+		
+		// Update daily notification if user just worked out
+		updateDailyNotificationIfNeeded();
+		
+		editingWorkoutId = null;
+		clearWorkoutDraft();
+		
+		const saveSuccess = document.getElementById('save-success');
+		if (saveSuccess) {
+			saveSuccess.classList.remove('hidden');
+			setTimeout(() => {
+				saveSuccess.classList.add('hidden');
+			}, 2000);
+		}
+		
+		await loadWorkouts();
+		switchTab('workouts');
+	} catch (error) {
+		console.error('[WORKOUT] Unexpected error saving workout:', error);
+		alert('An error occurred while saving the workout. Please try again.');
+	} finally {
+		// Always reset the saving flag and re-enable button
+		isSavingWorkout = false;
+		const saveWorkoutBtn = document.getElementById('save-workout');
+		if (saveWorkoutBtn) {
+			saveWorkoutBtn.disabled = false;
+			saveWorkoutBtn.style.opacity = '1';
+			saveWorkoutBtn.style.pointerEvents = 'auto';
+		}
 	}
-	localStorage.setItem('workouts', JSON.stringify(workouts));
-	
-	// Update streak only for new workouts (not edits)
-	if (!editingWorkoutId) {
-		updateStreak();
-	}
-	
-	editingWorkoutId = null;
-	clearWorkoutDraft();
-	
-	const saveSuccess = document.getElementById('save-success');
-	if (saveSuccess) {
-		saveSuccess.classList.remove('hidden');
-		setTimeout(() => {
-			saveSuccess.classList.add('hidden');
-		}, 2000);
-	}
-	
-	loadWorkouts(workouts);
-	switchTab('workouts');
 }
 
-function loadWorkouts(prefetchedWorkouts = null) {
-	const workouts = prefetchedWorkouts ?? JSON.parse(localStorage.getItem('workouts') || '[]');
+// Migrate localStorage workouts to Supabase
+async function migrateLocalStorageWorkouts() {
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		return;
+	}
+	
+	const { data: { session } } = await supabaseClient.auth.getSession();
+	if (!session) {
+		return;
+	}
+	
+	// Check if migration already done for this user
+	const migrationKey = `workouts_migrated_${session.user.id}`;
+	if (localStorage.getItem(migrationKey) === 'true') {
+		return; // Already migrated
+	}
+	
+	// Get workouts from localStorage
+	const localWorkouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	if (localWorkouts.length === 0) {
+		// Mark as migrated even if no workouts to avoid checking again
+		localStorage.setItem(migrationKey, 'true');
+		return;
+	}
+	
+	try {
+		// Check if user already has workouts in Supabase
+		const { data: existingWorkouts, error: checkError } = await supabaseClient
+			.from('workouts')
+			.select('id')
+			.eq('user_id', session.user.id)
+			.limit(1);
+		
+		if (checkError) {
+			console.error('[MIGRATION] Error checking existing workouts:', checkError);
+			return;
+		}
+		
+		// If user already has workouts in Supabase, don't migrate (they might have been synced already)
+		if (existingWorkouts && existingWorkouts.length > 0) {
+			console.log('[MIGRATION] User already has workouts in Supabase, skipping migration');
+			localStorage.setItem(migrationKey, 'true');
+			return;
+		}
+		
+		// Migrate each workout
+		const workoutsToMigrate = localWorkouts.map(workout => {
+			// Preserve date as YYYY-MM-DD string to avoid timezone issues
+			let workoutDate;
+			if (workout.date) {
+				if (typeof workout.date === 'string' && workout.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+					// Already a date string, use it directly
+					workoutDate = workout.date;
+				} else {
+					// ISO string or Date object, extract date part using local time
+					const date = new Date(workout.date);
+					const year = date.getFullYear();
+					const month = String(date.getMonth() + 1).padStart(2, '0');
+					const day = String(date.getDate()).padStart(2, '0');
+					workoutDate = `${year}-${month}-${day}`;
+				}
+			} else {
+				// No date, use today
+				const today = new Date();
+				const year = today.getFullYear();
+				const month = String(today.getMonth() + 1).padStart(2, '0');
+				const day = String(today.getDate()).padStart(2, '0');
+				workoutDate = `${year}-${month}-${day}`;
+			}
+			
+			return {
+				user_id: session.user.id,
+				name: workout.name || 'Workout',
+				date: workoutDate,
+				exercises: workout.exercises || [],
+				duration: workout.duration || 0,
+				total_volume: calculateWorkoutVolume(workout) || 0
+			};
+		});
+		
+		if (workoutsToMigrate.length > 0) {
+			const { data, error } = await supabaseClient
+				.from('workouts')
+				.insert(workoutsToMigrate)
+				.select();
+			
+			if (error) {
+				console.error('[MIGRATION] Error migrating workouts:', error);
+				return;
+			}
+			
+			console.log(`[MIGRATION] Successfully migrated ${workoutsToMigrate.length} workouts to Supabase`);
+		}
+		
+		// Mark migration as complete
+		localStorage.setItem(migrationKey, 'true');
+	} catch (error) {
+		console.error('[MIGRATION] Unexpected error during migration:', error);
+	}
+}
+
+async function loadWorkouts(prefetchedWorkouts = null) {
+	// Check if user is logged in
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		showLoginScreen();
+		return;
+	}
+	
+	const { data: { session } } = await supabaseClient.auth.getSession();
+	if (!session) {
+		showLoginScreen();
+		return;
+	}
+	
+	let workouts = [];
+	
+	// If prefetched workouts provided, use those (for backward compatibility)
+	if (prefetchedWorkouts) {
+		workouts = prefetchedWorkouts;
+	} else {
+		// Load from Supabase
+		try {
+			const { data, error } = await supabaseClient
+				.from('workouts')
+				.select('*')
+				.eq('user_id', session.user.id)
+				.order('date', { ascending: false });
+			
+			if (error) {
+				console.error('[WORKOUT] Error loading workouts:', error);
+				// Fallback to localStorage if Supabase fails
+				workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+			} else {
+				// Transform Supabase data to match app format
+				workouts = (data || []).map(workout => {
+					// CRITICAL: Preserve the EXACT date string from Supabase (YYYY-MM-DD)
+					// Store it as both 'date' and 'originalDate' to ensure it's never lost
+					let workoutDate;
+					if (workout.date) {
+						// Supabase returns dates as YYYY-MM-DD strings - use it DIRECTLY
+						if (typeof workout.date === 'string' && workout.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+							workoutDate = workout.date;
+						} else {
+							// Fallback: extract date part (shouldn't happen with Supabase)
+							workoutDate = workout.date.toString().split('T')[0];
+						}
+					} else {
+						// No date, use today
+						const today = new Date();
+						const year = today.getFullYear();
+						const month = String(today.getMonth() + 1).padStart(2, '0');
+						const day = String(today.getDate()).padStart(2, '0');
+						workoutDate = `${year}-${month}-${day}`;
+					}
+					
+					return {
+						id: workout.id,
+						name: workout.name || 'Workout',
+						date: workoutDate, // For display/sorting
+						originalDate: workoutDate, // EXACT original date - NEVER TOUCH THIS
+						exercises: workout.exercises || [],
+						duration: workout.duration || 0,
+						total_volume: workout.total_volume || 0
+					};
+				});
+				
+				// Also sync to localStorage as backup
+				localStorage.setItem('workouts', JSON.stringify(workouts));
+			}
+		} catch (error) {
+			console.error('[WORKOUT] Unexpected error loading workouts:', error);
+			// Fallback to localStorage
+			workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		}
+	}
+	
 	const workoutsList = document.getElementById('workouts-list');
 	const workoutsCount = document.getElementById('workouts-count');
 	
@@ -2015,11 +3292,17 @@ function loadWorkouts(prefetchedWorkouts = null) {
 			return;
 		}
 		
-		const sorted = [...workouts].sort((a, b) => new Date(b.date) - new Date(a.date));
+		// Sort by date string (YYYY-MM-DD) directly to avoid timezone issues
+		const sorted = [...workouts].sort((a, b) => {
+			// Compare date strings directly (YYYY-MM-DD format)
+			return b.date.localeCompare(a.date);
+		});
 		
 		sorted.forEach(workout => {
 			const li = document.createElement('li');
-			const date = new Date(workout.date);
+			// Parse date string (YYYY-MM-DD) to Date object for display
+			// Use noon (12:00) to avoid timezone issues when converting
+			const date = new Date(workout.date + 'T12:00:00');
 			const dateLabel = formatWorkoutDate(date);
 			const durationLabel = formatDurationForCard(workout.duration);
 			const volume = calculateWorkoutVolume(workout);
@@ -2124,7 +3407,7 @@ function buildWorkoutExercisesMarkup(workout) {
 						<div class="workout-edit-set-number">${idx + 1}</div>
 				</div>
 					${isBodyweight ? '' : `<div class="weight-col">
-						<div class="workout-view-value">${set.weight ?? 0}</div>
+						<div class="workout-view-value">${convertWeightForDisplay(set.weight ?? 0)}</div>
 				</div>`}
 					<div class="reps-col">
 						<div class="workout-view-value">${set.reps ?? 0}</div>
@@ -2153,7 +3436,7 @@ function buildWorkoutExercisesMarkup(workout) {
 				<div class="workout-edit-sets view-mode ${isBodyweight ? 'bodyweight' : ''}">
 					<div class="workout-edit-set-row workout-edit-set-header">
 						<div class="set-col">Set</div>
-						${isBodyweight ? '' : '<div class="weight-col">Kg</div>'}
+						${isBodyweight ? '' : `<div class="weight-col">${getWeightUnitLabel()}</div>`}
 						<div class="reps-col">Reps</div>
 						<div class="action-col"></div>
 					</div>
@@ -2456,21 +3739,86 @@ function calculateWorkoutVolume(workout) {
 }
 
 function formatVolume(volumeKg) {
-	if (volumeKg === 0) return '0 kg';
-	return `${Math.round(volumeKg).toLocaleString()} kg`;
+	if (volumeKg === 0) return `0 ${getWeightUnitLabel().toLowerCase()}`;
+	const unit = getWeightUnitLabel().toLowerCase();
+	if (isLbs()) {
+		const volumeLbs = Math.round(Number(kgToLbs(volumeKg)));
+		return `${volumeLbs.toLocaleString()} ${unit}`;
+	}
+	return `${Math.round(volumeKg).toLocaleString()} ${unit}`;
 }
 
-function deleteWorkout(id) {
-	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-	const filtered = workouts.filter(workout => workout.id !== id);
-	localStorage.setItem('workouts', JSON.stringify(filtered));
-	loadWorkouts();
+async function deleteWorkout(id) {
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		alert('Please log in to delete workouts');
+		return;
+	}
+	
+	const { data: { session } } = await supabaseClient.auth.getSession();
+	if (!session) {
+		alert('Please log in to delete workouts');
+		return;
+	}
+	
+	try {
+		// Delete from Supabase
+		const { error } = await supabaseClient
+			.from('workouts')
+			.delete()
+			.eq('id', id)
+			.eq('user_id', session.user.id);
+		
+		if (error) {
+			console.error('[WORKOUT] Error deleting workout:', error);
+			alert('Failed to delete workout. Please try again.');
+			return;
+		}
+		
+		// Also remove from localStorage
+		const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		const filtered = workouts.filter(workout => workout.id !== id);
+		localStorage.setItem('workouts', JSON.stringify(filtered));
+		
+		await loadWorkouts();
+	} catch (error) {
+		console.error('[WORKOUT] Unexpected error deleting workout:', error);
+		alert('An error occurred while deleting the workout. Please try again.');
+	}
 }
 
 function editWorkout(workout) {
 	if (!workout) return;
 	currentWorkout = JSON.parse(JSON.stringify(workout));
 	editingWorkoutId = workout.id;
+	
+	// CRITICAL: Preserve the original date string EXACTLY as it came from Supabase
+	// Store it separately so it's never touched or converted
+	if (workout.originalDate) {
+		currentWorkout.originalDate = workout.originalDate;
+	} else if (workout.date) {
+		// If originalDate not set, extract it from the date field
+		// This handles workouts loaded from Supabase (which stores as YYYY-MM-DD)
+		if (typeof workout.date === 'string' && workout.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+			currentWorkout.originalDate = workout.date;
+		} else {
+			// Fallback: extract date part from ISO string
+			const dateStr = workout.date.toString();
+			if (dateStr.includes('T')) {
+				currentWorkout.originalDate = dateStr.split('T')[0];
+			} else {
+				// Last resort: use local date components
+				const date = new Date(workout.date);
+				const year = date.getFullYear();
+				const month = String(date.getMonth() + 1).padStart(2, '0');
+				const day = String(date.getDate()).padStart(2, '0');
+				currentWorkout.originalDate = `${year}-${month}-${day}`;
+			}
+		}
+	}
+	
 	workoutStartTime = null;
 	if (workoutTimer) {
 		clearInterval(workoutTimer);
@@ -2545,7 +3893,9 @@ function initProgress() {
 				// Use the selected date so you can backfill specific days
 				const dayKey = dateInputValue; // YYYY-MM-DD from input[type=date]
 				const now = new Date(`${dayKey}T12:00:00`);
-				const value = parseFloat(weight);
+				// Convert weight from display unit to kg for storage
+				const currentUnit = getWeightUnit();
+				const value = convertWeightForStorage(parseFloat(weight), currentUnit);
 				// Remove any existing entries for this day (to prevent duplicates)
 				const filteredProgress = progress.filter(p => {
 					const pDayKey = p.dayKey || (p.date ? p.date.slice(0, 10) : '');
@@ -2611,8 +3961,26 @@ function initProgress() {
 }
 
 async function loadProgress() {
+	// Check if user is logged in
+	if (supabaseClient) {
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			showLoginScreen();
+			return;
+		}
+	} else {
+		showLoginScreen();
+		return;
+	}
 	const progress = JSON.parse(localStorage.getItem('progress') || '[]');
 	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	
+	// Initialize unit label
+	const unitLabel = document.getElementById('progress-unit-label');
+	if (unitLabel) {
+		unitLabel.textContent = getWeightUnitLabel().toLowerCase();
+	}
+	
 	renderWeightChart(progress);
 	await renderMuscleFocus(workouts);
 	updateExerciseInsightsOptions(workouts);
@@ -2623,9 +3991,16 @@ async function loadProgress() {
 function renderWeightChart(progress) {
 	const canvas = document.getElementById('progress-chart');
 	const empty = document.getElementById('progress-empty');
+	const chartWrapper = document.querySelector('.progress-chart-wrapper');
 	if (!canvas) return;
 	const ctx = canvas.getContext('2d');
 	if (!ctx) return;
+	
+	// Update unit label in chart wrapper
+	if (chartWrapper) {
+		const unit = getWeightUnitLabel().toLowerCase();
+		chartWrapper.setAttribute('data-unit', unit);
+	}
 
 	canvas.width = canvas.clientWidth || 320;
 	canvas.height = canvas.clientHeight || 220;
@@ -2766,13 +4141,21 @@ function renderWeightChart(progress) {
 	// Hide tooltip initially
 	if (tooltip) tooltip.style.display = 'none';
 	
-	// Set placeholder to last weight entry
+	// Set placeholder to last weight entry (convert to display unit)
 	const weightInput = document.getElementById('progress-weight');
 	if (weightInput && sorted.length > 0) {
 		const lastEntry = sorted[sorted.length - 1];
-		weightInput.placeholder = `${lastEntry.weight}`;
+		// Convert from stored kg to display unit
+		const displayWeight = convertWeightForDisplay(lastEntry.weight);
+		weightInput.placeholder = `${displayWeight}`;
 	} else if (weightInput) {
 		weightInput.placeholder = '';
+	}
+	
+	// Update unit label dynamically
+	const unitLabel = document.getElementById('progress-unit-label');
+	if (unitLabel) {
+		unitLabel.textContent = getWeightUnitLabel().toLowerCase();
 	}
 	
 	if (yLabelsEl) {
@@ -2844,7 +4227,7 @@ function renderWeightChart(progress) {
 				day: '2-digit',
 				month: 'short'
 			});
-			tooltip.textContent = `${labelDate} • ${nearest.weight} kg`;
+			tooltip.textContent = `${labelDate} • ${convertWeightForDisplay(nearest.weight)} ${getWeightUnitLabel().toLowerCase()}`;
 			tooltip.style.left = `${nearest.cx}px`;
 			tooltip.style.top = `${nearest.cy}px`;
 			tooltip.style.display = 'block';
@@ -2942,7 +4325,8 @@ async function renderMuscleFocus(workouts) {
 	// Fetch all missing muscle data in parallel
 	await Promise.all(exercisesNeedingMuscles.map(async ({ exercise, workout }) => {
 		try {
-			const res = await fetch('/exercise-info', {
+			const apiUrl = getApiUrl('/exercise-info');
+			const res = await fetch(apiUrl, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ exercise: exercise.key || exercise.display })
@@ -3173,14 +4557,14 @@ function handleExerciseInsightsForName(name) {
 				<div class="progress-pr-result-title">Top weight set</div>
 				<div class="progress-pr-result-meta">
 					<span><strong>${entry.name}</strong></span>
-					<span>${bestWeightSet.weight} kg × ${bestWeightSet.reps}</span>
+					<span>${convertWeightForDisplay(bestWeightSet.weight)} ${getWeightUnitLabel().toLowerCase()} × ${bestWeightSet.reps}</span>
 				</div>
 			</div>
 			<div class="progress-pr-result">
 				<div class="progress-pr-result-title">Top volume set</div>
 				<div class="progress-pr-result-meta">
 					<span><strong>${entry.name}</strong></span>
-					<span>${bestVolumeSet.weight} kg × ${bestVolumeSet.reps} (${bestVolumeSet.volume} kg)</span>
+					<span>${convertWeightForDisplay(bestVolumeSet.weight)} ${getWeightUnitLabel().toLowerCase()} × ${bestVolumeSet.reps} (${formatVolume(bestVolumeSet.volume)})</span>
 				</div>
 			</div>
 		`;
@@ -3273,7 +4657,7 @@ function renderPRTimeline(workouts) {
 				<div class="progress-pr-timeline-date">${dateStr}</div>
 				<div class="progress-pr-timeline-content">
 					<div class="progress-pr-timeline-exercise">${pr.display}</div>
-					<div class="progress-pr-timeline-value">${pr.bestWeight} kg × ${pr.bestReps} reps</div>
+					<div class="progress-pr-timeline-value">${convertWeightForDisplay(pr.bestWeight)} ${getWeightUnitLabel().toLowerCase()} × ${pr.bestReps} reps</div>
 				</div>
 			</div>
 		`;
@@ -3382,8 +4766,8 @@ function renderProgressiveOverloadTracker(workouts) {
 			statusClass,
 			statusText,
 			changePercent: Math.abs(changePercent).toFixed(1),
-			recentBest: `${recentBestSet.weight}kg × ${recentBestSet.reps}`,
-			oldBest: `${oldBestSet.weight}kg × ${oldBestSet.reps}`,
+			recentBest: `${convertWeightForDisplay(recentBestSet.weight)}${getWeightUnitLabel().toLowerCase()} × ${recentBestSet.reps}`,
+			oldBest: `${convertWeightForDisplay(oldBestSet.weight)}${getWeightUnitLabel().toLowerCase()} × ${oldBestSet.reps}`,
 			workoutCount: workoutCount
 		};
 	});
@@ -3416,34 +4800,828 @@ function renderProgressiveOverloadTracker(workouts) {
 // ======================
 // 🚪 LOGOUT
 // ======================
+// Track if logout is already initialized to prevent duplicate listeners
+let logoutInitialized = false;
+
 function initLogout() {
 	const btn = document.getElementById('logout-btn');
 	if (!btn) return;
 	
-	btn.addEventListener('click', async () => {
+	// If already initialized, remove old listener first
+	if (logoutInitialized) {
+		// Clone button to remove all listeners
+		const newBtn = btn.cloneNode(true);
+		btn.parentNode.replaceChild(newBtn, btn);
+		// Update reference
+		const updatedBtn = document.getElementById('logout-btn');
+		if (!updatedBtn) return;
+		updatedBtn.addEventListener('click', handleLogoutClick);
+		return;
+	}
+	
+	// First time initialization
+	btn.addEventListener('click', handleLogoutClick);
+	logoutInitialized = true;
+}
+
+async function handleLogoutClick(e) {
+	e.preventDefault();
+	e.stopPropagation();
+	
 			if (confirm('Are you sure you want to log out?')) {
 			await logout();
 			}
-		});
 	}
 
 // ========== SETTINGS ==========
 function initSettings() {
 	initLogout(); // Initialize logout button
+	initSettingsToggles();
+	initDeleteAccount();
+}
+
+function initSettingsToggles() {
+	// Notifications toggle
+	const notificationsToggle = document.getElementById('settings-notifications-toggle');
+	if (notificationsToggle) {
+		// Load saved state
+		const saved = localStorage.getItem('settings-notifications') === 'true';
+		notificationsToggle.checked = saved;
+		notificationsToggle.addEventListener('change', async (e) => {
+			localStorage.setItem('settings-notifications', e.target.checked);
+			if (e.target.checked) {
+				// Request notification permission
+				await requestNotificationPermission();
+				// Schedule notifications when enabled
+				await scheduleDailyNotifications();
+				await scheduleWeeklyNotifications();
+			} else {
+				// Cancel all notifications when disabled
+				if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications) {
+					try {
+						await window.Capacitor.Plugins.LocalNotifications.cancel({
+							notifications: [{ id: 100 }, { id: 200 }]
+						});
+					} catch (error) {
+						console.error('[NOTIFICATIONS] Failed to cancel notifications:', error);
+					}
+				}
+			}
+		});
+		// Request permission on load if enabled
+		if (saved) {
+			requestNotificationPermission();
+		}
+	}
+	
+	// Rest timer toggle
+	const restTimerToggle = document.getElementById('settings-rest-timer-toggle');
+	if (restTimerToggle) {
+		// Load saved state
+		const saved = localStorage.getItem('settings-rest-timer') === 'true';
+		restTimerToggle.checked = saved;
+		restTimerToggle.addEventListener('change', (e) => {
+			localStorage.setItem('settings-rest-timer', e.target.checked);
+		});
+	}
+	
+	// Weight unit toggle (kg/lbs)
+	const unitToggle = document.getElementById('settings-unit-toggle');
+	if (unitToggle) {
+		// Load saved state (default to kg = false/left, lbs = true/right)
+		const savedUnit = getWeightUnit(); // Uses 'kg' as default for new accounts
+		unitToggle.checked = savedUnit === 'lbs'; // Right (purple) = lbs, Left = kg
+		unitToggle.addEventListener('change', (e) => {
+			const unit = e.target.checked ? 'lbs' : 'kg'; // Right (purple) = lbs, Left = kg
+			localStorage.setItem('settings-weight-unit', unit);
+			
+			// Update weight chart unit label
+			const chartWrapper = document.querySelector('.progress-chart-wrapper');
+			if (chartWrapper) {
+				const unitLabel = getWeightUnitLabel().toLowerCase();
+				chartWrapper.setAttribute('data-unit', unitLabel);
+			}
+			
+			// Reload progress to update chart with new units
+			loadProgress();
+			// Update progress unit label immediately
+			const unitLabel = document.getElementById('progress-unit-label');
+			if (unitLabel) {
+				unitLabel.textContent = getWeightUnitLabel().toLowerCase();
+			}
+			// Refresh all displays to show converted weights
+			if (currentTab === 'workout-builder' && currentWorkout) {
+				renderWorkoutList();
+			}
+			if (currentTab === 'workouts') {
+				loadWorkouts();
+			}
+			if (currentTab === 'progress') {
+				loadProgress();
+			}
+		});
+	}
+}
+
+// ========== REST TIMER ==========
+let restTimerInterval = null;
+let restTimerSeconds = 0;
+let restTimerRunning = false;
+let scheduledNotificationId = null;
+let restTimerStartTime = null; // Track when timer started for background accuracy
+let restTimerInitialSeconds = 0; // Store initial seconds when timer starts
+
+function initRestTimer() {
+	const overlay = document.getElementById('rest-timer-overlay');
+	const closeBtn = document.getElementById('rest-timer-close');
+	const startBtn = document.getElementById('rest-timer-start');
+	const addMinuteBtn = document.getElementById('rest-timer-add-minute');
+	const timeDisplay = document.getElementById('rest-timer-time');
+	
+	if (!overlay || !closeBtn || !startBtn || !addMinuteBtn || !timeDisplay) return;
+	
+	// Close button
+	closeBtn.addEventListener('click', () => {
+		stopRestTimer();
+		overlay.classList.add('hidden');
+	});
+	
+	// Start/Pause button
+	startBtn.addEventListener('click', () => {
+		if (restTimerRunning) {
+			pauseRestTimer();
+		} else {
+			startRestTimer();
+		}
+	});
+	
+	// Add minute button
+	addMinuteBtn.addEventListener('click', async () => {
+		restTimerSeconds += 60;
+		updateRestTimerDisplay();
+		// Reschedule notification with new time if timer is running
+		if (restTimerRunning) {
+			await scheduleRestTimerNotification(restTimerSeconds);
+		}
+	});
+	
+	// Update display initially
+	updateRestTimerDisplay();
+}
+
+async function startRestTimer() {
+	// Prevent multiple intervals
+	if (restTimerInterval) {
+		clearInterval(restTimerInterval);
+		restTimerInterval = null;
+	}
+	
+	if (restTimerSeconds === 0) {
+		restTimerSeconds = 60; // Default to 1 minute
+		restTimerInitialSeconds = 60;
+	} else if (restTimerInitialSeconds === 0) {
+		// If initialSeconds is 0 but restTimerSeconds has a value, set it
+		restTimerInitialSeconds = restTimerSeconds;
+	}
+	
+	// If timer is already running, don't reset it - just ensure it continues
+	if (restTimerRunning && restTimerStartTime) {
+		// Timer is already running - don't reset, just ensure interval is active
+		if (!restTimerInterval) {
+			// Restart interval if it was cleared (e.g., after app comes back from background)
+			restTimerInterval = setInterval(() => {
+				if (restTimerRunning && restTimerStartTime) {
+					const elapsed = Math.floor((Date.now() - restTimerStartTime) / 1000);
+					const remaining = Math.max(0, restTimerInitialSeconds - elapsed);
+					restTimerSeconds = remaining;
+					updateRestTimerDisplay();
+					
+					if (remaining === 0) {
+						stopRestTimer();
+						showRestTimerComplete();
+					}
+				}
+			}, 100);
+		}
+		return; // Don't restart timer if it's already running
+	}
+	
+	restTimerRunning = true;
+	restTimerStartTime = Date.now(); // Track start time for accurate timing
+	restTimerInitialSeconds = restTimerSeconds; // Store initial value
+	const startBtn = document.getElementById('rest-timer-start');
+	if (startBtn) startBtn.textContent = 'Pause';
+	
+	// Schedule notification for when timer reaches 00:00 (works even when app is in background)
+	await scheduleRestTimerNotification(restTimerSeconds);
+	
+	// Timer based on elapsed time - always accurate, even in background
+	restTimerInterval = setInterval(() => {
+		if (restTimerRunning && restTimerStartTime) {
+			// Calculate elapsed time since start
+			const elapsed = Math.floor((Date.now() - restTimerStartTime) / 1000);
+			const remaining = Math.max(0, restTimerInitialSeconds - elapsed);
+			
+			// Always update display (even if value didn't change, for smooth updates)
+			restTimerSeconds = remaining;
+			updateRestTimerDisplay();
+			
+			if (remaining === 0) {
+				// Timer finished
+				stopRestTimer();
+				showRestTimerComplete();
+			}
+		}
+	}, 100); // Check every 100ms for smooth updates, but calculate based on elapsed time
+}
+
+async function pauseRestTimer() {
+	restTimerRunning = false;
+	// Update initial seconds to current remaining time for resume
+	if (restTimerStartTime) {
+		const elapsed = Math.floor((Date.now() - restTimerStartTime) / 1000);
+		restTimerInitialSeconds = Math.max(0, restTimerInitialSeconds - elapsed);
+		restTimerSeconds = restTimerInitialSeconds;
+	}
+	restTimerStartTime = null; // Clear start time
+	const startBtn = document.getElementById('rest-timer-start');
+	if (startBtn) startBtn.textContent = 'Start';
+	
+	if (restTimerInterval) {
+		clearInterval(restTimerInterval);
+		restTimerInterval = null;
+	}
+	
+	// Cancel scheduled notification when paused
+	await cancelRestTimerNotification();
+}
+
+async function stopRestTimer() {
+	restTimerRunning = false;
+	restTimerStartTime = null; // Clear start time
+	restTimerInitialSeconds = 0;
+	const startBtn = document.getElementById('rest-timer-start');
+	if (startBtn) startBtn.textContent = 'Start';
+	
+	if (restTimerInterval) {
+		clearInterval(restTimerInterval);
+		restTimerInterval = null;
+	}
+	
+	// Cancel scheduled notification when stopped
+	await cancelRestTimerNotification();
+	
+	restTimerSeconds = 0;
+	updateRestTimerDisplay();
+}
+
+function updateRestTimerDisplay() {
+	const timeDisplay = document.getElementById('rest-timer-time');
+	if (!timeDisplay) return;
+	
+	const minutes = Math.floor(restTimerSeconds / 60);
+	const seconds = restTimerSeconds % 60;
+	timeDisplay.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+// Schedule notification for when timer completes (works in background)
+async function scheduleRestTimerNotification(secondsRemaining) {
+	if (!window.Capacitor || !window.Capacitor.Plugins || !window.Capacitor.Plugins.LocalNotifications) {
+		return;
+	}
+	
+	try {
+		// Cancel any existing notification first
+		await cancelRestTimerNotification();
+		
+		// Calculate when the timer will reach 00:00
+		const triggerTime = new Date(Date.now() + (secondsRemaining * 1000));
+		
+		console.log('[REST TIMER] Scheduling notification for:', triggerTime.toISOString(), '(', secondsRemaining, 'seconds from now)');
+		
+		// Schedule notification
+		await window.Capacitor.Plugins.LocalNotifications.schedule({
+			notifications: [{
+				title: 'Rest Timer',
+				body: 'Rest time is complete!',
+				id: 1,
+				schedule: {
+					at: triggerTime
+				},
+				sound: 'default'
+			}]
+		});
+		
+		scheduledNotificationId = 1;
+		console.log('[REST TIMER] Notification scheduled successfully');
+	} catch (error) {
+		console.error('[REST TIMER] Failed to schedule notification:', error);
+	}
+}
+
+// Cancel scheduled notification
+async function cancelRestTimerNotification() {
+	if (!window.Capacitor || !window.Capacitor.Plugins || !window.Capacitor.Plugins.LocalNotifications) {
+		return;
+	}
+	
+	if (scheduledNotificationId !== null) {
+		try {
+			await window.Capacitor.Plugins.LocalNotifications.cancel({
+				notifications: [{ id: scheduledNotificationId }]
+			});
+			console.log('[REST TIMER] Cancelled scheduled notification');
+			scheduledNotificationId = null;
+		} catch (error) {
+			console.error('[REST TIMER] Failed to cancel notification:', error);
+		}
+	}
+}
+
+function showRestTimerComplete() {
+	// This is called when timer reaches 00:00 while app is active
+	// The scheduled notification will also fire if app is in background
+	
+	// Show alert if app is active (notification will also show)
+	if (!document.hidden) {
+		// App is visible, notification will show automatically
+		console.log('[REST TIMER] Timer complete - notification should show');
+	}
+	
+	// Vibrate if available
+	if (navigator.vibrate) {
+		navigator.vibrate([200, 100, 200]);
+	}
+	
+	// Clear scheduled notification ID since it has fired
+	scheduledNotificationId = null;
+}
+
+// Function to open rest timer (called from workout)
+// IMPORTANT: This only opens the overlay, does NOT start the timer automatically
+function openRestTimer() {
+	const overlay = document.getElementById('rest-timer-overlay');
+	if (!overlay) return;
+	
+	// Don't reset timer if it's already running - just show the overlay
+	if (restTimerRunning && restTimerStartTime) {
+		// Timer is running - just update display with current remaining time
+		const elapsed = Math.floor((Date.now() - restTimerStartTime) / 1000);
+		const remaining = Math.max(0, restTimerInitialSeconds - elapsed);
+		restTimerSeconds = remaining;
+		updateRestTimerDisplay();
+		overlay.classList.remove('hidden');
+		const startBtn = document.getElementById('rest-timer-start');
+		if (startBtn) startBtn.textContent = 'Pause';
+		return;
+	}
+	
+	// Timer is not running - set default if needed
+	overlay.classList.remove('hidden');
+	if (restTimerSeconds === 0) {
+		restTimerSeconds = 60; // Default 1 minute
+		restTimerInitialSeconds = 60;
+	} else {
+		// If timer has a value but initialSeconds is 0, set it
+		if (restTimerInitialSeconds === 0) {
+			restTimerInitialSeconds = restTimerSeconds;
+		}
+	}
+	updateRestTimerDisplay();
+	
+	// Ensure start button shows "Start" (timer should NOT auto-start)
+	const startBtn = document.getElementById('rest-timer-start');
+	if (startBtn) startBtn.textContent = 'Start';
+}
+
+// Check if set is complete and trigger rest timer if enabled
+function checkAndTriggerRestTimer(set, weightValue, repsValue, exercise) {
+	const restTimerEnabled = localStorage.getItem('settings-rest-timer') === 'true';
+	if (!restTimerEnabled) return;
+	
+	const isBodyweight = exercise ? isBodyweightExercise(exercise) : false;
+	
+	// For bodyweight: only need reps
+	// For weighted: need both weight AND reps
+	const hasWeight = weightValue != null && weightValue !== '' && weightValue !== '0';
+	const hasReps = repsValue != null && repsValue !== '' && repsValue !== '0';
+	
+	const isComplete = isBodyweight ? hasReps : (hasWeight && hasReps);
+	
+	if (isComplete) {
+		// Small delay to let user finish typing
+		setTimeout(() => {
+			openRestTimer();
+		}, 800);
+	}
+}
+
+// ========== NOTIFICATIONS ==========
+async function requestNotificationPermission() {
+	if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications) {
+		try {
+			const result = await window.Capacitor.Plugins.LocalNotifications.requestPermissions();
+			if (result.display === 'granted') {
+				console.log('Notification permission granted');
+				return true;
+			} else {
+				console.log('Notification permission denied');
+				return false;
+			}
+		} catch (e) {
+			console.error('Failed to request notification permission:', e);
+			return false;
+		}
+	} else if ('Notification' in window) {
+		// Web browser fallback
+		if (Notification.permission === 'default') {
+			const permission = await Notification.requestPermission();
+			return permission === 'granted';
+		}
+		return Notification.permission === 'granted';
+	}
+	return false;
+}
+
+// ========== DAILY & WEEKLY NOTIFICATIONS ==========
+
+// Check if user worked out today
+function hasWorkedOutToday() {
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	const today = new Date();
+	today.setHours(0, 0, 0, 0);
+	const todayKey = today.toISOString().split('T')[0];
+	
+	return workouts.some(w => {
+		const workoutDate = new Date(w.date);
+		workoutDate.setHours(0, 0, 0, 0);
+		return workoutDate.toISOString().split('T')[0] === todayKey;
+	});
+}
+
+// Calculate weekly stats (for Sunday notification)
+function calculateWeeklyStats() {
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	
+	// Get start of this week (Monday)
+	const now = new Date();
+	const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+	const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+	const weekStart = new Date(now);
+	weekStart.setDate(now.getDate() - daysFromMonday);
+	weekStart.setHours(0, 0, 0, 0);
+	
+	// Get end of week (Sunday)
+	const weekEnd = new Date(weekStart);
+	weekEnd.setDate(weekStart.getDate() + 6);
+	weekEnd.setHours(23, 59, 59, 999);
+	
+	// Filter workouts from this week
+	const weekWorkouts = workouts.filter(w => {
+		const workoutDate = new Date(w.date);
+		return workoutDate >= weekStart && workoutDate <= weekEnd;
+	});
+	
+	// Calculate stats
+	const workoutCount = weekWorkouts.length;
+	const exerciseCount = weekWorkouts.reduce((sum, w) => {
+		return sum + (w.exercises?.length || 0);
+	}, 0);
+	const totalVolume = weekWorkouts.reduce((sum, w) => {
+		return sum + (calculateWorkoutVolume(w) || 0);
+	}, 0);
+	
+	return {
+		workouts: workoutCount,
+		exercises: exerciseCount,
+		volume: totalVolume
+	};
+}
+
+// Schedule daily workout reminder (18:00 every day)
+async function scheduleDailyNotifications() {
+	if (!window.Capacitor || !window.Capacitor.Plugins || !window.Capacitor.Plugins.LocalNotifications) {
+		return;
+	}
+	
+	// Check if notifications are enabled
+	const notificationsEnabled = localStorage.getItem('settings-notifications') === 'true';
+	if (!notificationsEnabled) {
+		console.log('[NOTIFICATIONS] Daily notifications disabled');
+		return;
+	}
+	
+	try {
+		// Cancel existing daily notifications first
+		await window.Capacitor.Plugins.LocalNotifications.cancel({
+			notifications: [{ id: 100 }] // Daily reminder ID = 100
+		});
+		
+		// Get current streak
+		const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		const streak = calculateStreak(workouts);
+		const hasWorkoutToday = hasWorkedOutToday();
+		
+		// Only schedule if user hasn't worked out today
+		if (hasWorkoutToday) {
+			console.log('[NOTIFICATIONS] User already worked out today, skipping daily reminder');
+			return;
+		}
+		
+		// Calculate next 18:00
+		const now = new Date();
+		const reminderTime = new Date(now);
+		reminderTime.setHours(18, 0, 0, 0);
+		
+		// If it's already past 18:00 today, schedule for tomorrow
+		if (now >= reminderTime) {
+			reminderTime.setDate(reminderTime.getDate() + 1);
+		}
+		
+		// Build notification message based on streak
+		let title = 'Time to work out! 💪';
+		let body = '';
+		if (streak > 0) {
+			body = `Don't lose your ${streak} day streak! 🔥`;
+		} else {
+			body = 'Start your workout streak! 🔥';
+		}
+		
+		console.log('[NOTIFICATIONS] Scheduling daily reminder for:', reminderTime.toISOString());
+		
+		// Schedule notification - use 'every: day' for daily repeats
+		await window.Capacitor.Plugins.LocalNotifications.schedule({
+			notifications: [{
+				title: title,
+				body: body,
+				id: 100,
+				schedule: {
+					at: reminderTime,
+					every: 'day' // Repeat daily
+				},
+				sound: 'default'
+			}]
+		});
+		
+		console.log('[NOTIFICATIONS] Daily reminder scheduled successfully');
+	} catch (error) {
+		console.error('[NOTIFICATIONS] Failed to schedule daily reminder:', error);
+	}
+}
+
+// Schedule weekly stats notification (Sunday 20:00)
+async function scheduleWeeklyNotifications() {
+	if (!window.Capacitor || !window.Capacitor.Plugins || !window.Capacitor.Plugins.LocalNotifications) {
+		return;
+	}
+	
+	// Check if notifications are enabled
+	const notificationsEnabled = localStorage.getItem('settings-notifications') === 'true';
+	if (!notificationsEnabled) {
+		console.log('[NOTIFICATIONS] Weekly notifications disabled');
+		return;
+	}
+	
+	try {
+		// Cancel existing weekly notifications first
+		await window.Capacitor.Plugins.LocalNotifications.cancel({
+			notifications: [{ id: 200 }] // Weekly stats ID = 200
+		});
+		
+		// Calculate next Sunday 20:00
+		const now = new Date();
+		const nextSunday = new Date(now);
+		const daysUntilSunday = (7 - now.getDay()) % 7 || 7; // 0 = Sunday, so if today is Sunday, next is in 7 days
+		nextSunday.setDate(now.getDate() + daysUntilSunday);
+		nextSunday.setHours(20, 0, 0, 0);
+		nextSunday.setMinutes(0, 0, 0);
+		
+		// If today is Sunday and it's before 20:00, schedule for today
+		if (now.getDay() === 0 && now.getHours() < 20) {
+			nextSunday.setDate(now.getDate());
+		}
+		
+		console.log('[NOTIFICATIONS] Scheduling weekly stats for:', nextSunday.toISOString());
+		
+		// Calculate current week stats
+		const stats = calculateWeeklyStats();
+		const volumeLabel = formatVolume(stats.volume);
+		
+		// Schedule notification - use 'every: week' with 'on: weekday' for weekly repeats
+		// Note: Stats are calculated at scheduling time, not at notification time
+		await window.Capacitor.Plugins.LocalNotifications.schedule({
+			notifications: [{
+				title: 'Your weekly stats',
+				body: `${stats.workouts} workouts, ${stats.exercises} exercises, ${volumeLabel} volume`,
+				id: 200,
+				schedule: {
+					at: nextSunday,
+					every: 'week',
+					on: {
+						weekday: 1, // Sunday (1 = Sunday in Capacitor)
+						hour: 20,
+						minute: 0
+					}
+				},
+				sound: 'default'
+			}]
+		});
+		
+		console.log('[NOTIFICATIONS] Weekly stats scheduled successfully');
+	} catch (error) {
+		console.error('[NOTIFICATIONS] Failed to schedule weekly stats:', error);
+	}
+}
+
+// Update daily notification when workout is saved (check if user worked out today)
+async function updateDailyNotificationIfNeeded() {
+	const notificationsEnabled = localStorage.getItem('settings-notifications') === 'true';
+	if (!notificationsEnabled) return;
+	
+	// If user worked out today, cancel today's reminder and reschedule for tomorrow
+	if (hasWorkedOutToday()) {
+		try {
+			await window.Capacitor.Plugins.LocalNotifications.cancel({
+				notifications: [{ id: 100 }]
+			});
+			// Reschedule for tomorrow (will check again if user worked out)
+			await scheduleDailyNotifications();
+		} catch (error) {
+			console.error('[NOTIFICATIONS] Failed to update daily notification:', error);
+		}
+	}
+}
+
+function initDeleteAccount() {
+	const btn = document.getElementById('delete-account-btn');
+	if (!btn) return;
+	
+	btn.addEventListener('click', async () => {
+		if (confirm('Are you sure you want to delete your account? This action cannot be undone.')) {
+			try {
+				const { data: { session } } = await supabaseClient.auth.getSession();
+				if (!session) {
+					alert('You must be logged in to delete your account.');
+					return;
+				}
+				
+				const response = await fetch('/delete-account', {
+					method: 'POST',
+					headers: {
+						'Authorization': `Bearer ${session.access_token}`,
+						'Content-Type': 'application/json'
+					}
+				});
+				
+				const data = await response.json();
+				if (response.ok && data.success) {
+					alert('Account deleted successfully.');
+					await logout();
+				} else {
+					alert(data.error || 'Failed to delete account. Please contact support.');
+				}
+			} catch (e) {
+				console.error('Delete account failed:', e);
+				alert('Failed to delete account. Please try again or contact support.');
+			}
+		}
+	});
+}
+
+// Calculate workout streak (consecutive days with workouts)
+function calculateStreak(workouts) {
+	if (!workouts || workouts.length === 0) return 0;
+	
+	// Sort workouts by date (newest first)
+	const sorted = [...workouts].sort((a, b) => new Date(b.date) - new Date(a.date));
+	
+	// Get today's date at midnight
+	const today = new Date();
+	today.setHours(0, 0, 0, 0);
+	
+	let streak = 0;
+	let currentDate = new Date(today);
+	
+	// Check if there's a workout today
+	const todayKey = currentDate.toISOString().split('T')[0];
+	const hasWorkoutToday = sorted.some(w => {
+		const workoutDate = new Date(w.date);
+		workoutDate.setHours(0, 0, 0, 0);
+		return workoutDate.toISOString().split('T')[0] === todayKey;
+	});
+	
+	// If no workout today, start from yesterday
+	if (!hasWorkoutToday) {
+		currentDate.setDate(currentDate.getDate() - 1);
+	}
+	
+	// Count consecutive days with workouts
+	while (true) {
+		const dateKey = currentDate.toISOString().split('T')[0];
+		const hasWorkout = sorted.some(w => {
+			const workoutDate = new Date(w.date);
+			workoutDate.setHours(0, 0, 0, 0);
+			return workoutDate.toISOString().split('T')[0] === dateKey;
+		});
+		
+		if (!hasWorkout) break;
+		
+		streak++;
+		currentDate.setDate(currentDate.getDate() - 1);
+	}
+	
+	return streak;
+}
+
+// Calculate total workout hours
+function calculateTotalHours(workouts) {
+	if (!workouts || workouts.length === 0) return 0;
+	
+	const totalMs = workouts.reduce((sum, workout) => {
+		return sum + (workout.duration || 0);
+	}, 0);
+	
+	// Convert milliseconds to hours (rounded to 1 decimal)
+	const hours = totalMs / (1000 * 60 * 60);
+	return Math.round(hours * 10) / 10; // Round to 1 decimal
 }
 
 async function loadSettings() {
+	// Check if user is logged in - but don't redirect, just return if not logged in
+	if (supabaseClient) {
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			// Don't show login screen here - switchTab already handles that
+			// Just show placeholder data
+			const usernameEl = document.getElementById('settings-username');
+			const emailEl = document.getElementById('settings-email');
+			if (usernameEl) usernameEl.textContent = '—';
+			if (emailEl) emailEl.textContent = '—';
+			return;
+		}
+	} else {
+		// No supabase client - show placeholder
+		const usernameEl = document.getElementById('settings-username');
+		const emailEl = document.getElementById('settings-email');
+		if (usernameEl) usernameEl.textContent = '—';
+		if (emailEl) emailEl.textContent = '—';
+		return;
+	}
+	
 	// Load user info from Supabase
 	try {
+		console.log('[SETTINGS] Loading user data...');
 		const user = await getUser();
+		console.log('[SETTINGS] User result:', user ? user.email : 'null');
+		
+		const usernameEl = document.getElementById('settings-username');
+		const emailEl = document.getElementById('settings-email');
+		
 		if (user) {
+			if (usernameEl) {
+				const username = user.user_metadata?.username || user.email?.split('@')[0] || '—';
+				usernameEl.textContent = username;
+				console.log('[SETTINGS] Username set:', username);
+			}
+			if (emailEl) {
+				const email = user.email || '—';
+				emailEl.textContent = email;
+				console.log('[SETTINGS] Email set:', email);
+			}
+		} else {
+			// No user but session exists - show placeholder
+			console.log('[SETTINGS] No user found but session exists - showing placeholder');
+			if (usernameEl) usernameEl.textContent = '—';
+			if (emailEl) emailEl.textContent = '—';
+		}
+	} catch (e) {
+		console.error('[SETTINGS] Failed to load settings:', e);
+		// On error, just show placeholder - don't redirect
 				const usernameEl = document.getElementById('settings-username');
 				const emailEl = document.getElementById('settings-email');
-			if (usernameEl) usernameEl.textContent = user.user_metadata?.username || user.email?.split('@')[0] || '—';
-			if (emailEl) emailEl.textContent = user.email || '—';
-			}
+		if (usernameEl) usernameEl.textContent = '—';
+		if (emailEl) emailEl.textContent = '—';
+	}
+	
+	// Calculate and display dynamic stats
+	try {
+		const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		
+		// Calculate stats
+		const streak = calculateStreak(workouts);
+		const workoutCount = workouts.length;
+		const totalHours = calculateTotalHours(workouts);
+		
+		// Update UI
+		const streakEl = document.getElementById('settings-stat-streak');
+		const workoutsEl = document.getElementById('settings-stat-workouts');
+		const hoursEl = document.getElementById('settings-stat-hours');
+		
+		if (streakEl) streakEl.textContent = streak.toString();
+		if (workoutsEl) workoutsEl.textContent = workoutCount.toString();
+		if (hoursEl) hoursEl.textContent = totalHours.toString();
 	} catch (e) {
-		console.error('Failed to load settings:', e);
+		console.error('Failed to calculate stats:', e);
 	}
 }
 
@@ -3631,23 +5809,6 @@ function initExerciseVideoModal() {
 		e.preventDefault();
 		e.stopPropagation();
 		
-		// Find the exercise card container
-		const exerciseCard = btn.closest('.workout-exercise, .workout-edit-exercise');
-		if (!exerciseCard) return;
-		
-		// Ensure workout details are expanded in "Your Workouts" view
-		const workoutDetails = exerciseCard.closest('.workout-details');
-		if (workoutDetails && !workoutDetails.classList.contains('expanded')) {
-			workoutDetails.classList.add('expanded');
-		}
-		
-		// Check if video is already showing
-		const existingVideo = exerciseCard.querySelector('.exercise-video-inline');
-		if (existingVideo) {
-			existingVideo.remove();
-			return;
-		}
-		
 		let videoUrl = btn.dataset.video;
 		if (!videoUrl) {
 			const exerciseKey = btn.dataset.exercise;
@@ -3660,49 +5821,53 @@ function initExerciseVideoModal() {
 					btn.dataset.video = videoUrl;
 				} else {
 					alert('No video available for this exercise yet.');
+					btn.disabled = false;
 					return;
 				}
 			} catch (error) {
 				console.error('Failed to load exercise video:', error);
 				alert('Could not load the exercise video. Please try again.');
+				btn.disabled = false;
 				return;
 			} finally {
 				btn.disabled = false;
 			}
 		}
 		
-		// Create inline video container
-		const videoContainer = document.createElement('div');
-		videoContainer.className = 'exercise-video-inline';
-		videoContainer.innerHTML = `
-			<button class="exercise-video-inline-close" type="button" aria-label="Close video">✕</button>
-			<div class="exercise-video-inline-frame">
-				<iframe src="${escapeHtmlAttr(videoUrl)}" title="Exercise video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-			</div>
-		`;
-		
-		// Insert after the header, before sets
-		const setsContainer = exerciseCard.querySelector('.workout-edit-sets, .workout-view-sets');
-		if (setsContainer) {
-			exerciseCard.insertBefore(videoContainer, setsContainer);
-		} else {
-			exerciseCard.appendChild(videoContainer);
+		// Convert YouTube embed URL to watch URL
+		// From: https://www.youtube.com/embed/VIDEO_ID
+		// To: https://www.youtube.com/watch?v=VIDEO_ID
+		let watchUrl = videoUrl;
+		if (videoUrl.includes('youtube.com/embed/')) {
+			const videoId = videoUrl.match(/embed\/([^?&#]+)/)?.[1];
+			if (videoId) {
+				watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+			}
 		}
 		
-		// Close button handler
-		const closeBtn = videoContainer.querySelector('.exercise-video-inline-close');
-		if (closeBtn) {
-			closeBtn.addEventListener('click', (e) => {
-				e.stopPropagation();
-				videoContainer.remove();
-			});
+		// Open in browser/app (prefer Capacitor Browser, fallback to window.open)
+		if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser) {
+			try {
+				await window.Capacitor.Plugins.Browser.open({
+					url: watchUrl,
+					windowName: '_system' // Opens in system browser/app
+				});
+			} catch (error) {
+				console.error('Failed to open browser:', error);
+				// Fallback to window.open
+				window.open(watchUrl, '_blank');
+			}
+		} else {
+			// Web browser fallback
+			window.open(watchUrl, '_blank');
 		}
 	});
 }
 
 async function fetchExerciseInfoByKey(exerciseKey) {
 	const body = JSON.stringify({ exercise: exerciseKey });
-	const res = await fetch('/exercise-info', {
+	const apiUrl = getApiUrl('/exercise-info');
+	const res = await fetch(apiUrl, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body
@@ -3767,6 +5932,19 @@ function initExerciseCard() {
 
 // ========== UTILITY FUNCTIONS ==========
 async function loadExercises() {
+	// Check if user is logged in
+	if (supabaseClient) {
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			// Don't show login screen for exercises - they're needed for workout builder
+			// Just return empty array
+			allExercises = [];
+			return;
+		}
+	} else {
+		allExercises = [];
+		return;
+	}
 	try {
 		const apiUrl = getApiUrl('/exercises');
 		const res = await fetch(apiUrl);
@@ -3783,7 +5961,9 @@ async function loadExercises() {
 }
 
 function loadStreak() {
-	const streak = parseInt(localStorage.getItem('streak') || '0');
+	// Calculate streak from actual workouts
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	const streak = calculateStreak(workouts);
 	document.querySelectorAll('.streak-count').forEach(el => {
 		if (el) el.textContent = streak;
 	});
@@ -3897,29 +6077,108 @@ function openAIDetectChat() {
 			const loadingId = addAIDetectChatMessage('bot', 'Even nadenken...', null, true);
 			
 			try {
-				// Send to backend
+				// Get Supabase session for authentication
+				const supabase = await initSupabase();
+				if (!supabase) {
+					addAIDetectChatMessage('bot', 'Je moet ingelogd zijn om AI detect te gebruiken. Log in en probeer het opnieuw.', null);
+					return;
+				}
+				
+				const { data: { session } } = await supabase.auth.getSession();
+				if (!session) {
+					addAIDetectChatMessage('bot', 'Je moet ingelogd zijn om AI detect te gebruiken. Log in en probeer het opnieuw.', null);
+					return;
+				}
+				
+				// Send to backend - use new OpenAI Vision endpoint
 				const formData = new FormData();
 				formData.append('image', file);
-				formData.append('message', 'Welke oefening is dit?');
-				const apiUrl = getApiUrl('/api/vision-detect');
+				const apiUrl = getApiUrl('/api/recognize-exercise');
+				console.log('[AI Detect] Sending to:', apiUrl);
+				console.log('[AI Detect] File:', file.name, file.type, file.size);
+				
 				const res = await fetch(apiUrl, {
 					method: 'POST',
+					headers: {
+						'Authorization': `Bearer ${session.access_token}`
+					},
 					body: formData
 				});
 				
+				console.log('[AI Detect] Response status:', res.status, res.statusText);
+				
+				// Handle no credits (403)
+				if (res.status === 403) {
+					const errorData = await res.json();
+					addAIDetectChatMessage('bot', errorData.error || 'Je hebt geen credits meer. Je hebt alle 10 gratis credits deze maand gebruikt.', null);
+					// Reload credits display
+					loadCreditsBalance();
+					return;
+				}
+				
+				if (!res.ok) {
+					const errorText = await res.text();
+					console.error('[AI Detect] Error response:', errorText);
+					throw new Error(`Server error: ${res.status} ${res.statusText}`);
+				}
+				
 				const data = await res.json();
-				console.log('AI detect response:', data);
+				console.log('[AI Detect] Response data:', data);
 				
 				// Remove loading message
 				const loadingEl = document.querySelector(`[data-message-id="${loadingId}"]`);
 				if (loadingEl) loadingEl.remove();
 				
-				// ALWAYS show something - even if it's an error, show it in the chat
-				if (data.success && data.message) {
-					// Show AI chat response
-					addAIDetectChatMessage('bot', data.message, null);
+				// Update credits display if credits_remaining is in response
+				if (data.credits_remaining !== undefined) {
+					loadCreditsBalance();
+				}
+				
+				// Handle /api/recognize-exercise response
+				if (data.exercise) {
+					const exerciseName = data.exercise;
+					
+					// Check if it's unknown
+					if (exerciseName.toLowerCase() === 'unknown exercise' || exerciseName.toLowerCase().includes('unknown')) {
+					addAIDetectChatMessage('bot', 'Sorry, ik kon de oefening niet goed identificeren. Kun je een duidelijkere foto maken?', null);
+					} else {
+						// Format exercise name for display (capitalize first letter of each word)
+						const displayName = exerciseName.split(' ').map(word => 
+							word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+						).join(' ');
+						
+						addAIDetectChatMessage('bot', `Ik denk dat dit een **${displayName}** is!`, null);
+						
+						// Try to find matching exercise in the exercise list
+						const matchingExercise = findExerciseByName(exerciseName);
+						
+						if (matchingExercise) {
+							// Add a button to add this exercise to the workout
+							setTimeout(() => {
+								const messagesContainer = document.getElementById('ai-detect-chat-messages');
+								if (messagesContainer) {
+									const selectBtn = document.createElement('button');
+									selectBtn.className = 'ai-detect-chat-select-btn';
+									selectBtn.textContent = `✓ ${matchingExercise.display} toevoegen`;
+									selectBtn.onclick = () => {
+										// Close chat modal
+										closeAIDetectChat();
+										// Close exercise selector if open
+										const selector = document.getElementById('exercise-selector');
+										if (selector) selector.classList.add('hidden');
+										document.body.classList.remove('selector-open');
+										// Add exercise to workout
+										addExerciseToWorkout(matchingExercise);
+									};
+									messagesContainer.appendChild(selectBtn);
+								}
+							}, 500);
+						} else {
+							// Exercise not found in list, but still show the detected name
+							addAIDetectChatMessage('bot', `Let op: "${displayName}" staat niet in de oefeningenlijst. Je kunt handmatig een oefening selecteren.`, null);
+						}
+					}
 				} else {
-					// Error from backend - show in chat, don't show error modal
 					const errorMsg = data.error || 'Er ging iets mis. Probeer het opnieuw.';
 					addAIDetectChatMessage('bot', `Sorry, ${errorMsg.toLowerCase()}`, null);
 				}

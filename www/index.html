@@ -23,16 +23,30 @@
 		// Backend API URL - REQUIRED for Capacitor/iOS
 		// Set this to your deployed Flask backend URL
 		// Leave empty for local web development (will use relative paths)
-		window.BACKEND_URL = "https://gymvision-ai.onrender.com";
+		// For local testing: use "http://localhost:5004" (iOS Simulator) or "http://YOUR_MAC_IP:5004" (real iPhone)
+		window.BACKEND_URL = "https://gymvision-ai.onrender.com"; // Change to "http://localhost:5004" for local testing
 	</script>
 	<script>
 		// Comprehensive error handling - prevent app crashes
 		// Also show alerts for critical errors so we can debug
 		window.addEventListener('error', function(e) {
-			console.error('JavaScript Error:', e.message, 'at', e.filename + ':' + e.lineno);
-			// Show alert for critical errors (only in development/debug mode)
-			if (window.location.href.includes('localhost') || window.location.href.includes('capacitor://')) {
-				alert('JS Error: ' + e.message + '\nFile: ' + e.filename + ':' + e.lineno);
+			const errorMessage = e.message || e.error?.message || 'Unknown error';
+			const errorFile = e.filename || e.error?.fileName || 'Unknown file';
+			const errorLine = e.lineno || e.error?.lineNumber || 'Unknown line';
+			
+			console.error('JavaScript Error:', errorMessage, 'at', errorFile + ':' + errorLine);
+			console.error('Full error object:', e);
+			
+			// Only show alert for critical errors in development/debug mode
+			// And only if we have a meaningful error message
+			if (errorMessage !== 'Unknown error' && errorMessage !== 'undefined' && 
+			    (window.location.href.includes('localhost') || window.location.href.includes('capacitor://'))) {
+				// Don't show alerts for common non-critical errors
+				if (!errorMessage.includes('ResizeObserver') && 
+				    !errorMessage.includes('Non-Error promise rejection') &&
+				    !errorMessage.includes('Script error')) {
+					alert('JS Error: ' + errorMessage + '\nFile: ' + errorFile + ':' + errorLine);
+				}
 			}
 			// Prevent default error handling that might crash the app
 			e.preventDefault();
@@ -180,6 +194,11 @@
 	</style>
 </head>
 <body>
+	<div id="app-loading-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;background:#0f0f10;z-index:99999;display:flex;align-items:center;justify-content:center;">
+		<div style="text-align:center;color:#888;">
+			<img src="static/logo.png" alt="GymVision" style="height:60px;width:auto;filter:brightness(0) invert(1);opacity:0.5;" />
+		</div>
+	</div>
 	<div class="phone-shell">
 		<div class="content hidden" id="home-content">
 		<header class="topbar">
@@ -263,7 +282,7 @@
 			</section>
 		</div>
 
-		<div class="content" id="workouts-content">
+		<div class="content hidden" id="workouts-content">
 			<header class="topbar">
 				<div class="brand brand-logo"><img src="static/logo.png" alt="GymVision" /></div>
 				<div class="icons streak">
@@ -273,8 +292,8 @@
 			</header>
 			<button id="continue-workout-btn" class="btn primary start-workout-btn hidden" style="margin:22px 22px 12px;width:calc(100% - 44px);display:none">Continue workout</button>
 			<div id="start-workout-buttons" style="display:flex;gap:10px;margin:22px 22px 20px;">
-				<button id="ai-workout-btn" class="btn primary" style="flex:1">AI Workout</button>
-				<button id="manual-workout-btn" class="btn" style="flex:1">Manual Workout</button>
+				<button id="ai-workout-btn" class="btn primary" style="flex:1;touch-action:manipulation;-webkit-touch-callout:none;" onclick="console.log('AI onclick fired'); if(window.startAIWorkout){window.startAIWorkout();}else{alert('App loading...');} return false;" ontouchstart="console.log('AI touchstart fired'); if(window.startAIWorkout){window.startAIWorkout();}else{alert('App loading...');} return false;">AI Workout</button>
+				<button id="manual-workout-btn" class="btn" style="flex:1;touch-action:manipulation;-webkit-touch-callout:none;" onclick="console.log('Manual onclick fired'); if(window.startNewWorkout){window.startNewWorkout();}else{alert('App loading...');} return false;" ontouchstart="console.log('Manual touchstart fired'); if(window.startNewWorkout){window.startNewWorkout();}else{alert('App loading...');} return false;">Manual Workout</button>
 			</div>
 			<h2 style="padding:0 22px 12px;margin:0;font-size:24px;font-weight:800">Your Workouts <span id="workouts-count" style="color:var(--sub);font-size:14px">(0)</span></h2>
 			<ul id="workouts-list" class="workouts-main-list"></ul>
@@ -299,12 +318,15 @@
 							<label for="workout-name" class="workout-label">Workout name:</label>
 							<div id="workout-timer" class="workout-timer-value">00:00</div>
 						</div>
-						<input id="workout-name" class="workout-name" placeholder="Workout name" value="Workout" />
+						<div class="workout-name-container">
+							<input id="workout-name" class="workout-name" placeholder="Workout name" value="Workout" />
+						</div>
 					</div>
 					<ul id="workout-list" class="workout-list"></ul>
 					<div class="save-success hidden" id="save-success">✓ Saved</div>
 				</section>
 			</div>
+			
 		</div>
 
 		<div class="content hidden" id="progress-content">
@@ -315,29 +337,6 @@
 					<div id="streak-count-progress" class="streak-count">0</div>
 				</div>
 			</header>
-			<section class="card progress-chart-card">
-				<div class="progress-chart-header">
-					<h3>Weight Chart</h3>
-					<input type="date" id="progress-date" class="progress-chart-date-input" required>
-				</div>
-				<div class="progress-chart-wrapper">
-					<canvas id="progress-chart"></canvas>
-					<div id="progress-empty" class="progress-empty">No data yet</div>
-					<div id="progress-y-labels" class="progress-y-labels"></div>
-					<div id="progress-x-labels" class="progress-x-labels"></div>
-					<div id="progress-tooltip" class="progress-tooltip"></div>
-				</div>
-				<form id="progress-form" class="progress-inline-form">
-					<div class="progress-weight-group">
-						<label for="progress-weight" class="progress-weight-label">Weight</label>
-						<div class="progress-weight-input-wrapper">
-							<input type="number" id="progress-weight" step="0.1" min="0" placeholder="" required>
-							<span class="progress-inline-unit">kg</span>
-						</div>
-					</div>
-					<button type="submit" class="btn primary progress-inline-submit">Save</button>
-				</form>
-			</section>
 
 			<section class="card progress-muscle-card">
 				<div class="progress-muscle-header">
@@ -390,6 +389,30 @@
 				</div>
 			</section>
 
+			<section class="card progress-chart-card">
+				<div class="progress-chart-header">
+					<h3>Weight Chart</h3>
+					<input type="date" id="progress-date" class="progress-chart-date-input" required>
+				</div>
+				<div class="progress-chart-wrapper" data-unit="kg">
+					<canvas id="progress-chart"></canvas>
+					<div id="progress-empty" class="progress-empty">No data yet</div>
+					<div id="progress-y-labels" class="progress-y-labels"></div>
+					<div id="progress-x-labels" class="progress-x-labels"></div>
+					<div id="progress-tooltip" class="progress-tooltip"></div>
+				</div>
+				<form id="progress-form" class="progress-inline-form">
+					<div class="progress-weight-group">
+						<label for="progress-weight" class="progress-weight-label">Weight</label>
+						<div class="progress-weight-input-wrapper">
+							<input type="number" id="progress-weight" step="0.1" min="0" placeholder="" required>
+							<span class="progress-inline-unit" id="progress-unit-label"></span>
+						</div>
+					</div>
+					<button type="submit" class="btn primary progress-inline-submit">Save</button>
+				</form>
+			</section>
+
 			
 		</div>
 
@@ -433,15 +456,81 @@
 					</div>
 				</div>
 				
-				<!-- Logout Button -->
-				<button id="logout-btn" class="settings-logout-btn">
-					Log Out
-				</button>
+				<!-- Settings Options -->
+				<div class="settings-options">
+					<!-- Notifications Toggle -->
+					<div class="settings-option-item">
+						<div class="settings-option-left">
+							<img src="static/images/notification-icon.png?v=2" alt="Notifications" class="settings-icon" onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='block';">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:none; width:20px; height:20px; color:#dfe0e6; flex-shrink:0;">
+								<path d="M10 2C8.9 2 8 2.9 8 4V5.58C6.84 6.42 6 7.85 6 9.5V13L4 15V16H16V15L14 13V9.5C14 7.85 13.16 6.42 12 5.58V4C12 2.9 11.1 2 10 2Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+								<path d="M8 16V17C8 18.1 8.9 19 10 19C11.1 19 12 18.1 12 17V16" stroke="currentColor" stroke-width="1.5" fill="none"/>
+							</svg>
+							<span class="settings-option-label">Notifications</span>
+						</div>
+						<div class="settings-option-right">
+							<label class="settings-toggle">
+								<input type="checkbox" id="settings-notifications-toggle">
+								<span class="settings-toggle-slider">
+									<span class="settings-toggle-label-left"></span>
+									<span class="settings-toggle-label-right"></span>
+								</span>
+							</label>
+						</div>
+					</div>
+					
+					<!-- Unit Toggle (kg/lbs) -->
+					<div class="settings-option-item">
+						<div class="settings-option-left">
+							<img src="static/images/weight-icon.png?v=2" alt="Weight Unit" class="settings-icon" onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='block';">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:none; width:20px; height:20px; color:#dfe0e6; flex-shrink:0;">
+								<circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.5" fill="none"/>
+								<path d="M10 4V16M4 10H16" stroke="currentColor" stroke-width="1.5" fill="none"/>
+							</svg>
+							<span class="settings-option-label">Weight Unit</span>
+						</div>
+						<div class="settings-option-right">
+							<label class="settings-toggle">
+								<input type="checkbox" id="settings-unit-toggle">
+								<span class="settings-toggle-slider">
+									<span class="settings-toggle-label-left">lbs</span>
+									<span class="settings-toggle-label-right">kg</span>
+								</span>
+							</label>
+						</div>
+					</div>
+					
+					<!-- Rest Timer Toggle -->
+					<div class="settings-option-item">
+						<div class="settings-option-left">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+								<circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.5" fill="none"/>
+								<path d="M10 6V10L13 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+							</svg>
+							<span class="settings-option-label">Rest Timer</span>
+						</div>
+						<div class="settings-option-right">
+							<label class="settings-toggle">
+								<input type="checkbox" id="settings-rest-timer-toggle">
+								<span class="settings-toggle-slider">
+									<span class="settings-toggle-label-left"></span>
+									<span class="settings-toggle-label-right"></span>
+								</span>
+							</label>
+						</div>
+					</div>
+					
+				</div>
 				
-				<!-- Delete Account Button -->
-				<button id="delete-account-btn" class="settings-delete-account-btn">
-					Delete Account
-				</button>
+				<!-- Action Buttons -->
+				<div class="settings-action-buttons">
+					<button id="logout-btn" class="settings-logout-btn">
+						Log Out
+					</button>
+					<button id="delete-account-btn" class="settings-delete-account-btn">
+						Delete Account
+					</button>
+				</div>
 			</div>
 		</div>
 
@@ -496,16 +585,38 @@
 			<div class="exercise-selector-muscles-row">
 				<div class="exercise-selector-muscles" id="exercise-selector-muscles"></div>
 			</div>
-			<!-- AI Detect temporarily disabled -->
-			<!-- <div class="exercise-selector-or">or</div>
+			<div class="exercise-selector-or">or</div>
 			<div class="exercise-selector-ai-detect">
 				<button type="button" id="exercise-selector-ai-detect" class="btn primary">
-					AI detect
+					AI-detect
 				</button>
-				<input type="file" id="exercise-selector-file" accept="image/*" capture="environment" hidden>
-			</div> -->
+				<input type="file" id="exercise-selector-file" accept="image/*" hidden>
+			</div>
 			<div id="exercise-selector-predictions" class="exercise-selector-predictions"></div>
 			<div class="exercise-selector-results" id="exercise-selector-results"></div>
+		</div>
+	</div>
+
+	<!-- AI Detect Chat Modal -->
+	<div id="ai-detect-chat-modal" class="ai-detect-chat-modal hidden">
+		<div class="ai-detect-chat-backdrop"></div>
+		<div class="ai-detect-chat-content">
+			<div class="ai-detect-chat-header">
+				<h3>AI Exercise Detection</h3>
+				<button id="ai-detect-chat-close" class="ai-detect-chat-close" type="button">✕</button>
+			</div>
+			<div id="ai-detect-chat-messages" class="ai-detect-chat-messages">
+				<div class="ai-detect-chat-message ai-detect-chat-message-bot">
+					<div class="ai-detect-chat-avatar">🤖</div>
+					<div class="ai-detect-chat-text">Upload a photo of the exercise machine or movement, and I'll identify it for you!</div>
+				</div>
+			</div>
+			<div class="ai-detect-chat-input-area">
+				<label for="ai-detect-chat-file" class="ai-detect-chat-file-label">
+					<input type="file" id="ai-detect-chat-file" accept="image/*" hidden>
+					<span class="ai-detect-chat-file-button">📷 Foto maken of uploaden</span>
+				</label>
+			</div>
 		</div>
 	</div>
 
@@ -593,22 +704,24 @@
 			</div>
 		</div>
 
-	<footer class="navbar" id="main-navbar">
-			<button class="nav-btn active" data-tab="workouts">
+	<footer class="navbar" id="main-navbar" style="display: none;">
+			<button class="nav-btn active" data-tab="workouts" onclick="console.log('Nav workouts clicked'); if(window.switchTab){window.switchTab('workouts');} return false;" ontouchstart="console.log('Nav workouts touched'); if(window.switchTab){window.switchTab('workouts');} return false;" style="touch-action:manipulation;-webkit-touch-callout:none;">
 				<img src="static/nav/dumbell.png" alt="Workouts" class="nav-icon" />
 				<span>Workouts</span>
 			</button>
-			<button class="nav-btn" data-tab="progress">
+			<button class="nav-btn" data-tab="progress" onclick="console.log('Nav progress clicked'); if(window.switchTab){window.switchTab('progress');} return false;" ontouchstart="console.log('Nav progress touched'); if(window.switchTab){window.switchTab('progress');} return false;" style="touch-action:manipulation;-webkit-touch-callout:none;">
 				<img src="static/nav/progress.png" alt="Progress" class="nav-icon" />
 				<span>Progress</span>
 			</button>
-			<button class="nav-btn" data-tab="settings">
+			<button class="nav-btn" data-tab="settings" onclick="console.log('Nav settings clicked'); if(window.switchTab){window.switchTab('settings');} return false;" ontouchstart="console.log('Nav settings touched'); if(window.switchTab){window.switchTab('settings');} return false;" style="touch-action:manipulation;-webkit-touch-callout:none;">
 				<img src="static/nav/settings.png" alt="Settings" class="nav-icon" />
 				<span>Settings</span>
 			</button>
 		</footer>
 	</div>
 
+	<!-- Capacitor Core - MUST load before app.js for iOS -->
+	<script type="module" src="https://cdn.jsdelivr.net/npm/@capacitor/core@latest/dist/capacitor.js"></script>
 	<!-- Main app.js -->
 	<script src="static/app.js"></script>
 	<script>
@@ -617,5 +730,23 @@
 			navigator.serviceWorker.register('static/sw.js').catch(()=>{});
 		}
 	</script>
+	
+	<!-- Rest Timer Overlay (outside phone-shell for proper z-index) -->
+	<div id="rest-timer-overlay" class="rest-timer-overlay hidden">
+		<div class="rest-timer-container">
+			<div class="rest-timer-header">
+				<h3>Rest Timer</h3>
+				<button class="rest-timer-close" id="rest-timer-close">×</button>
+			</div>
+			<div class="rest-timer-display">
+				<div class="rest-timer-time" id="rest-timer-time">00:00</div>
+				<div class="rest-timer-label">Rest Time</div>
+			</div>
+			<div class="rest-timer-controls">
+				<button class="rest-timer-btn" id="rest-timer-start">Start</button>
+				<button class="rest-timer-btn" id="rest-timer-add-minute">+ 1 min</button>
+			</div>
+		</div>
+	</div>
 </body>
 </html>

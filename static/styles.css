@@ -236,7 +236,7 @@ body{
 .scan-item-time{color:var(--sub);font-size:12px}
 
 /* Bottom navbar */
-.navbar{position:relative;left:0;right:0;height:72px;background:rgba(13,13,16,.9);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:space-around;border-top:1px solid #242429;z-index:5;margin:0;padding:0;padding-bottom:env(safe-area-inset-bottom, 0px)}
+.navbar{position:relative;left:0;right:0;height:72px;background:rgba(13,13,16,.9);backdrop-filter:blur(10px);display:none;align-items:center;justify-content:space-around;border-top:1px solid #242429;z-index:5;margin:0;padding:0;padding-bottom:calc(10px + env(safe-area-inset-bottom, 0px))}
 .navbar .vision-fab{position:absolute}
 .nav-btn{background:none;border:0;color:var(--sub);font-weight:700;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px}
 .nav-btn.active{color:#fff}
@@ -420,7 +420,7 @@ body{
 .exercise-selector-muscles button{background:#1b1b1f;border:1px solid #2c2c34;color:#dfe0e6;padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:600;cursor:pointer}
 .exercise-selector-muscles button.active{background:var(--accent);border-color:var(--accent);color:#0b0b0d}
 .exercise-selector-muscles-row{margin-bottom:16px !important;flex-shrink:0}
-.exercise-selector-or{text-align:center;color:#888 !important;font-size:14px !important;margin:8px 0 12px 0 !important;font-weight:500 !important;padding:8px 0 !important;flex-shrink:0 !important;position:relative !important;z-index:10 !important;display:block !important;visibility:visible !important;opacity:1 !important;height:auto !important;background:transparent !important}
+.exercise-selector-or{text-align:center;color:#888 !important;font-size:14px !important;margin:4px 0 4px 0 !important;font-weight:500 !important;padding:4px 0 !important;flex-shrink:0 !important;position:relative !important;z-index:10 !important;display:block !important;visibility:visible !important;opacity:1 !important;height:auto !important;background:transparent !important}
 .exercise-selector-ai-detect{margin-top:0 !important;margin-bottom:20px !important;display:flex !important;justify-content:center !important;padding:0 16px !important;flex-shrink:0 !important;position:relative !important;z-index:10 !important;width:100% !important;visibility:visible !important;opacity:1 !important;height:auto !important;background:transparent !important}
 .exercise-selector-ai-detect .btn{width:auto !important;min-width:140px;max-width:200px;padding:8px 16px;flex:none !important;position:relative}
 .exercise-selector-ai-detect .btn::before{content:'✦';position:absolute;left:20%;top:-18px;color:rgba(124,92,255,0.8);font-size:14px;animation:twinkle 2s ease-in-out infinite;text-shadow:0 0 8px rgba(124,92,255,0.6)}
@@ -802,7 +802,7 @@ body{
 .settings-option-item{display:flex;align-items:center;justify-content:space-between;padding:16px;background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);border-radius:14px;box-shadow:0 4px 12px rgba(0,0,0,0.15)}
 .settings-option-left{display:flex;align-items:center;gap:12px;flex:1}
 .settings-option-left svg{width:20px;height:20px;color:#dfe0e6;flex-shrink:0}
-.settings-icon{width:20px;height:20px;flex-shrink:0;object-fit:contain;filter:brightness(0) invert(1) opacity(0.9)}
+.settings-icon{width:20px;height:20px;flex-shrink:0;object-fit:contain;opacity:0.9;filter:brightness(0) invert(1)}
 .settings-option-label{color:#fff;font-size:15px;font-weight:600;font-family:'Inter',sans-serif}
 .settings-option-right{flex-shrink:0}
 .settings-toggle{position:relative;display:inline-block;width:52px;height:28px}
@@ -1422,13 +1422,13 @@ body.ai-detect-chat-open {
 }
 
 #rest-timer-add-minute {
-	background: #2a2a33;
-	border: 1px solid #3a3a45;
-	color: #fff;
-	box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
+	background: #2a2a33 !important;
+	border: 1px solid #3a3a45 !important;
+	color: #fff !important;
+	box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15) !important;
 }
 
 #rest-timer-add-minute:hover {
-	background: #32323d;
-	box-shadow: 0 12px 22px rgba(0, 0, 0, 0.2);
+	background: #32323d !important;
+	box-shadow: 0 12px 22px rgba(0, 0, 0, 0.2) !important;
 }
