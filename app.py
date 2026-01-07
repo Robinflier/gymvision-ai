@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import json
 import sqlite3
-import requests
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -31,6 +30,11 @@ except Exception:
 	Client = None
 
 try:
+	from ultralytics import YOLO  # type: ignore
+except Exception:
+	YOLO = None  # type: ignore
+
+try:
 	from groq import Groq  # type: ignore
 	GROQ_AVAILABLE = True
 except Exception:
@@ -43,6 +47,11 @@ except Exception:
 	OPENAI_AVAILABLE = False
 
 APP_ROOT = Path(__file__).resolve().parent
+MODEL_PATH = APP_ROOT / "best.pt"
+MODEL_PATH_1 = APP_ROOT / "best1.pt"
+MODEL_PATH_2 = APP_ROOT / "best2.pt"
+MODEL_PATH_3 = APP_ROOT / "best3.pt"
+MODEL_PATH_4 = APP_ROOT / "best4.pt"
 DATABASE_PATH = APP_ROOT / "gymvision.db"
 IMAGES_PATHS = [APP_ROOT / "images"]
 PARENT_IMAGES_PATH = APP_ROOT.parent / "images"
@@ -66,7 +75,60 @@ def normalize_label(text: str) -> str:
 	return "".join(ch if ch.isalnum() else "_" for ch in (text or "").lower()).strip("_")
 
 # ========== ML MODELS ==========
-# YOLO models removed - using OpenAI Vision for exercise recognition
+_model_cache = {}
+_model_paths = {
+	"best": MODEL_PATH,
+	"best1": MODEL_PATH_1,
+	"best2": MODEL_PATH_2,
+	"best3": MODEL_PATH_3,
+	"best4": MODEL_PATH_4
+}
+_MAX_MODELS_IN_MEMORY = 2
+
+def _load_model(model_name: str):
+	"""Load a single model if it exists and isn't already loaded."""
+	if YOLO is None:
+		raise RuntimeError("Ultralytics not available")
+	if model_name in _model_cache:
+		return _model_cache[model_name]
+	model_path = _model_paths.get(model_name)
+	if not model_path or not model_path.exists():
+		return None
+	if len(_model_cache) >= _MAX_MODELS_IN_MEMORY:
+		oldest_key = next(iter(_model_cache))
+		del _model_cache[oldest_key]
+		import gc
+		gc.collect()
+	print(f"[INFO] Loading model: {model_name}")
+	_model_cache[model_name] = YOLO(str(model_path))
+	return _model_cache[model_name]
+
+def get_models():
+	"""Get all available models."""
+	models = {}
+	priority_models = ["best", "best3"]
+	for model_name in priority_models:
+		model = _load_model(model_name)
+		if model is not None:
+			models[model_name] = model
+	if len(models) < _MAX_MODELS_IN_MEMORY:
+		for model_name in ["best1", "best2", "best4"]:
+			if len(models) >= _MAX_MODELS_IN_MEMORY:
+				break
+			model = _load_model(model_name)
+			if model is not None:
+				models[model_name] = model
+	if not models:
+		raise FileNotFoundError("No model files found")
+	return (
+		models.get("best"),
+		models.get("best1"),
+		models.get("best2"),
+		models.get("best3"),
+		models.get("best4")
+	)
+
+# YOLO model labels and priorities removed - no longer using YOLO models
 
 app = Flask(
 	__name__,
@@ -144,7 +206,7 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"close_grip_pulldown": {"display": "Close Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/IjoFCmLX7z0", "image": "https://strengthlevel.com/images/illustrations/close-grip-pulldown.png"},
 	"reverse_grip_pulldown": {"display": "Reverse Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/scy-QV06nuA", "image": "/images/reversegrippulldown.jpg"},
 	"straight_arm_pulldown": {"display": "Straight Arm Pulldown", "muscles": normalize_muscles(["Back", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/G9uNaXGTJ4w", "image": "https://strengthlevel.com/images/illustrations/straight-arm-pulldown.png"},
-"seated_row": {"display": "Seated Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/UCXxvVItLoM", "image": "https://strengthlevel.com/images/illustrations/seated-row.png"},
+	"seated_row": {"display": "Seated Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/UCXxvVItLoM", "image": "https://strengthlevel.com/images/illustrations/seated-row.png"},
 	"seated_machine_row": {"display": "Seated Machine Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/TeFo51Q_Nsc", "image": "/images/seatedmachinerow.jpg"},
 	"t_bar_row": {"display": "T-Bar Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/yPis7nlbqdY", "image": "https://strengthlevel.com/images/illustrations/t-bar-row.png"},
 	"chest_supported_t_bar_row": {"display": "Chest Supported T-Bar Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/0UBRfiO4zDs", "image": "/images/chestsupportedtbarrow.jpg"},
@@ -792,7 +854,143 @@ def nav_icon(filename):
 # _try_openai_vision function removed - no longer used
 
 
-# YOLO /predict endpoint removed - using OpenAI Vision for exercise recognition
+def _serialize_prediction_choice(pred: Dict[str, Any]) -> Dict[str, Any]:
+	key = pred["key"]
+	label = pred.get("label")
+	meta = MACHINE_METADATA.get(key, {"display": label or "Unknown", "muscles": [], "video": ""})
+	display_name = meta.get("display") or (label.replace("_", " ").title() if label else "Unknown")
+	return {
+		"key": key, "label": label, "display": display_name,
+		"muscles": normalize_muscles(meta.get("muscles", [])),
+		"video": meta.get("video", ""),
+		"image": image_url_for_key(key, meta) or meta.get("image"),
+		"confidence": pred.get("conf", 0.0),
+	}
+
+@app.route("/predict", methods=["POST"])
+def predict():
+	"""YOLO prediction endpoint - uses local best.pt models."""
+	file = request.files.get("image")
+	if not file:
+		return jsonify({"error": "No image provided"}), 400
+	tmp_dir = APP_ROOT / "tmp"
+	tmp_dir.mkdir(exist_ok=True)
+	tmp_path = tmp_dir / "upload.jpg"
+	try:
+		file.save(str(tmp_path))
+	except Exception as e:
+		return jsonify({"error": f"Failed to save image: {str(e)}"}), 500
+	if not tmp_path.exists() or tmp_path.stat().st_size == 0:
+		return jsonify({"error": "Image file is empty"}), 400
+	try:
+		model, model1, model2, model3, model4 = get_models()
+	except Exception as e:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"error": "Models not available"}), 500
+	models_loaded = sum(1 for m in [model, model1, model2, model3, model4] if m is not None)
+	if models_loaded == 0:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"error": "No models available"}), 500
+	predictions = []
+	def get_model_predictions(model_obj, model_name, max_predictions=3):
+		model_preds = []
+		try:
+			if not tmp_path.exists():
+				return model_preds
+			results = model_obj.predict(source=str(tmp_path), verbose=False)
+			if not results or len(results) == 0:
+				return model_preds
+			best = results[0]
+			if hasattr(best, "probs") and best.probs is not None:
+				probs = best.probs.data
+				top_indices = probs.topk(min(max_predictions, len(best.names))).indices.tolist()
+				top_confs = probs.topk(min(max_predictions, len(best.names))).values.tolist()
+				for idx, conf in zip(top_indices, top_confs):
+					label = best.names[int(idx)]
+					norm = normalize_label(label)
+					key = ALIASES.get(norm, norm)
+					model_preds.append({"label": label, "conf": float(conf), "key": key, "source": model_name})
+			elif hasattr(best, "boxes") and len(best.boxes) > 0:
+				confidences = best.boxes.conf.tolist()
+				classes = best.boxes.cls.tolist()
+				box_predictions = []
+				for i, (conf, cls_idx) in enumerate(zip(confidences, classes)):
+					label = best.names[int(cls_idx)]
+					norm = normalize_label(label)
+					key = ALIASES.get(norm, norm)
+					box_predictions.append({"label": label, "conf": float(conf), "key": key, "source": model_name, "index": i})
+				box_predictions.sort(key=lambda x: x["conf"], reverse=True)
+				seen_keys = set()
+				for pred in box_predictions:
+					if pred["key"] not in seen_keys:
+						model_preds.append(pred)
+						seen_keys.add(pred["key"])
+						if len(model_preds) >= max_predictions:
+							break
+		except Exception as e:
+			print(f"[ERROR] Model {model_name} prediction failed: {e}")
+		return model_preds
+	if model:
+		predictions.extend(get_model_predictions(model, "best"))
+	if model1:
+		predictions.extend(get_model_predictions(model1, "best1"))
+	if model2:
+		predictions.extend(get_model_predictions(model2, "best2"))
+	if model3:
+		predictions.extend(get_model_predictions(model3, "best3"))
+	if model4:
+		predictions.extend(get_model_predictions(model4, "best4"))
+	if not predictions:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+	excluded_keys = {normalize_label("Kettlebells"), normalize_label("Assisted Chin Up-Dip")}
+	predictions = [p for p in predictions if p.get("key") not in excluded_keys]
+	if not predictions:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+	grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+	for pred in predictions:
+		grouped[pred["key"]].append(pred)
+	label_candidates: List[Dict[str, Any]] = []
+	for key, preds_for_label in grouped.items():
+		sorted_preds = sorted(preds_for_label, key=lambda p: p["conf"], reverse=True)
+		label_candidates.append(sorted_preds[0])
+	sorted_predictions = sorted(label_candidates, key=lambda p: p["conf"], reverse=True)[:3]
+	if not sorted_predictions:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+	top_payloads = [_serialize_prediction_choice(pred) for pred in sorted_predictions]
+	primary_payload = top_payloads[0]
+	try:
+		os.remove(str(tmp_path))
+	except Exception:
+		pass
+	return jsonify({
+		"success": True,
+		"label": primary_payload["label"],
+		"confidence": primary_payload["confidence"],
+		"display": primary_payload["display"],
+		"muscles": primary_payload["muscles"],
+		"video": primary_payload["video"],
+		"key": primary_payload["key"],
+		"image": primary_payload.get("image"),
+		"top_predictions": top_payloads,
+	})
 
 @app.route("/api/vision-detect", methods=["POST"])
 def vision_detect():
@@ -882,254 +1080,50 @@ def vision_detect():
 # /predict endpoint removed - now using /api/vision-detect with OpenAI Vision
 
 
-def extract_exercise_from_caption(caption):
-	"""
-	Extract exercise name from BLIP caption.
-	Caption examples:
-	- "a person doing bench press"
-	- "bench press exercise"
-	- "a man performing a bench press"
-	"""
-	import re
-	caption_lower = caption.lower()
-	
-	# List of common exercise keywords (from MACHINE_METADATA)
-	exercise_keywords = [
-		"bench press", "incline bench press", "decline bench press", "dumbbell bench press",
-		"dumbbell fly", "cable crossover", "pec deck", "chest press", "push up",
-		"incline dumbbell press", "decline dumbbell press", "cable fly", "incline cable fly",
-		"lat pulldown", "pull up", "cable row", "barbell row", "t-bar row", "seated row",
-		"seated machine row", "one arm row", "cable row", "face pull", "rear delt fly",
-		"shoulder press", "dumbbell shoulder press", "lateral raise", "front raise",
-		"rear delt raise", "arnold press", "upright row", "shrug",
-		"bicep curl", "dumbbell curl", "barbell curl", "hammer curl", "cable curl",
-		"concentration curl", "preacher curl", "tricep extension", "tricep pushdown",
-		"overhead extension", "dips", "close grip bench press", "skull crusher",
-		"squat", "leg press", "leg extension", "leg curl", "hack squat", "bulgarian split squat",
-		"lunges", "deadlift", "romanian deadlift", "stiff leg deadlift", "good morning",
-		"hip thrust", "hip thrust machine", "smith machine hip thrust", "smith machine donkey kick",
-		"cable kickback", "abductor", "adductor", "cable step up", "smith machine step up",
-		"calf raise", "standing calf raise", "seated calf raise", "leg press calf raise",
-		"calf press machine", "donkey calf raise",
-		"crunch", "cable crunch", "decline sit up", "hanging leg raise", "knee raise",
-		"russian twist", "rotary torso machine", "ab crunch machine"
-	]
-	
-	# Find matching exercise in caption (longest match first)
-	exercise_keywords.sort(key=len, reverse=True)
-	for exercise in exercise_keywords:
-		if exercise in caption_lower:
-			return exercise
-	
-	# If no match, try to extract first 2-3 words after "doing" or "performing"
-	patterns = [
-		r"doing\s+([a-z\s]+?)(?:\s+exercise|\s+with|\s+on|\.|$)",
-		r"performing\s+([a-z\s]+?)(?:\s+exercise|\s+with|\s+on|\.|$)",
-		r"([a-z\s]+?)\s+exercise",
-		r"a\s+([a-z\s]+?)(?:\s+exercise|\s+machine|\.|$)",
-	]
-	
-	for pattern in patterns:
-		match = re.search(pattern, caption_lower)
-		if match:
-			extracted = match.group(1).strip()
-			# Take first 2-3 words
-			words = extracted.split()[:3]
-			if len(words) >= 2:
-				return " ".join(words)
-	
-	# Fallback: return first few words of caption
-	words = caption_lower.split()[:3]
-	return " ".join(words) if words else "unknown exercise"
-
-
-def _get_user_id_from_token():
-	"""Helper function to get user_id from Authorization header (Supabase JWT token)."""
-	auth_header = request.headers.get("Authorization")
-	if not auth_header or not auth_header.startswith("Bearer "):
-		return None
-	
-	access_token = auth_header.replace("Bearer ", "").strip()
-	if not access_token or not SUPABASE_AVAILABLE:
-		return None
-	
-	try:
-		SUPABASE_URL = os.getenv("SUPABASE_URL")
-		SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
-		if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-			return None
-		
-		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-		user_response = supabase_client.auth.get_user(access_token)
-		
-		if user_response.user:
-			return user_response.user.id
-		return None
-	except Exception as e:
-		print(f"[ERROR] Failed to get user from token: {e}", flush=True)
-		return None
-
-
-def _check_and_use_credit(user_id):
-	"""
-	Check if user has credits available and use one.
-	Returns: (can_use, credits_remaining, error_message)
-	"""
-	if not SUPABASE_AVAILABLE or not user_id:
-		return False, 0, "Authentication required"
-	
-	try:
-		SUPABASE_URL = os.getenv("SUPABASE_URL")
-		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-		if not SUPABASE_URL:
-			return False, 0, "Supabase not configured"
-		
-		# Use service role key for admin operations
-		supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY or os.getenv("SUPABASE_ANON_KEY"))
-		
-		# Get current month (YYYY-MM format for comparison)
-		now = datetime.now()
-		current_month = now.strftime("%Y-%m")
-		
-		# Get or create user credits record
-		credits_response = supabase_client.table("user_credits").select("*").eq("user_id", user_id).execute()
-		
-		if credits_response.data and len(credits_response.data) > 0:
-			credits_record = credits_response.data[0]
-			last_reset_month = credits_record.get("last_reset_month", "")
-			
-			# Check if we need to reset (new month)
-			if last_reset_month != current_month:
-				# Reset free credits for new month
-				supabase_client.table("user_credits").update({
-					"free_credits_used": 0,
-					"last_reset_month": current_month
-				}).eq("user_id", user_id).execute()
-				free_credits_used = 0
-			else:
-				free_credits_used = credits_record.get("free_credits_used", 0)
-			
-			paid_credits = credits_record.get("paid_credits", 0)
-			
-			# Check if user has credits available
-			if free_credits_used >= 10 and paid_credits <= 0:
-				return False, 0, "No credits available. You've used all 10 free credits this month."
-			
-			# Use credit (prefer free, then paid)
-			if free_credits_used < 10:
-				# Use free credit
-				new_free_used = free_credits_used + 1
-				supabase_client.table("user_credits").update({
-					"free_credits_used": new_free_used,
-					"last_reset_month": current_month
-				}).eq("user_id", user_id).execute()
-				credits_remaining = (10 - new_free_used) + paid_credits
-				return True, credits_remaining, None
-			else:
-				# Use paid credit
-				if paid_credits > 0:
-					new_paid = paid_credits - 1
-					supabase_client.table("user_credits").update({
-						"paid_credits": new_paid
-					}).eq("user_id", user_id).execute()
-					credits_remaining = new_paid
-					return True, credits_remaining, None
-				else:
-					return False, 0, "No credits available"
-		else:
-			# Create new record with 1 free credit used
-			supabase_client.table("user_credits").insert({
-				"user_id": user_id,
-				"free_credits_used": 1,
-				"paid_credits": 0,
-				"last_reset_month": current_month
-			}).execute()
-			return True, 9, None  # 9 remaining (10 - 1 used)
-			
-	except Exception as e:
-		print(f"[ERROR] Credit check failed: {e}", flush=True)
-		import traceback
-		traceback.print_exc()
-		return False, 0, f"Error checking credits: {str(e)}"
-
-
 @app.route("/api/recognize-exercise", methods=["POST"])
 def recognize_exercise():
 	"""
 	Exercise recognition endpoint: image → exercise name.
-	Uses OpenAI Vision with credit system (10 free credits per month per user).
-	"""
-	try:
-		# Get user ID from token
-		user_id = _get_user_id_from_token()
-		if not user_id:
-			return jsonify({"exercise": "unknown exercise", "error": "Authentication required"}), 401
-		
-		# Check and use credit
-		can_use, credits_remaining, error_msg = _check_and_use_credit(user_id)
-		if not can_use:
-			return jsonify({
-				"exercise": "unknown exercise",
-				"error": error_msg or "No credits available",
-				"credits_remaining": 0
-			}), 403
-		
-		# Get image file
-		file = request.files.get("image")
-		if not file:
-			print("[ERROR] No file in request", flush=True)
-			return jsonify({"exercise": "unknown exercise"}), 200
-		
-		print(f"[INFO] Exercise recognition request: {file.filename}, user_id: {user_id}, credits_remaining: {credits_remaining}", flush=True)
-		
-		# Read image bytes
-		image_bytes = file.read()
-		if not image_bytes:
-			print("[ERROR] Image bytes is empty", flush=True)
-			return jsonify({"exercise": "unknown exercise"}), 200
-		
-		# Use OpenAI Vision
-		response_data, status_code = _recognize_exercise_openai(image_bytes, file.content_type)
-		
-		# Add credits_remaining to response
-		if isinstance(response_data, dict):
-			response_data["credits_remaining"] = credits_remaining
-		
-		return jsonify(response_data), status_code
-		
-	except Exception as e:
-		print(f"[ERROR] Exercise recognition error: {e}", flush=True)
-		import traceback
-		traceback.print_exc()
-		return jsonify({"exercise": "unknown exercise"}), 200
-
-
-def _recognize_exercise_openai(image_bytes, content_type):
-	"""
-	Use OpenAI Vision for exercise recognition.
-	Returns: (response_dict, status_code) tuple
+	Same pattern as vision-detect - just call OpenAI Vision directly.
 	"""
 	import base64
 	
-	if not OPENAI_AVAILABLE:
-		return {"exercise": "unknown exercise"}, 200
-	
 	try:
+		if not OPENAI_AVAILABLE:
+			return jsonify({"exercise": "unknown exercise"}), 200
+		
+		# Get image file (same as vision-detect)
+		file = request.files.get("image")
+		if not file:
+			print("[ERROR] No file in request")
+			return jsonify({"exercise": "unknown exercise"}), 200
+		
+		print(f"[DEBUG] File received: {file.filename}, content_type: {file.content_type}")
+		
+		# Get OpenAI API key
 		api_key = os.getenv("OPENAI_API_KEY")
 		if not api_key:
-			print("[ERROR] OPENAI_API_KEY not set", flush=True)
-			return {"exercise": "unknown exercise"}, 200
+			print("[ERROR] OPENAI_API_KEY not set")
+			return jsonify({"exercise": "unknown exercise"}), 200
+		
+		# Read image and encode (same as vision-detect)
+		image_bytes = file.read()
+		if not image_bytes:
+			print("[ERROR] Image bytes is empty")
+			return jsonify({"exercise": "unknown exercise"}), 200
+		
+		print(f"[DEBUG] Image size: {len(image_bytes)} bytes")
 		
 		image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 		
-		# Determine format
+		# Determine format (same as vision-detect)
 		image_format = "jpeg"
-		if content_type and "png" in content_type:
+		if file.content_type and "png" in file.content_type:
 			image_format = "png"
-		elif content_type and "webp" in content_type:
+		elif file.content_type and "webp" in file.content_type:
 			image_format = "webp"
 		
-		# Call OpenAI Vision
+		# Call OpenAI Vision - FORCE it to always give an exercise
 		client = OpenAI(api_key=api_key)
 		response = client.chat.completions.create(
 			model="gpt-4o-mini",
@@ -1149,121 +1143,63 @@ def _recognize_exercise_openai(image_bytes, content_type):
 				}
 			],
 			max_tokens=50,
-			temperature=0.3
+			temperature=0.3  # Lower temperature for more consistent responses
 		)
 		
+		# Extract response
 		if response.choices and len(response.choices) > 0:
 			response_content = response.choices[0].message.content
 			if response_content:
 				raw_response = response_content.strip()
-				print(f"[INFO] OpenAI response: '{raw_response}'", flush=True)
+				print(f"[DEBUG] OpenAI raw response: '{raw_response}'")
+				
 				exercise_name = raw_response.lower()
+				
+				# Clean up - remove common prefixes and phrases
 				exercise_name = exercise_name.strip('"\'.,;:!?')
+				exercise_name = exercise_name.replace("dit is een ", "").replace("dit is ", "")
 				exercise_name = exercise_name.replace("this is a ", "").replace("this is ", "")
 				exercise_name = exercise_name.replace("looks like ", "").replace("appears to be ", "")
 				exercise_name = exercise_name.replace("i see a ", "").replace("i see ", "")
 				exercise_name = exercise_name.replace("it's a ", "").replace("it is a ", "")
-				exercise_name = " ".join(exercise_name.split())
+				exercise_name = exercise_name.replace("probably a ", "").replace("likely a ", "")
+				exercise_name = " ".join(exercise_name.split())  # Normalize whitespace
 				
-				if exercise_name == "unknown exercise" or exercise_name == "unknown" or len(exercise_name.strip()) < 2:
+				# ONLY mark as unknown if EXPLICITLY stated
+				# Accept everything else, even if weird
+				if exercise_name == "unknown exercise" or exercise_name == "unknown":
+					# Try one more time with a different prompt if we get unknown
+					print("[DEBUG] Got 'unknown', trying again with different prompt...")
+					# For now, just return unknown - but we could retry here
 					exercise_name = "unknown exercise"
+				elif len(exercise_name.strip()) < 2:
+					# Too short, but still try to use it
+					exercise_name = "unknown exercise"
+				else:
+					# We have something - use it!
+					# Don't mark as unknown even if it's weird
+					pass
 				
-				print(f"[INFO] OpenAI final exercise: '{exercise_name}'", flush=True)
-				return {"exercise": exercise_name}, 200
+				print(f"[DEBUG] Final exercise: '{exercise_name}'")
+				return jsonify({"exercise": exercise_name}), 200
 		
-		print("[ERROR] OpenAI returned empty response", flush=True)
-		return {"exercise": "unknown exercise"}, 200
+		print("[DEBUG] No response from OpenAI")
+		return jsonify({"exercise": "unknown exercise"}), 200
+		
 	except Exception as e:
-		print(f"[ERROR] OpenAI error: {e}", flush=True)
+		print(f"[ERROR] Exercise recognition error: {e}")
 		import traceback
 		traceback.print_exc()
-		return {"exercise": "unknown exercise"}, 200
-
-
-@app.route("/api/credits/balance", methods=["GET"])
-def get_credits_balance():
-	"""Get user's credit balance."""
-	user_id = _get_user_id_from_token()
-	if not user_id:
-		return jsonify({"error": "Authentication required"}), 401
-	
-	if not SUPABASE_AVAILABLE:
-		return jsonify({"error": "Supabase not available"}), 500
-	
-	try:
-		SUPABASE_URL = os.getenv("SUPABASE_URL")
-		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-		if not SUPABASE_URL:
-			return jsonify({"error": "Supabase not configured"}), 500
-		
-		supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY or os.getenv("SUPABASE_ANON_KEY"))
-		
-		# Get current month
-		now = datetime.now()
-		current_month = now.strftime("%Y-%m")
-		
-		# Get user credits
-		credits_response = supabase_client.table("user_credits").select("*").eq("user_id", user_id).execute()
-		
-		if credits_response.data and len(credits_response.data) > 0:
-			credits_record = credits_response.data[0]
-			last_reset_month = credits_record.get("last_reset_month", "")
-			
-			# Check if we need to reset (new month)
-			if last_reset_month != current_month:
-				# Reset free credits for new month
-				supabase_client.table("user_credits").update({
-					"free_credits_used": 0,
-					"last_reset_month": current_month
-				}).eq("user_id", user_id).execute()
-				free_credits_used = 0
-			else:
-				free_credits_used = credits_record.get("free_credits_used", 0)
-			
-			paid_credits = credits_record.get("paid_credits", 0)
-			free_credits_remaining = max(0, 10 - free_credits_used)
-			total_credits = free_credits_remaining + paid_credits
-			
-			return jsonify({
-				"free_credits_used": free_credits_used,
-				"free_credits_remaining": free_credits_remaining,
-				"paid_credits": paid_credits,
-				"total_credits": total_credits,
-				"current_month": current_month
-			}), 200
-		else:
-			# No record yet, create one
-			supabase_client.table("user_credits").insert({
-				"user_id": user_id,
-				"free_credits_used": 0,
-				"paid_credits": 0,
-				"last_reset_month": current_month
-			}).execute()
-			
-			return jsonify({
-				"free_credits_used": 0,
-				"free_credits_remaining": 10,
-				"paid_credits": 0,
-				"total_credits": 10,
-				"current_month": current_month
-			}), 200
-			
-	except Exception as e:
-		print(f"[ERROR] Failed to get credits balance: {e}", flush=True)
-		import traceback
-		traceback.print_exc()
-		return jsonify({"error": f"Failed to get credits: {str(e)}"}), 500
+		return jsonify({"exercise": "unknown exercise"}), 200
 
 
 @app.route("/health", methods=["GET"])
 def health():
 	"""Health check endpoint to test if backend is working."""
-	hf_token = os.getenv("HUGGINGFACE_API_TOKEN")
 	return jsonify({
 		"status": "ok",
 		"openai_available": OPENAI_AVAILABLE,
-		"groq_available": GROQ_AVAILABLE,
-		"huggingface_available": hf_token is not None
+		"groq_available": GROQ_AVAILABLE
 	}), 200
 
 @app.route("/favicon.ico")
