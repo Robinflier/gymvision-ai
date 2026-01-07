@@ -31,11 +31,6 @@ except Exception:
 	Client = None
 
 try:
-	from ultralytics import YOLO  # type: ignore
-except Exception:
-	YOLO = None  # type: ignore
-
-try:
 	from groq import Groq  # type: ignore
 	GROQ_AVAILABLE = True
 except Exception:
@@ -48,11 +43,6 @@ except Exception:
 	OPENAI_AVAILABLE = False
 
 APP_ROOT = Path(__file__).resolve().parent
-MODEL_PATH = APP_ROOT / "best.pt"
-MODEL_PATH_1 = APP_ROOT / "best1.pt"
-MODEL_PATH_2 = APP_ROOT / "best2.pt"
-MODEL_PATH_3 = APP_ROOT / "best3.pt"
-MODEL_PATH_4 = APP_ROOT / "best4.pt"
 DATABASE_PATH = APP_ROOT / "gymvision.db"
 IMAGES_PATHS = [APP_ROOT / "images"]
 PARENT_IMAGES_PATH = APP_ROOT.parent / "images"
@@ -76,60 +66,7 @@ def normalize_label(text: str) -> str:
 	return "".join(ch if ch.isalnum() else "_" for ch in (text or "").lower()).strip("_")
 
 # ========== ML MODELS ==========
-_model_cache = {}
-_model_paths = {
-	"best": MODEL_PATH,
-	"best1": MODEL_PATH_1,
-	"best2": MODEL_PATH_2,
-	"best3": MODEL_PATH_3,
-	"best4": MODEL_PATH_4
-}
-_MAX_MODELS_IN_MEMORY = 2
-
-def _load_model(model_name: str):
-	"""Load a single model if it exists and isn't already loaded."""
-	if YOLO is None:
-		raise RuntimeError("Ultralytics not available")
-	if model_name in _model_cache:
-		return _model_cache[model_name]
-	model_path = _model_paths.get(model_name)
-	if not model_path or not model_path.exists():
-		return None
-	if len(_model_cache) >= _MAX_MODELS_IN_MEMORY:
-		oldest_key = next(iter(_model_cache))
-		del _model_cache[oldest_key]
-		import gc
-		gc.collect()
-	print(f"[INFO] Loading model: {model_name}")
-	_model_cache[model_name] = YOLO(str(model_path))
-	return _model_cache[model_name]
-
-def get_models():
-	"""Get all available models."""
-	models = {}
-	priority_models = ["best", "best3"]
-	for model_name in priority_models:
-		model = _load_model(model_name)
-		if model is not None:
-			models[model_name] = model
-	if len(models) < _MAX_MODELS_IN_MEMORY:
-		for model_name in ["best1", "best2", "best4"]:
-			if len(models) >= _MAX_MODELS_IN_MEMORY:
-				break
-			model = _load_model(model_name)
-			if model is not None:
-				models[model_name] = model
-	if not models:
-		raise FileNotFoundError("No model files found")
-	return (
-		models.get("best"),
-		models.get("best1"),
-		models.get("best2"),
-		models.get("best3"),
-		models.get("best4")
-	)
-
-# YOLO model labels and priorities removed - no longer using YOLO models
+# YOLO models removed - using OpenAI Vision for exercise recognition
 
 app = Flask(
 	__name__,
@@ -855,143 +792,7 @@ def nav_icon(filename):
 # _try_openai_vision function removed - no longer used
 
 
-def _serialize_prediction_choice(pred: Dict[str, Any]) -> Dict[str, Any]:
-	key = pred["key"]
-	label = pred.get("label")
-	meta = MACHINE_METADATA.get(key, {"display": label or "Unknown", "muscles": [], "video": ""})
-	display_name = meta.get("display") or (label.replace("_", " ").title() if label else "Unknown")
-	return {
-		"key": key, "label": label, "display": display_name,
-		"muscles": normalize_muscles(meta.get("muscles", [])),
-		"video": meta.get("video", ""),
-		"image": image_url_for_key(key, meta) or meta.get("image"),
-		"confidence": pred.get("conf", 0.0),
-	}
-
-@app.route("/predict", methods=["POST"])
-def predict():
-	"""YOLO prediction endpoint - uses local best.pt models."""
-	file = request.files.get("image")
-	if not file:
-		return jsonify({"error": "No image provided"}), 400
-	tmp_dir = APP_ROOT / "tmp"
-	tmp_dir.mkdir(exist_ok=True)
-	tmp_path = tmp_dir / "upload.jpg"
-	try:
-		file.save(str(tmp_path))
-	except Exception as e:
-		return jsonify({"error": f"Failed to save image: {str(e)}"}), 500
-	if not tmp_path.exists() or tmp_path.stat().st_size == 0:
-		return jsonify({"error": "Image file is empty"}), 400
-	try:
-		model, model1, model2, model3, model4 = get_models()
-	except Exception as e:
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		return jsonify({"error": "Models not available"}), 500
-	models_loaded = sum(1 for m in [model, model1, model2, model3, model4] if m is not None)
-	if models_loaded == 0:
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		return jsonify({"error": "No models available"}), 500
-	predictions = []
-	def get_model_predictions(model_obj, model_name, max_predictions=3):
-		model_preds = []
-		try:
-			if not tmp_path.exists():
-				return model_preds
-			results = model_obj.predict(source=str(tmp_path), verbose=False)
-			if not results or len(results) == 0:
-				return model_preds
-			best = results[0]
-			if hasattr(best, "probs") and best.probs is not None:
-				probs = best.probs.data
-				top_indices = probs.topk(min(max_predictions, len(best.names))).indices.tolist()
-				top_confs = probs.topk(min(max_predictions, len(best.names))).values.tolist()
-				for idx, conf in zip(top_indices, top_confs):
-					label = best.names[int(idx)]
-					norm = normalize_label(label)
-					key = ALIASES.get(norm, norm)
-					model_preds.append({"label": label, "conf": float(conf), "key": key, "source": model_name})
-			elif hasattr(best, "boxes") and len(best.boxes) > 0:
-				confidences = best.boxes.conf.tolist()
-				classes = best.boxes.cls.tolist()
-				box_predictions = []
-				for i, (conf, cls_idx) in enumerate(zip(confidences, classes)):
-					label = best.names[int(cls_idx)]
-					norm = normalize_label(label)
-					key = ALIASES.get(norm, norm)
-					box_predictions.append({"label": label, "conf": float(conf), "key": key, "source": model_name, "index": i})
-				box_predictions.sort(key=lambda x: x["conf"], reverse=True)
-				seen_keys = set()
-				for pred in box_predictions:
-					if pred["key"] not in seen_keys:
-						model_preds.append(pred)
-						seen_keys.add(pred["key"])
-						if len(model_preds) >= max_predictions:
-							break
-		except Exception as e:
-			print(f"[ERROR] Model {model_name} prediction failed: {e}")
-		return model_preds
-	if model:
-		predictions.extend(get_model_predictions(model, "best"))
-	if model1:
-		predictions.extend(get_model_predictions(model1, "best1"))
-	if model2:
-		predictions.extend(get_model_predictions(model2, "best2"))
-	if model3:
-		predictions.extend(get_model_predictions(model3, "best3"))
-	if model4:
-		predictions.extend(get_model_predictions(model4, "best4"))
-	if not predictions:
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
-	excluded_keys = {normalize_label("Kettlebells"), normalize_label("Assisted Chin Up-Dip")}
-	predictions = [p for p in predictions if p.get("key") not in excluded_keys]
-	if not predictions:
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
-	grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-	for pred in predictions:
-		grouped[pred["key"]].append(pred)
-	label_candidates: List[Dict[str, Any]] = []
-	for key, preds_for_label in grouped.items():
-		sorted_preds = sorted(preds_for_label, key=lambda p: p["conf"], reverse=True)
-		label_candidates.append(sorted_preds[0])
-	sorted_predictions = sorted(label_candidates, key=lambda p: p["conf"], reverse=True)[:3]
-	if not sorted_predictions:
-		try:
-			os.remove(str(tmp_path))
-		except Exception:
-			pass
-		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
-	top_payloads = [_serialize_prediction_choice(pred) for pred in sorted_predictions]
-	primary_payload = top_payloads[0]
-	try:
-		os.remove(str(tmp_path))
-	except Exception:
-		pass
-	return jsonify({
-		"success": True,
-		"label": primary_payload["label"],
-		"confidence": primary_payload["confidence"],
-		"display": primary_payload["display"],
-		"muscles": primary_payload["muscles"],
-		"video": primary_payload["video"],
-		"key": primary_payload["key"],
-		"image": primary_payload.get("image"),
-		"top_predictions": top_payloads,
-	})
+# YOLO /predict endpoint removed - using OpenAI Vision for exercise recognition
 
 @app.route("/api/vision-detect", methods=["POST"])
 def vision_detect():
