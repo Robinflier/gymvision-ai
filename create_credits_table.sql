@@ -38,3 +38,7 @@ CREATE POLICY "Service role full access"
     USING (true)
     WITH CHECK (true);
 
+-- Grant permissions to service_role (critical for backend access)
+GRANT ALL ON public.user_credits TO service_role;
+GRANT SELECT, INSERT, UPDATE ON public.user_credits TO authenticated;
+

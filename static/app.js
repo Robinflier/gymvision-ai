@@ -1674,8 +1674,9 @@ function initExerciseSelector() {
 					return;
 				}
 				
-				// Show credits message
-				showCreditsMessage(creditsInfo.credits_remaining);
+				// Show credits message - subtract 1 because we're about to use one
+				const creditsAfterUse = Math.max(0, creditsInfo.credits_remaining - 1);
+				showCreditsMessage(creditsAfterUse);
 				
 				aiDetectBtn.disabled = true;
 				aiDetectBtn.textContent = 'Analyzing...';
@@ -1733,9 +1734,6 @@ function initExerciseSelector() {
 					// Update credits display if provided
 					if (data.credits_remaining !== undefined) {
 						showCreditsMessage(data.credits_remaining);
-						// Update credits in settings tab
-						const creditsEl = document.getElementById('settings-stat-credits');
-						if (creditsEl) creditsEl.textContent = data.credits_remaining.toString();
 					}
 					
 					// Extract exercise name - be VERY lenient, accept anything
@@ -5641,20 +5639,10 @@ async function loadSettings() {
 		const streakEl = document.getElementById('settings-stat-streak');
 		const workoutsEl = document.getElementById('settings-stat-workouts');
 		const hoursEl = document.getElementById('settings-stat-hours');
-		const creditsEl = document.getElementById('settings-stat-credits');
 		
 		if (streakEl) streakEl.textContent = streak.toString();
 		if (workoutsEl) workoutsEl.textContent = workoutCount.toString();
 		if (hoursEl) hoursEl.textContent = totalHours.toString();
-		
-		// Load and display credits
-		try {
-			const creditsInfo = await getUserCredits();
-			if (creditsEl) creditsEl.textContent = creditsInfo.credits_remaining.toString();
-		} catch (e) {
-			console.error('[SETTINGS] Failed to load credits:', e);
-			if (creditsEl) creditsEl.textContent = '10';
-		}
 	} catch (e) {
 		console.error('Failed to calculate stats:', e);
 	}
@@ -6115,8 +6103,9 @@ function openAIDetectChat() {
 				return;
 			}
 			
-			// Show credits message
-			showCreditsMessage(creditsInfo.credits_remaining);
+			// Show credits message - subtract 1 because we're about to use one
+			const creditsAfterUse = Math.max(0, creditsInfo.credits_remaining - 1);
+			showCreditsMessage(creditsAfterUse);
 			
 			// Show loading message
 			const loadingId = addAIDetectChatMessage('bot', 'Even nadenken...', null, true);
@@ -6163,9 +6152,6 @@ function openAIDetectChat() {
 				// Update credits display if provided
 				if (data.credits_remaining !== undefined) {
 					showCreditsMessage(data.credits_remaining);
-					// Update credits in settings tab
-					const creditsEl = document.getElementById('settings-stat-credits');
-					if (creditsEl) creditsEl.textContent = data.credits_remaining.toString();
 				}
 				
 				// Remove loading message
