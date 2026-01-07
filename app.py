@@ -944,16 +944,16 @@ def get_user_credits(user_id: str) -> dict:
 		return {"credits_remaining": 10, "last_reset_month": None}
 
 
-def decrement_user_credits(user_id: str) -> bool:
-	"""Decrement user credits by 1. Returns True if successful, False if no credits."""
+def decrement_user_credits(user_id: str) -> int:
+	"""Decrement user credits by 1. Returns new credits_remaining value, or -1 if error."""
 	if not SUPABASE_AVAILABLE:
-		return True  # Allow if Supabase not available
+		return 10  # Default if Supabase not available
 	
 	SUPABASE_URL = os.getenv("SUPABASE_URL")
 	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
 	
 	if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-		return True  # Allow if Supabase not configured
+		return 10  # Default if Supabase not configured
 	
 	try:
 		supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
@@ -963,17 +963,29 @@ def decrement_user_credits(user_id: str) -> bool:
 		credits_remaining = credits_info["credits_remaining"]
 		
 		if credits_remaining <= 0:
-			return False
+			return 0
 		
-		# Decrement
-		supabase_client.table("user_credits").update({
-			"credits_remaining": credits_remaining - 1
+		# Decrement and get updated value
+		new_credits = credits_remaining - 1
+		result = supabase_client.table("user_credits").update({
+			"credits_remaining": new_credits
 		}).eq("user_id", user_id).execute()
 		
-		return True
+		print(f"[DEBUG] Decremented credits: {credits_remaining} -> {new_credits}")
+		
+		# Verify the update worked by fetching again
+		verify_result = supabase_client.table("user_credits").select("credits_remaining").eq("user_id", user_id).execute()
+		if verify_result.data and len(verify_result.data) > 0:
+			verified_credits = verify_result.data[0].get("credits_remaining", new_credits)
+			print(f"[DEBUG] Verified credits in DB: {verified_credits}")
+			return verified_credits
+		
+		return new_credits
 	except Exception as e:
 		print(f"[ERROR] Error decrementing user credits: {e}")
-		return True  # Allow on error to not break the app
+		import traceback
+		traceback.print_exc()
+		return -1  # Return -1 on error
 
 
 @app.route("/api/recognize-exercise", methods=["POST"])
@@ -1107,15 +1119,18 @@ def recognize_exercise():
 				
 				# Decrement credits after successful AI call
 				if user_id:
-					decrement_user_credits(user_id)
-					# Get updated credits for response
-					credits_info = get_user_credits(user_id)
+					updated_credits = decrement_user_credits(user_id)
+					if updated_credits < 0:
+						# Error decrementing, get current value
+						credits_info = get_user_credits(user_id)
+						updated_credits = credits_info["credits_remaining"]
+					print(f"[DEBUG] Credits after decrement: {updated_credits}")
 					return jsonify({
 						"exercise": exercise_name,
-						"credits_remaining": credits_info["credits_remaining"]
+						"credits_remaining": updated_credits
 					}), 200
 				
-				return jsonify({"exercise": exercise_name}), 200
+				return jsonify({"exercise": exercise_name, "credits_remaining": 0}), 200
 		
 		print("[DEBUG] No response from OpenAI")
 		return jsonify({"exercise": "unknown exercise"}), 200

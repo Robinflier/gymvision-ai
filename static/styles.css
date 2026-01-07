@@ -794,7 +794,7 @@ body{
 .settings-profile-info{flex:1;display:flex;flex-direction:column;gap:4px}
 .settings-username{color:#fff;font-size:18px;font-weight:700;font-family:'Inter',sans-serif}
 .settings-email{color:rgba(255,255,255,0.8);font-size:14px;font-family:'Inter',sans-serif}
-.settings-stats-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:8px}
+.settings-stats-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-top:8px}
 .settings-stat-box{text-align:center;padding:12px 8px;background:rgba(255,255,255,0.15);border-radius:12px;border:1px solid rgba(255,255,255,0.2)}
 .settings-stat-value{color:#fff;font-size:20px;font-weight:800;font-family:'Inter',sans-serif;margin-bottom:4px}
 .settings-stat-label{color:rgba(255,255,255,0.9);font-size:12px;font-family:'Inter',sans-serif;text-transform:uppercase;letter-spacing:0.5px}

@@ -187,7 +187,7 @@ function isBodyweightExercise(exercise) {
 
 // Helper function to fetch user from backend with Authorization header
 async function getUserCredits() {
-	/**Get user credits from backend."""
+	/**Get user credits from backend.*/
 	try {
 		const session = await supabaseClient.auth.getSession();
 		if (!session.data.session) {
@@ -216,7 +216,7 @@ async function getUserCredits() {
 }
 
 function showCreditsMessage(creditsRemaining) {
-	/**Show credits message briefly during AI detect."""
+	/**Show credits message briefly during AI detect.*/
 	const message = `${creditsRemaining} credit${creditsRemaining !== 1 ? 's' : ''} left this month`;
 	
 	// Create or update credits display
@@ -226,15 +226,18 @@ function showCreditsMessage(creditsRemaining) {
 		creditsDisplay.id = 'ai-credits-display';
 		creditsDisplay.style.cssText = `
 			position: fixed;
-			top: 20px;
-			right: 20px;
-			background: rgba(0, 0, 0, 0.8);
+			top: 50%;
+			left: 50%;
+			transform: translate(-50%, -50%);
+			background: rgba(0, 0, 0, 0.9);
 			color: white;
-			padding: 8px 16px;
-			border-radius: 8px;
-			font-size: 14px;
+			padding: 16px 24px;
+			border-radius: 12px;
+			font-size: 16px;
+			font-weight: 600;
 			z-index: 10000;
 			transition: opacity 0.3s;
+			box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 		`;
 		document.body.appendChild(creditsDisplay);
 	}
@@ -1730,6 +1733,9 @@ function initExerciseSelector() {
 					// Update credits display if provided
 					if (data.credits_remaining !== undefined) {
 						showCreditsMessage(data.credits_remaining);
+						// Update credits in settings tab
+						const creditsEl = document.getElementById('settings-stat-credits');
+						if (creditsEl) creditsEl.textContent = data.credits_remaining.toString();
 					}
 					
 					// Extract exercise name - be VERY lenient, accept anything
@@ -5635,10 +5641,20 @@ async function loadSettings() {
 		const streakEl = document.getElementById('settings-stat-streak');
 		const workoutsEl = document.getElementById('settings-stat-workouts');
 		const hoursEl = document.getElementById('settings-stat-hours');
+		const creditsEl = document.getElementById('settings-stat-credits');
 		
 		if (streakEl) streakEl.textContent = streak.toString();
 		if (workoutsEl) workoutsEl.textContent = workoutCount.toString();
 		if (hoursEl) hoursEl.textContent = totalHours.toString();
+		
+		// Load and display credits
+		try {
+			const creditsInfo = await getUserCredits();
+			if (creditsEl) creditsEl.textContent = creditsInfo.credits_remaining.toString();
+		} catch (e) {
+			console.error('[SETTINGS] Failed to load credits:', e);
+			if (creditsEl) creditsEl.textContent = '10';
+		}
 	} catch (e) {
 		console.error('Failed to calculate stats:', e);
 	}
@@ -6147,6 +6163,9 @@ function openAIDetectChat() {
 				// Update credits display if provided
 				if (data.credits_remaining !== undefined) {
 					showCreditsMessage(data.credits_remaining);
+					// Update credits in settings tab
+					const creditsEl = document.getElementById('settings-stat-credits');
+					if (creditsEl) creditsEl.textContent = data.credits_remaining.toString();
 				}
 				
 				// Remove loading message
@@ -6245,28 +6264,24 @@ function addAIDetectChatMessage(role, text, file, isLoading = false) {
 	
 	const messageId = 'msg-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 	const messageDiv = document.createElement('div');
-	messageDiv.className = `ai-detect-chat-message ai-detect-chat-message-${role}`;
+	messageDiv.className = 'ai-detect-chat-message ai-detect-chat-message-' + role;
 	messageDiv.setAttribute('data-message-id', messageId);
 	
 	if (role === 'user' && file) {
 		// User message with image
 		const reader = new FileReader();
-		reader.onload = (e) => {
-			messageDiv.innerHTML = `
-				<div class="ai-detect-chat-avatar">👤</div>
-				<div class="ai-detect-chat-content">
-					<img src="${e.target.result}" alt="Uploaded photo" class="ai-detect-chat-image" />
-				</div>
-			`;
+		reader.onload = function(e) {
+			messageDiv.innerHTML = '<div class="ai-detect-chat-avatar">👤</div><div class="ai-detect-chat-content"><img src="' + e.target.result + '" alt="Uploaded photo" class="ai-detect-chat-image" /></div>';
 		};
 		reader.readAsDataURL(file);
 	} else if (role === 'bot') {
-		// Bot message - convert markdown ** to bold
-		const formattedText = text ? text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') : '';
-		messageDiv.innerHTML = `
-			<div class="ai-detect-chat-avatar">🤖</div>
-			<div class="ai-detect-chat-text">${isLoading ? '<span class="ai-detect-chat-loading">' + formattedText + '</span>' : formattedText}</div>
-		`;
+		// Bot message - simple text display
+		const displayText = text || '';
+		const textContent = isLoading ? '<span class="ai-detect-chat-loading">' + displayText + '</span>' : displayText;
+		messageDiv.innerHTML = '<div class="ai-detect-chat-avatar">🤖</div><div class="ai-detect-chat-text">' + textContent + '</div>';
+	} else {
+		// User text message (no file)
+		messageDiv.innerHTML = '<div class="ai-detect-chat-avatar">👤</div><div class="ai-detect-chat-text">' + (text || '') + '</div>';
 	}
 	
 	messagesContainer.appendChild(messageDiv);
