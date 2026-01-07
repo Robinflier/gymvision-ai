@@ -990,25 +990,10 @@ def decrement_user_credits(user_id: str) -> int:
 		# Decrement and get updated value
 		new_credits = credits_remaining - 1
 		
-		# Check which column structure the table uses
-		# First try to get the record to see what columns exist
-		check_result = supabase_client.table("user_credits").select("*").eq("user_id", user_id).execute()
-		has_credits_remaining = False
-		if check_result.data and len(check_result.data) > 0:
-			has_credits_remaining = "credits_remaining" in check_result.data[0]
-		
-		# Update based on table structure
-		if has_credits_remaining:
-			update_data = {"credits_remaining": new_credits}
-		else:
-			# Use free_credits_used structure: increment free_credits_used
-			current_free_used = check_result.data[0].get("free_credits_used", 0)
-			update_data = {"free_credits_used": current_free_used + 1}
-			# Calculate new credits for return value
-			paid = check_result.data[0].get("paid_credits", 0)
-			new_credits = 10 - (current_free_used + 1) + paid
-		
-		result = supabase_client.table("user_credits").update(update_data).eq("user_id", user_id).execute()
+		# Update credits_remaining directly
+		result = supabase_client.table("user_credits").update({
+			"credits_remaining": new_credits
+		}).eq("user_id", user_id).execute()
 		
 		print(f"[DEBUG] Decremented credits: {credits_remaining} -> {new_credits}")
 		
