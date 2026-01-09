@@ -3011,7 +3011,7 @@ function renderWorkoutList() {
 				ex.sets.push({ weight: '', reps: '' });
 				renderWorkoutList();
 			});
-			li.appendChild(addSetBtn);
+			setsContainer.appendChild(addSetBtn);
 		}
 		
 		li.appendChild(setsContainer);
