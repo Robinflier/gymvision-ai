@@ -30,6 +30,11 @@ except Exception:
 	Client = None
 
 try:
+	from ultralytics import YOLO  # type: ignore
+except Exception:
+	YOLO = None  # type: ignore
+
+try:
 	from groq import Groq  # type: ignore
 	GROQ_AVAILABLE = True
 except Exception:
@@ -42,6 +47,11 @@ except Exception:
 	OPENAI_AVAILABLE = False
 
 APP_ROOT = Path(__file__).resolve().parent
+MODEL_PATH = APP_ROOT / "best.pt"
+MODEL_PATH_1 = APP_ROOT / "best1.pt"
+MODEL_PATH_2 = APP_ROOT / "best2.pt"
+MODEL_PATH_3 = APP_ROOT / "best3.pt"
+MODEL_PATH_4 = APP_ROOT / "best4.pt"
 DATABASE_PATH = APP_ROOT / "gymvision.db"
 IMAGES_PATHS = [APP_ROOT / "images"]
 PARENT_IMAGES_PATH = APP_ROOT.parent / "images"
@@ -65,7 +75,60 @@ def normalize_label(text: str) -> str:
 	return "".join(ch if ch.isalnum() else "_" for ch in (text or "").lower()).strip("_")
 
 # ========== ML MODELS ==========
-# YOLO models removed - using OpenAI Vision only
+_model_cache = {}
+_model_paths = {
+	"best": MODEL_PATH,
+	"best1": MODEL_PATH_1,
+	"best2": MODEL_PATH_2,
+	"best3": MODEL_PATH_3,
+	"best4": MODEL_PATH_4
+}
+_MAX_MODELS_IN_MEMORY = 2
+
+def _load_model(model_name: str):
+	"""Load a single model if it exists and isn't already loaded."""
+	if YOLO is None:
+		raise RuntimeError("Ultralytics not available")
+	if model_name in _model_cache:
+		return _model_cache[model_name]
+	model_path = _model_paths.get(model_name)
+	if not model_path or not model_path.exists():
+		return None
+	if len(_model_cache) >= _MAX_MODELS_IN_MEMORY:
+		oldest_key = next(iter(_model_cache))
+		del _model_cache[oldest_key]
+		import gc
+		gc.collect()
+	print(f"[INFO] Loading model: {model_name}")
+	_model_cache[model_name] = YOLO(str(model_path))
+	return _model_cache[model_name]
+
+def get_models():
+	"""Get all available models."""
+	models = {}
+	priority_models = ["best", "best3"]
+	for model_name in priority_models:
+		model = _load_model(model_name)
+		if model is not None:
+			models[model_name] = model
+	if len(models) < _MAX_MODELS_IN_MEMORY:
+		for model_name in ["best1", "best2", "best4"]:
+			if len(models) >= _MAX_MODELS_IN_MEMORY:
+				break
+			model = _load_model(model_name)
+			if model is not None:
+				models[model_name] = model
+	if not models:
+		raise FileNotFoundError("No model files found")
+	return (
+		models.get("best"),
+		models.get("best1"),
+		models.get("best2"),
+		models.get("best3"),
+		models.get("best4")
+	)
+
+# YOLO model labels and priorities removed - no longer using YOLO models
 
 app = Flask(
 	__name__,
@@ -91,7 +154,7 @@ login_manager.login_message = "Please log in to access the app."
 
 # Allowed muscle names (lowercase)
 ALLOWED_MUSCLES = {
-	"back", "chest", "shoulders", "biceps", "triceps", "quads", "hamstrings", "calves", "abs", "glutes",
+	"back", "chest", "shoulders", "biceps", "triceps", "quads", "hamstrings", "calves", "abs", "glutes", "cardio",
 }
 
 # Synonym mapping (lowercase) -> allowed name
@@ -143,8 +206,7 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"close_grip_pulldown": {"display": "Close Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/IjoFCmLX7z0", "image": "https://strengthlevel.com/images/illustrations/close-grip-pulldown.png"},
 	"reverse_grip_pulldown": {"display": "Reverse Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/scy-QV06nuA", "image": "/images/reversegrippulldown.jpg"},
 	"straight_arm_pulldown": {"display": "Straight Arm Pulldown", "muscles": normalize_muscles(["Back", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/G9uNaXGTJ4w", "image": "https://strengthlevel.com/images/illustrations/straight-arm-pulldown.png"},
-	"seated_row": {"display": "Seated Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/UCXxvVItLoM", "image": "https://strengthlevel.com/images/illustrations/seated-row.png"},
-	"seated_machine_row": {"display": "Seated Machine Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/TeFo51Q_Nsc", "image": "/images/seatedmachinerow.jpg"},
+"seated_row": {"display": "Seated Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/UCXxvVItLoM", "image": "https://strengthlevel.com/images/illustrations/seated-row.png"},
 	"t_bar_row": {"display": "T-Bar Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/yPis7nlbqdY", "image": "https://strengthlevel.com/images/illustrations/t-bar-row.png"},
 	"chest_supported_t_bar_row": {"display": "Chest Supported T-Bar Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/0UBRfiO4zDs", "image": "/images/chestsupportedtbarrow.jpg"},
 	"bent_over_row": {"display": "Bent Over Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/6FZHJGzMFEc", "image": "https://strengthlevel.com/images/illustrations/bent-over-row.png"},
@@ -210,21 +272,17 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"smith_machine_incline_bench_press": {"display": "Smith Machine Incline Bench Press", "muscles": normalize_muscles(["Chest", "Shoulders", "Triceps"]), "video": "https://www.youtube.com/embed/8urE8Z8AMQ4", "image": "https://strengthlevel.com/images/illustrations/incline-bench-press.png"},
 	"smith_machine_decline_bench_press": {"display": "Smith Machine Decline Bench Press", "muscles": normalize_muscles(["Chest", "Triceps", "Shoulders"]), "video": "https://www.youtube.com/embed/R1Cwq8rJ_bI", "image": "https://strengthlevel.com/images/illustrations/decline-bench-press.png"},
 	"smith_machine_shoulder_press": {"display": "Smith Machine Shoulder Press", "muscles": normalize_muscles(["Shoulders", "Triceps", "-"]), "video": "https://www.youtube.com/embed/OLqZDUUD2b0", "image": "https://strengthlevel.com/images/illustrations/machine-shoulder-press.png"},
-	"smith_machine_step_up": {"display": "Smith Machine Step Up", "muscles": normalize_muscles(["Quads", "Glutes", "-"]), "video": "https://www.youtube.com/embed/qYFlvmFu2wE", "image": "/images/smithmachinestepup.jpg"},
-	"cable_step_up": {"display": "Cable Step Up", "muscles": normalize_muscles(["Quads", "Glutes", "-"]), "video": "https://www.youtube.com/embed/IHIvl5uQzSs", "image": "/images/cablestepup.jpg"},
 	"goblet_squat": {"display": "Goblet Squat", "muscles": normalize_muscles(["Quads", "Glutes", "Hamstrings"]), "video": "https://www.youtube.com/embed/pEGfGwp6IEA", "image": "https://strengthlevel.com/images/illustrations/goblet-squat.png"},
+	"walking_lunges": {"display": "Walking Lunges", "muscles": normalize_muscles(["Quads", "Hamstrings", "Glutes"]), "video": "https://www.youtube.com/embed/eFWCn5iEbTU", "image": "/images/walkinglunges.jpg"},
 
 	# Hamstrings
 	"lying_leg_curl": {"display": "Lying Leg Curl", "muscles": normalize_muscles(["Hamstrings", "Glutes", "-"]), "video": "https://www.youtube.com/embed/SbSNUXPRkc8", "image": "https://strengthlevel.com/images/illustrations/lying-leg-curl.png"},
 	"seated_leg_curl_machine": {"display": "Seated Leg Curl Machine", "muscles": normalize_muscles(["Hamstrings", "Glutes", "-"]), "video": "https://www.youtube.com/embed/Orxowest56U", "image": "https://strengthlevel.com/images/illustrations/seated-leg-curl.png"},
-	"stiff_leg_deadlift": {"display": "Stiff Leg Deadlift", "muscles": normalize_muscles(["Hamstrings", "Glutes", "Back"]), "video": "https://www.youtube.com/embed/CN_7cz3P-1U", "image": "/images/stifflegdeadlift.jpg"},
 	"good_morning": {"display": "Good Morning", "muscles": normalize_muscles(["Hamstrings", "Glutes", "Back"]), "video": "https://www.youtube.com/embed/dEJ0FTm-CEk", "image": "https://strengthlevel.com/images/illustrations/good-morning.png"},
 
 	# Glutes
 	"hip_thrust": {"display": "Hip Thrust", "muscles": normalize_muscles(["Glutes", "Hamstrings", "-"]), "video": "https://www.youtube.com/embed/pUdIL5x0fWg", "image": "https://strengthlevel.com/images/illustrations/hip-thrust.png"},
-	"hip_thrust_machine": {"display": "Hip Thrust Machine", "muscles": normalize_muscles(["Glutes", "Hamstrings", "-"]), "video": "https://www.youtube.com/embed/ZSPmIyX9RZs", "image": "/images/hipthrustmachine.jpg"},
 	"smith_machine_hip_thrust": {"display": "Smith Machine Hip Thrust", "muscles": normalize_muscles(["Glutes", "Hamstrings", "-"]), "video": "https://www.youtube.com/embed/CXGJ36cQyWo", "image": "/images/smithmachinehipthrust.jpg"},
-	"smith_machine_donkey_kick": {"display": "Smith Machine Donkey Kick", "muscles": normalize_muscles(["Glutes", "-", "-"]), "video": "https://www.youtube.com/embed/TptGEG-CcQM", "image": "/images/smithmachinedonkeykick.jpg"},
 	"cable_kickback": {"display": "Cable Kickback", "muscles": normalize_muscles(["Glutes", "Hamstrings", "-"]), "video": "https://www.youtube.com/embed/zjVK1sOqFdw", "image": "https://strengthlevel.com/images/illustrations/cable-kickback.png"},
 	"abductor_machine": {"display": "Abductor Machine", "muscles": normalize_muscles(["Glutes", "-", "-"]), "video": "https://www.youtube.com/embed/G_8LItOiZ0Q", "image": "https://strengthlevel.com/images/illustrations/hip-abduction.png"},
 	"adductor_machine": {"display": "Adductor Machine", "muscles": normalize_muscles(["Glutes", "-", "-"]), "video": "https://www.youtube.com/embed/CjAVezAggkI", "image": "https://strengthlevel.com/images/illustrations/hip-adduction.png"},
@@ -245,6 +303,15 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"russian_twist": {"display": "Russian Twist", "muscles": normalize_muscles(["Abs", "Back", "-"]), "video": "https://www.youtube.com/embed/99T1EfpMwPA", "image": "https://strengthlevel.com/images/illustrations/russian-twist.png"},
 	"rotary_torso_machine": {"display": "Rotary Torso Machine", "muscles": normalize_muscles(["Abs", "Back", "-"]), "video": "https://www.youtube.com/embed/h5naeryzGjE", "image": "https://strengthlevel.com/images/illustrations/rotary-torso.png"},
 	"ab_crunch_machine": {"display": "Ab Crunch Machine", "muscles": normalize_muscles(["Abs", "-", "-"]), "video": "https://www.youtube.com/embed/fuPFq2EYswE", "image": "/images/abcrunchmachine.jpg"},
+	
+	# Cardio
+	"running": {"display": "Running", "muscles": normalize_muscles(["Cardio", "-", "-"]), "video": "https://www.youtube.com/embed/_kGESn8ArrU", "image": "/images/running.jpg"},
+	"walking": {"display": "Walking", "muscles": normalize_muscles(["Cardio", "-", "-"]), "video": "https://www.youtube.com/embed/786B8jCL4lw", "image": "/images/walking.jpg"},
+	"stairmaster": {"display": "Stairmaster", "muscles": normalize_muscles(["Cardio", "-", "-"]), "video": "https://www.youtube.com/embed/V2EQYdMw4Do", "image": "/images/stairmaster.jpg"},
+	"rowing_machine": {"display": "Rowing Machine", "muscles": normalize_muscles(["Cardio", "-", "-"]), "video": "https://www.youtube.com/embed/6_eLpWiNijE", "image": "/images/rowingmachine.jpg"},
+	"hometrainer": {"display": "Hometrainer", "muscles": normalize_muscles(["Cardio", "-", "-"]), "video": "https://www.youtube.com/embed/UbwHzt9U9vM", "image": "/images/hometrainer.jpg"},
+	"elliptical_machine": {"display": "Elliptical Machine", "muscles": normalize_muscles(["Cardio", "-", "-"]), "video": "https://www.youtube.com/embed/j38LNpTLwzY", "image": "/images/ellipticalmachine.jpg"},
+	
 	# Generic detections (for display purposes only)
 	"chinning_dipping": {"display": "Chinning Dipping", "muscles": [], "video": "", "image": ""},
 	"leg_raise_tower": {"display": "Leg Raise Tower", "muscles": [], "video": "", "image": ""},
@@ -284,7 +351,6 @@ ALIASES: Dict[str, str] = {
 	"pull_up": "pull_up",
 	"chin_up": "chin_up",
 	"seated_row": "seated_row",
-	"seated_machine_row": "seated_machine_row",
 	"t_bar_row": "t_bar_row",
 	"bent_over_row": "bent_over_row",
 	"one_arm_dumbbell_row": "one_arm_dumbbell_row",
@@ -293,8 +359,6 @@ ALIASES: Dict[str, str] = {
 	"deadlift": "deadlift",
 	"romanian_deadlift": "romanian_deadlift",
 	"sumo_deadlift": "sumo_deadlift",
-	"stiff_leg_deadlift": "stiff_leg_deadlift",
-	"stiff_legged_deadlift": "stiff_leg_deadlift",
 
 	# Shoulders
 	"shoulder_press_machine": "shoulder_press_machine",
@@ -360,8 +424,6 @@ ALIASES: Dict[str, str] = {
 	"smith_machine_flat_bench_press": "smith_machine_bench_press",
 	"smith_machine_incline_bench_press": "smith_machine_incline_bench_press",
 	"smith_machine_decline_bench_press": "smith_machine_decline_bench_press",
-	"smith_machine_step_up": "smith_machine_step_up",
-	"cable_step_up": "cable_step_up",
 	"goblet_squat": "goblet_squat",
 
 	# Hamstrings
@@ -376,8 +438,6 @@ ALIASES: Dict[str, str] = {
 	"hip_thrust": "hip_thrust",
 	"hip_thruster": "hip_thrust",
 	"hip_truster": "hip_thrust",
-	"hip_thrust_machine": "hip_thrust_machine",
-	"smith_machine_donkey_kick": "smith_machine_donkey_kick",
 	"cable_kickback": "cable_kickback",
 	"hip_abductor_machine": "abductor_machine",
 	"hip_abductor": "abductor_machine",
@@ -804,7 +864,130 @@ def _serialize_prediction_choice(pred: Dict[str, Any]) -> Dict[str, Any]:
 		"confidence": pred.get("conf", 0.0),
 	}
 
-# /predict endpoint removed - using OpenAI Vision only via /api/recognize-exercise
+@app.route("/predict", methods=["POST"])
+def predict():
+	"""YOLO prediction endpoint - uses local best.pt models."""
+	file = request.files.get("image")
+	if not file:
+		return jsonify({"error": "No image provided"}), 400
+	tmp_dir = APP_ROOT / "tmp"
+	tmp_dir.mkdir(exist_ok=True)
+	tmp_path = tmp_dir / "upload.jpg"
+	try:
+		file.save(str(tmp_path))
+	except Exception as e:
+		return jsonify({"error": f"Failed to save image: {str(e)}"}), 500
+	if not tmp_path.exists() or tmp_path.stat().st_size == 0:
+		return jsonify({"error": "Image file is empty"}), 400
+	try:
+		model, model1, model2, model3, model4 = get_models()
+	except Exception as e:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"error": "Models not available"}), 500
+	models_loaded = sum(1 for m in [model, model1, model2, model3, model4] if m is not None)
+	if models_loaded == 0:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"error": "No models available"}), 500
+	predictions = []
+	def get_model_predictions(model_obj, model_name, max_predictions=3):
+		model_preds = []
+		try:
+			if not tmp_path.exists():
+				return model_preds
+			results = model_obj.predict(source=str(tmp_path), verbose=False)
+			if not results or len(results) == 0:
+				return model_preds
+			best = results[0]
+			if hasattr(best, "probs") and best.probs is not None:
+				probs = best.probs.data
+				top_indices = probs.topk(min(max_predictions, len(best.names))).indices.tolist()
+				top_confs = probs.topk(min(max_predictions, len(best.names))).values.tolist()
+				for idx, conf in zip(top_indices, top_confs):
+					label = best.names[int(idx)]
+					norm = normalize_label(label)
+					key = ALIASES.get(norm, norm)
+					model_preds.append({"label": label, "conf": float(conf), "key": key, "source": model_name})
+			elif hasattr(best, "boxes") and len(best.boxes) > 0:
+				confidences = best.boxes.conf.tolist()
+				classes = best.boxes.cls.tolist()
+				box_predictions = []
+				for i, (conf, cls_idx) in enumerate(zip(confidences, classes)):
+					label = best.names[int(cls_idx)]
+					norm = normalize_label(label)
+					key = ALIASES.get(norm, norm)
+					box_predictions.append({"label": label, "conf": float(conf), "key": key, "source": model_name, "index": i})
+				box_predictions.sort(key=lambda x: x["conf"], reverse=True)
+				seen_keys = set()
+				for pred in box_predictions:
+					if pred["key"] not in seen_keys:
+						model_preds.append(pred)
+						seen_keys.add(pred["key"])
+						if len(model_preds) >= max_predictions:
+							break
+		except Exception as e:
+			print(f"[ERROR] Model {model_name} prediction failed: {e}")
+		return model_preds
+	if model:
+		predictions.extend(get_model_predictions(model, "best"))
+	if model1:
+		predictions.extend(get_model_predictions(model1, "best1"))
+	if model2:
+		predictions.extend(get_model_predictions(model2, "best2"))
+	if model3:
+		predictions.extend(get_model_predictions(model3, "best3"))
+	if model4:
+		predictions.extend(get_model_predictions(model4, "best4"))
+	if not predictions:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+	excluded_keys = {normalize_label("Kettlebells"), normalize_label("Assisted Chin Up-Dip")}
+	predictions = [p for p in predictions if p.get("key") not in excluded_keys]
+	if not predictions:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+	grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+	for pred in predictions:
+		grouped[pred["key"]].append(pred)
+	label_candidates: List[Dict[str, Any]] = []
+	for key, preds_for_label in grouped.items():
+		sorted_preds = sorted(preds_for_label, key=lambda p: p["conf"], reverse=True)
+		label_candidates.append(sorted_preds[0])
+	sorted_predictions = sorted(label_candidates, key=lambda p: p["conf"], reverse=True)[:3]
+	if not sorted_predictions:
+		try:
+			os.remove(str(tmp_path))
+		except Exception:
+			pass
+		return jsonify({"success": False, "error": "NO_PREDICTION"}), 422
+	top_payloads = [_serialize_prediction_choice(pred) for pred in sorted_predictions]
+	primary_payload = top_payloads[0]
+	try:
+		os.remove(str(tmp_path))
+	except Exception:
+		pass
+	return jsonify({
+		"success": True,
+		"label": primary_payload["label"],
+		"confidence": primary_payload["confidence"],
+		"display": primary_payload["display"],
+		"muscles": primary_payload["muscles"],
+		"video": primary_payload["video"],
+		"key": primary_payload["key"],
+		"image": primary_payload.get("image"),
+		"top_predictions": top_payloads,
+	})
 
 @app.route("/api/vision-detect", methods=["POST"])
 def vision_detect():
@@ -894,165 +1077,15 @@ def vision_detect():
 # /predict endpoint removed - now using /api/vision-detect with OpenAI Vision
 
 
-def get_user_credits(user_id: str) -> dict:
-	"""Get user credits from Supabase, reset if new month."""
-	if not SUPABASE_AVAILABLE:
-		return {"credits_remaining": 10, "last_reset_month": None}
-	
-	SUPABASE_URL = os.getenv("SUPABASE_URL")
-	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-	
-	if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-		return {"credits_remaining": 10, "last_reset_month": None}
-	
-	try:
-		supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-		
-		# Get current month
-		now = datetime.now()
-		current_month = f"{now.year}-{now.month:02d}"
-		
-		# Check if user has credits record
-		credits_data = supabase_client.table("user_credits").select("*").eq("user_id", user_id).execute()
-		
-		if credits_data.data and len(credits_data.data) > 0:
-			record = credits_data.data[0]
-			last_reset_month = record.get("last_reset_month")
-			
-			# Calculate credits_remaining from existing structure if needed
-			if "credits_remaining" in record:
-				credits_remaining = record.get("credits_remaining", 10)
-			else:
-				# Fallback: calculate from free_credits_used and paid_credits
-				free_used = record.get("free_credits_used", 0)
-				paid = record.get("paid_credits", 0)
-				credits_remaining = 10 - free_used + paid
-			
-			# Reset if new month
-			if last_reset_month != current_month:
-				update_data = {
-					"last_reset_month": current_month
-				}
-				# Update credits_remaining if column exists, otherwise update free_credits_used
-				if "credits_remaining" in record:
-					update_data["credits_remaining"] = 10
-				else:
-					update_data["free_credits_used"] = 0
-				
-				supabase_client.table("user_credits").update(update_data).eq("user_id", user_id).execute()
-				return {"credits_remaining": 10, "last_reset_month": current_month}
-			else:
-				return {
-					"credits_remaining": credits_remaining,
-					"last_reset_month": last_reset_month
-				}
-		else:
-			# Create new record - try credits_remaining first, fallback to free_credits_used
-			insert_data = {
-				"user_id": user_id,
-				"last_reset_month": current_month
-			}
-			# Check if credits_remaining column exists by trying to insert it
-			try:
-				insert_data["credits_remaining"] = 10
-			except:
-				insert_data["free_credits_used"] = 0
-				insert_data["paid_credits"] = 0
-			
-			supabase_client.table("user_credits").insert(insert_data).execute()
-			return {"credits_remaining": 10, "last_reset_month": current_month}
-	except Exception as e:
-		print(f"[ERROR] Error getting user credits: {e}")
-		return {"credits_remaining": 10, "last_reset_month": None}
-
-
-def decrement_user_credits(user_id: str) -> int:
-	"""Decrement user credits by 1. Returns new credits_remaining value, or -1 if error."""
-	if not SUPABASE_AVAILABLE:
-		return 10  # Default if Supabase not available
-	
-	SUPABASE_URL = os.getenv("SUPABASE_URL")
-	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-	
-	if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-		return 10  # Default if Supabase not configured
-	
-	try:
-		supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-		
-		# Get current credits
-		credits_info = get_user_credits(user_id)
-		credits_remaining = credits_info["credits_remaining"]
-		
-		if credits_remaining <= 0:
-			return 0
-		
-		# Decrement and get updated value
-		new_credits = credits_remaining - 1
-		
-		# Update credits_remaining directly
-		result = supabase_client.table("user_credits").update({
-			"credits_remaining": new_credits
-		}).eq("user_id", user_id).execute()
-		
-		print(f"[DEBUG] Decremented credits: {credits_remaining} -> {new_credits}")
-		
-		# Verify the update worked by fetching again
-		verify_result = supabase_client.table("user_credits").select("credits_remaining").eq("user_id", user_id).execute()
-		if verify_result.data and len(verify_result.data) > 0:
-			verified_credits = verify_result.data[0].get("credits_remaining", new_credits)
-			print(f"[DEBUG] Verified credits in DB: {verified_credits}")
-			return verified_credits
-		
-		return new_credits
-	except Exception as e:
-		print(f"[ERROR] Error decrementing user credits: {e}")
-		import traceback
-		traceback.print_exc()
-		# If table doesn't exist, return current credits (don't decrement)
-		if "Could not find" in str(e) or "PGRST204" in str(e):
-			print("[ERROR] user_credits table does not exist! Please run create_credits_table.sql in Supabase SQL Editor.")
-			credits_info = get_user_credits(user_id)
-			return credits_info.get("credits_remaining", 10)
-		return -1  # Return -1 on error
-
-
 @app.route("/api/recognize-exercise", methods=["POST"])
 def recognize_exercise():
 	"""
 	Exercise recognition endpoint: image → exercise name.
-	Checks user credits before processing.
+	Same pattern as vision-detect - just call OpenAI Vision directly.
 	"""
 	import base64
 	
 	try:
-		# Check authentication and credits
-		access_token = request.headers.get("Authorization", "").replace("Bearer ", "")
-		user_id = None
-		
-		if access_token and SUPABASE_AVAILABLE:
-			try:
-				SUPABASE_URL = os.getenv("SUPABASE_URL")
-				SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-				if SUPABASE_URL and SUPABASE_KEY:
-					supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-					user_response = supabase_client.auth.get_user(access_token)
-					if user_response.user:
-						user_id = user_response.user.id
-			except Exception as e:
-				print(f"[DEBUG] Could not verify user token: {e}")
-		
-		# Check credits if user is authenticated
-		if user_id:
-			credits_info = get_user_credits(user_id)
-			credits_remaining = credits_info["credits_remaining"]
-			
-			if credits_remaining <= 0:
-				return jsonify({
-					"error": "no_credits",
-					"message": "You have no credits left this month. Credits reset on the 1st of each month."
-				}), 403
-		
 		if not OPENAI_AVAILABLE:
 			return jsonify({"exercise": "unknown exercise"}), 200
 		
@@ -1145,21 +1178,7 @@ def recognize_exercise():
 					pass
 				
 				print(f"[DEBUG] Final exercise: '{exercise_name}'")
-				
-				# Decrement credits after successful AI call
-				if user_id:
-					updated_credits = decrement_user_credits(user_id)
-					if updated_credits < 0:
-						# Error decrementing, get current value
-						credits_info = get_user_credits(user_id)
-						updated_credits = credits_info["credits_remaining"]
-					print(f"[DEBUG] Credits after decrement: {updated_credits}")
-					return jsonify({
-						"exercise": exercise_name,
-						"credits_remaining": updated_credits
-					}), 200
-				
-				return jsonify({"exercise": exercise_name, "credits_remaining": 0}), 200
+				return jsonify({"exercise": exercise_name}), 200
 		
 		print("[DEBUG] No response from OpenAI")
 		return jsonify({"exercise": "unknown exercise"}), 200
@@ -1169,41 +1188,6 @@ def recognize_exercise():
 		import traceback
 		traceback.print_exc()
 		return jsonify({"exercise": "unknown exercise"}), 200
-
-
-@app.route("/api/user-credits", methods=["GET"])
-def get_user_credits_endpoint():
-	"""Get current user's credits."""
-	access_token = request.headers.get("Authorization", "").replace("Bearer ", "")
-	if not access_token:
-		return jsonify({"error": "Authentication required"}), 401
-	
-	if not SUPABASE_AVAILABLE:
-		return jsonify({"credits_remaining": 10, "last_reset_month": None}), 200
-	
-	SUPABASE_URL = os.getenv("SUPABASE_URL")
-	SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_ANON_KEY")
-	
-	if not SUPABASE_URL or not SUPABASE_KEY:
-		return jsonify({"credits_remaining": 10, "last_reset_month": None}), 200
-	
-	try:
-		supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-		user_response = supabase_client.auth.get_user(access_token)
-		
-		if not user_response.user:
-			return jsonify({"error": "Invalid token"}), 401
-		
-		user_id = user_response.user.id
-		credits_info = get_user_credits(user_id)
-		
-		return jsonify({
-			"credits_remaining": credits_info["credits_remaining"],
-			"last_reset_month": credits_info["last_reset_month"]
-		}), 200
-	except Exception as e:
-		print(f"[ERROR] Error getting user credits: {e}")
-		return jsonify({"credits_remaining": 10, "last_reset_month": None}), 200
 
 
 @app.route("/health", methods=["GET"])

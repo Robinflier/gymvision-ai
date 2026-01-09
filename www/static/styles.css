@@ -60,13 +60,14 @@ body{
 /* Topbar */
 .topbar{
 	display:flex;align-items:center;justify-content:space-between;
-	padding:22px 22px 8px;
+	padding:27px 22px 10px;
 	background:transparent;
 }
 .brand{font-weight:700;font-size:20px;letter-spacing:.2px}
-.brand-logo img{height:104px;width:auto;display:block;filter:brightness(0) invert(1);margin-left:8px;margin-top:2px}
+.brand-logo{overflow:hidden;height:83px;display:flex;align-items:flex-start}
+.brand-logo img{height:104px;width:auto;display:block;filter:brightness(0) invert(1);margin-left:8px;margin-top:2px;transform:translateY(0)}
 .icons{opacity:.9}
-.streak{display:flex;flex-direction:column;align-items:center;gap:0px}
+.streak{display:flex;flex-direction:column;align-items:center;gap:0px;margin-top:20px}
 .streak-img{height:40px;width:auto;display:block}
 .streak-count{color:#fff;font-weight:800;font-size:12px;line-height:1;margin-top:-4px}
 
@@ -381,7 +382,7 @@ body{
 	width:28px;
 	height:28px;
 	padding:0;
-	border-radius:50%;
+	border-radius:8px;
 	box-shadow:0 4px 12px rgba(0,0,0,0.35);
 }
 .workout-view-sets{display:flex;flex-direction:column;gap:4px;margin-top:12px}
@@ -394,8 +395,13 @@ body{
 .workout-list .workout-exercise-delete-btn{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:8px;padding:4px 8px;font-size:14px;font-weight:600;cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin:0}
 .workout-edit-exercise-header{position:relative;display:flex;align-items:flex-start;gap:12px;margin-bottom:8px;justify-content:space-between;padding-right:0}
 .workout-edit-exercise-header .workout-exercise-name{flex:1;min-width:0;word-wrap:break-word;overflow-wrap:break-word;font-weight:700;font-size:15px;color:#dfe0e6;line-height:1.3}
-.workout-edit-exercise-header .workout-exercise-actions{position:static;display:flex !important;gap:6px;align-items:center;justify-content:flex-end;flex-shrink:0}
-.workout-list .workout-exercise-edit-btn{background:rgba(124,92,255,0.15);border:1px solid rgba(124,92,255,0.3);color:#7c5cff;border-radius:8px;padding:0;font-size:11px;font-weight:600;cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center}
+.workout-edit-exercise-header .workout-exercise-actions{position:static;display:flex !important;gap:4px;align-items:center;justify-content:flex-end;flex-shrink:0}
+.workout-list .workout-exercise-edit-btn{background:rgba(124,92,255,0.15);border:1px solid rgba(124,92,255,0.3);color:#7c5cff;border-radius:8px;padding:0;font-size:11px;font-weight:600;cursor:pointer;width:24px;height:24px;display:flex;align-items:center;justify-content:center}
+.workout-exercise-notes-btn{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.16);color:#fff;border-radius:8px;padding:0;cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s}
+.workout-exercise-notes-btn:hover{background:rgba(255,255,255,0.1)}
+.workout-exercise-notes-btn.has-notes{background:rgba(124,92,255,0.25);border-color:rgba(124,92,255,0.4);color:#7c5cff}
+.workout-exercise-notes-btn.has-notes:hover{background:rgba(124,92,255,0.35)}
+.workout-exercise-notes-btn svg{width:14px;height:14px;stroke:currentColor}
 .workout-list .workout-exercise-edit-btn:hover{background:rgba(124,92,255,0.25)}
 .workout-rest-timer-btn{background:rgba(124,92,255,0.15);border:1px solid rgba(124,92,255,0.3);color:#7c5cff;border-radius:8px;padding:4px 4px;font-size:10px;font-weight:700;cursor:pointer;transition:background .2s;flex-shrink:0;width:50px;height:28px;display:flex;align-items:center;justify-content:space-between;gap:3px}
 .workout-rest-timer-btn:hover{background:rgba(124,92,255,0.25)}
@@ -521,7 +527,7 @@ body{
 .exercise-info-btn{
 	width:28px;
 	height:28px;
-	border-radius:50%;
+	border-radius:8px;
 	border:1px solid rgba(255,255,255,0.16);
 	background:rgba(255,255,255,0.05);
 	color:#fff;
@@ -540,6 +546,8 @@ body{
 	display:block;
 	filter:invert(1);
 }
+.workout-edit-exercise-delete{width:28px;height:28px}
+.workout-edit-exercise-delete img{width:14px;height:14px}
 .exercise-info-btn:hover,
 .exercise-info-btn:focus-visible{
 	background:rgba(124,92,255,0.2);
@@ -566,12 +574,15 @@ body{
 .workout-quick-add-suggestion{padding:10px;font-weight:600;color:#dfe0e6;cursor:pointer}
 .workout-quick-add-suggestion:hover{background:#292933}
 .workout-edit-exercise-name{background:#0f0f12;color:#fff;border:1px solid #2b2b34;border-radius:8px;padding:6px 10px;font-weight:700;font-size:13px;word-wrap:break-word;overflow-wrap:break-word}
-.workout-edit-exercise-delete{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:8px;padding:0;cursor:pointer;width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin:0}
+.workout-edit-exercise-delete{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:8px;padding:0;cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin:0}
 .workout-edit-exercise-delete img{width:14px;height:14px;display:block;filter:invert(1)}
-.workout-edit-exercise-header .workout-edit-exercise-delete{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:8px;padding:0;cursor:pointer;width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin:0}
+.workout-edit-exercise-header .workout-edit-exercise-delete{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:8px;padding:0;cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin:0}
 .workout-edit-sets{display:flex;flex-direction:column;gap:2px;margin-top:6px}
 .workout-edit-set-row{display:grid;grid-template-columns:56px 0.9fr 1fr 36px;align-items:center;gap:10px;padding:2px 0}
 .workout-edit-sets.bodyweight .workout-edit-set-row{grid-template-columns:56px 1fr 36px}
+.workout-edit-sets.cardio .workout-edit-set-row{grid-template-columns:56px 0.9fr 1.5fr 36px}
+.workout-edit-sets.cardio .min-col,
+.workout-edit-sets.cardio .notes-col{text-align:center}
 .workout-edit-set-row.data{border-radius:0;padding:6px 12px;margin:0 -12px}
 .workout-edit-set-row.data.even{background:rgba(255,255,255,0.03)}
 .workout-edit-sets.view-mode{margin-top:10px}
@@ -738,8 +749,66 @@ body{
 .progress-muscle-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--sub);font-size:14px;font-weight:600;pointer-events:none}
 
 .progress-exercise-insights-card{padding:22px 22px 6px;display:flex;flex-direction:column;gap:20px;margin-top:8px}
+.progress-heatmap-card{padding:22px 22px 26px;display:flex;flex-direction:column;gap:18px;margin-top:8px}
+.progress-heatmap-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.progress-heatmap-header h3{margin:0;font-size:18px;font-weight:700;color:#fff;flex:1;text-align:center}
+.progress-heatmap-nav-btn{background:#2a2a33;border:1px solid #3a3a45;border-radius:8px;color:#fff;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;font-weight:600;transition:background 0.2s}
+.progress-heatmap-nav-btn:hover{background:#32323d}
+.progress-heatmap-nav-btn:active{transform:scale(0.95)}
+.progress-heatmap-weekdays{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:8px}
+.heatmap-weekday{text-align:center;font-size:11px;font-weight:600;color:var(--sub);padding:4px 0}
+.progress-heatmap-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.progress-heatmap-week-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;padding:0;justify-items:center;width:100%;overflow:hidden}
+.heatmap-day-week{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:2px 8px;border-radius:12px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;position:relative;min-height:45px}
+.heatmap-day-week:hover{transform:scale(1.05);z-index:1}
+.heatmap-day-label{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;background:transparent;border:2px solid #2a2a2f;transition:all 0.2s}
+.heatmap-date-label{font-size:15px;font-weight:700;color:#fff;transition:color 0.2s}
+.heatmap-day-week .heatmap-day-label{color:#a6a7ab;border-color:#2a2a2f}
+.heatmap-day-week .heatmap-date-label{color:#a6a7ab}
+.heatmap-day-week.has-sets .heatmap-day-label{border-color:#7c5cff;color:#7c5cff;opacity:1!important}
+.heatmap-day-week.has-sets:not(.today) .heatmap-date-label{color:#a6a7ab;opacity:1!important}
+.heatmap-day-week.today .heatmap-date-label{color:#a6a7ab}
+.heatmap-day-week.past:not(.has-sets) .heatmap-day-label{opacity:0.6}
+.heatmap-day-week.past:not(.has-sets) .heatmap-date-label{opacity:0.6;color:#a6a7ab}
+.heatmap-day-week.future:not(.has-sets) .heatmap-day-label{opacity:0.4}
+.heatmap-day-week.future:not(.has-sets) .heatmap-date-label{opacity:0.4;color:#a6a7ab}
+.heatmap-day{aspect-ratio:1;border-radius:4px;background:#1a1a1d;border:1px solid #2a2a2f;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;position:relative}
+.heatmap-day.empty{background:transparent;border:none;cursor:default}
+.heatmap-day:hover:not(.empty){transform:scale(1.1);z-index:1;box-shadow:0 4px 12px rgba(124,92,255,0.3)}
+.heatmap-day.intensity-0{background:#1a1a1d;border-color:#2a2a2f}
+.heatmap-day.intensity-1{background:#1e3a5f;border-color:#2a4a6f}
+.heatmap-day.intensity-2{background:#2a5a8f;border-color:#3a6a9f}
+.heatmap-day.intensity-3{background:#3a7abf;border-color:#4a8acf}
+.heatmap-day.intensity-4{background:#4a9aef;border-color:#5aaaff}
+.progress-heatmap-legend{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid #2a2a2f}
+.heatmap-legend-label{font-size:11px;color:var(--sub);font-weight:600}
+.heatmap-legend-colors{display:flex;gap:4px}
+.heatmap-legend-color{width:12px;height:12px;border-radius:3px;border:1px solid #2a2a2f}
+.heatmap-legend-color[data-level="0"]{background:#1a1a1d;border-color:#2a2a2f}
+.heatmap-legend-color[data-level="1"]{background:#1e3a5f;border-color:#2a4a6f}
+.heatmap-legend-color[data-level="2"]{background:#2a5a8f;border-color:#3a6a9f}
+.heatmap-legend-color[data-level="3"]{background:#3a7abf;border-color:#4a8acf}
+.heatmap-legend-color[data-level="4"]{background:#4a9aef;border-color:#5aaaff}
 .progress-exercise-insights-card .progress-pr-header h3{margin:0;font-size:18px;font-weight:700;color:#fff}
 .progress-exercise-insights-card .progress-pr-header p{display:none}
+
+/* Monthly Heatmap Styles */
+.progress-heatmap-monthly-card{padding:22px 22px 26px;display:flex;flex-direction:column;gap:18px;margin-top:8px}
+.progress-heatmap-monthly-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.progress-heatmap-monthly-header h3{margin:0;font-size:18px;font-weight:700;color:#fff;flex:1;text-align:center}
+.progress-heatmap-nav-btn{background:#2a2a33;border:1px solid #3a3a45;border-radius:8px;color:#fff;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;font-weight:600;transition:background 0.2s}
+.progress-heatmap-nav-btn:hover{background:#32323d}
+.progress-heatmap-nav-btn:active{transform:scale(0.95)}
+.progress-heatmap-monthly-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.heatmap-day-month{aspect-ratio:1;border-radius:4px;background:#1a1a1d;border:1px solid #2a2a2f;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;position:relative;display:flex;align-items:center;justify-content:center;min-height:32px}
+.heatmap-day-month.empty{background:transparent;border:none;cursor:default}
+.heatmap-day-month:hover:not(.empty){transform:scale(1.1);z-index:1;box-shadow:0 4px 12px rgba(124,92,255,0.3)}
+.heatmap-day-month.has-sets{background:#7c5cff;border-color:#7c5cff}
+.heatmap-day-month.has-sets:hover{box-shadow:0 4px 12px rgba(124,92,255,0.5)}
+.heatmap-date-label-month{font-size:12px;font-weight:600;color:#a6a7ab}
+.heatmap-day-month.has-sets .heatmap-date-label-month{color:#fff}
+.heatmap-day-month.past:not(.has-sets){opacity:0.6}
+.heatmap-day-month.future:not(.has-sets){opacity:0.4}
 .progress-pr-selector{display:flex;flex-direction:column;gap:4px;margin-top:0}
 .progress-pr-select-btn{width:100%;background:linear-gradient(135deg,#7c5cff 0%,#5b42ff 100%);border:none;box-shadow:0 4px 12px rgba(124,92,255,0.3);transition:all 0.2s}
 .progress-pr-select-btn:hover{box-shadow:0 6px 16px rgba(124,92,255,0.4);transform:translateY(-1px)}
@@ -1330,6 +1399,23 @@ body.ai-detect-chat-open {
 	display: none;
 }
 
+/* Exercise Notes Modal */
+.exercise-notes-modal{position:fixed;top:0;left:0;right:0;bottom:0;z-index:20001;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.exercise-notes-modal.hidden{display:none}
+.exercise-notes-backdrop{position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);backdrop-filter:blur(10px);pointer-events:auto}
+.exercise-notes-container{position:relative;background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.1);border-radius:20px;width:90%;max-width:500px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 25px 60px rgba(0,0,0,0.5);pointer-events:auto;overflow:hidden}
+.exercise-notes-header{display:flex;align-items:center;justify-content:space-between;padding:20px 22px;border-bottom:1px solid rgba(255,255,255,0.1)}
+.exercise-notes-title{font-size:18px;font-weight:700;color:#fff;margin:0}
+.exercise-notes-close{background:transparent;border:none;color:#a6a7ab;font-size:28px;line-height:1;cursor:pointer;padding:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;transition:background 0.2s}
+.exercise-notes-close:hover{background:rgba(255,255,255,0.1);color:#fff}
+.exercise-notes-content{flex:1;padding:20px 22px;overflow-y:auto}
+.exercise-notes-textarea{width:100%;min-height:200px;background:#0f0f10;border:1px solid #2a2a2f;border-radius:12px;padding:16px;color:#fff;font-size:15px;font-family:Inter,system-ui,-apple-system,sans-serif;resize:vertical;outline:none;transition:border-color 0.2s;box-sizing:border-box}
+.exercise-notes-textarea:focus{border-color:#7c5cff}
+.exercise-notes-textarea::placeholder{color:#6a6a6f}
+.exercise-notes-footer{padding:16px 22px;border-top:1px solid rgba(255,255,255,0.1);display:flex;justify-content:flex-end;gap:12px}
+.exercise-notes-footer .btn{min-width:100px}
+.exercise-notes-footer .btn.primary{background:var(--accent);border-color:transparent;color:#fff}
+
 .rest-timer-container {
 	background: linear-gradient(135deg, #18181d, #121215);
 	border: 1px solid rgba(255, 255, 255, 0.1);
@@ -1393,7 +1479,13 @@ body.ai-detect-chat-open {
 
 .rest-timer-controls {
 	display: flex;
+	flex-direction: column;
 	gap: 12px;
+}
+
+.rest-timer-adjust-buttons {
+	display: flex;
+	gap: 8px;
 }
 
 .rest-timer-btn {
@@ -1418,6 +1510,32 @@ body.ai-detect-chat-open {
 }
 
 .rest-timer-btn:active {
+	transform: translateY(0);
+}
+
+.rest-timer-btn-small {
+	flex: 1;
+	padding: 10px 16px;
+	border: none;
+	border-radius: 10px;
+	font-size: 13px;
+	font-weight: 600;
+	cursor: pointer;
+	font-family: 'Inter', sans-serif;
+	transition: transform 0.15s ease, box-shadow 0.15s ease;
+	background: #2a2a33;
+	border: 1px solid #3a3a45;
+	color: #fff;
+	box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.rest-timer-btn-small:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+	background: #32323d;
+}
+
+.rest-timer-btn-small:active {
 	transform: translateY(0);
 }
 

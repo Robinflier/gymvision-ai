@@ -215,6 +215,47 @@ async function getUserCredits() {
 	return { credits_remaining: 10, last_reset_month: null };
 }
 
+// Update AI detect buttons based on credits
+async function updateAIDetectButtons() {
+	/**Disable AI detect buttons if user has no credits.*/
+	try {
+		const creditsInfo = await getUserCredits();
+		const aiDetectBtn = document.getElementById('exercise-selector-ai-detect');
+		const aiDetectChatFile = document.getElementById('ai-detect-chat-file');
+		const aiDetectChatFileLabel = document.querySelector('.ai-detect-chat-file-label');
+		
+		const hasNoCredits = creditsInfo.credits_remaining <= 0;
+		
+		// Disable/enable main AI detect button
+		if (aiDetectBtn) {
+			aiDetectBtn.disabled = hasNoCredits;
+			if (hasNoCredits) {
+				aiDetectBtn.style.opacity = '0.5';
+				aiDetectBtn.style.cursor = 'not-allowed';
+			} else {
+				aiDetectBtn.style.opacity = '1';
+				aiDetectBtn.style.cursor = 'pointer';
+			}
+		}
+		
+		// Disable/enable AI detect chat file input
+		if (aiDetectChatFile) {
+			aiDetectChatFile.disabled = hasNoCredits;
+		}
+		if (aiDetectChatFileLabel) {
+			if (hasNoCredits) {
+				aiDetectChatFileLabel.style.opacity = '0.5';
+				aiDetectChatFileLabel.style.cursor = 'not-allowed';
+			} else {
+				aiDetectChatFileLabel.style.opacity = '1';
+				aiDetectChatFileLabel.style.cursor = 'pointer';
+			}
+		}
+	} catch (e) {
+		console.error('[CREDITS] Error updating AI detect buttons:', e);
+	}
+}
+
 function showCreditsMessage(creditsRemaining) {
 	/**Show credits message briefly during AI detect.*/
 	const message = `${creditsRemaining} credit${creditsRemaining !== 1 ? 's' : ''} left this month`;
@@ -442,6 +483,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 	initWorkoutBuilder();
 	initProgress();
 	initSettings();
+	
+	// Update AI detect buttons based on credits
+	updateAIDetectButtons();
 		initRestTimer();
 	initVision();
 		initExerciseVideoModal();
@@ -1659,7 +1703,12 @@ function initExerciseSelector() {
 	if (aiDetectBtn) {
 		const fileInput = document.getElementById('exercise-selector-file');
 		if (fileInput) {
-		aiDetectBtn.addEventListener('click', () => {
+		aiDetectBtn.addEventListener('click', async () => {
+				// Check if button is disabled (no credits)
+				if (aiDetectBtn.disabled) {
+					alert('You are out of your monthly credits');
+					return;
+				}
 				fileInput.click();
 			});
 			
@@ -1670,7 +1719,7 @@ function initExerciseSelector() {
 				// Get credits before starting
 				const creditsInfo = await getUserCredits();
 				if (creditsInfo.credits_remaining <= 0) {
-					alert('You have no credits left this month. Credits reset on the 1st of each month.');
+					alert('You are out of your monthly credits');
 					return;
 				}
 				
@@ -1708,7 +1757,9 @@ function initExerciseSelector() {
 						if (res.status === 403) {
 							const errorData = await res.json();
 							if (errorData.error === 'no_credits') {
-								alert('You have no credits left this month. Credits reset on the 1st of each month.');
+								alert('You are out of your monthly credits');
+								// Update buttons to reflect no credits
+								updateAIDetectButtons();
 								return;
 							}
 						}
@@ -1787,7 +1838,8 @@ function initExerciseSelector() {
 					console.error('AI detect error:', e);
 					alert('We couldn\'t recognize an exercise in this image.\n\nPlease try a clearer photo of the exercise being performed.');
 				} finally {
-					aiDetectBtn.disabled = false;
+					// Update buttons based on current credits (may be disabled if no credits left)
+					updateAIDetectButtons();
 					aiDetectBtn.textContent = 'AI-detect';
 					fileInput.value = '';
 				}
@@ -2564,12 +2616,16 @@ function hydrateExerciseFromMetadata(exercise) {
 	const sets = Array.isArray(exercise?.sets) && exercise.sets.length
 		? exercise.sets
 		: createDefaultSets();
+	const exerciseKey = meta?.key || exercise?.key;
+	// Load notes from localStorage (linked to exercise key)
+	const notes = exerciseKey ? getExerciseNotes(exerciseKey) : '';
 	return {
-		key: meta?.key || exercise?.key,
+		key: exerciseKey,
 		display: exercise?.display || meta?.display || exercise?.key || 'Exercise',
 		image: meta?.image || exercise?.image,
 		muscles: (exercise?.muscles && exercise.muscles.length) ? exercise.muscles : (meta?.muscles || []),
 		video: meta?.video || exercise?.video,
+		notes: notes,
 		sets
 	};
 }
@@ -2740,6 +2796,15 @@ function renderWorkoutList() {
 					<div class="workout-exercise-name">${ex.display || ex.key}</div>
 				</div>
 				<div class="workout-exercise-actions">
+					<button class="workout-exercise-notes-btn ${getExerciseNotes(ex.key) ? 'has-notes' : ''}" data-exercise-key="${ex.key || ex.display || ''}" data-exercise-index="${idx}" aria-label="Exercise notes" title="Add notes">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+							<polyline points="14 2 14 8 20 8"></polyline>
+							<line x1="16" y1="13" x2="8" y2="13"></line>
+							<line x1="16" y1="17" x2="8" y2="17"></line>
+							<polyline points="10 9 9 9 8 9"></polyline>
+						</svg>
+					</button>
 					${infoButtonHtml}
 					<button class="workout-edit-exercise-delete" aria-label="Remove exercise">
 						<img src="static/close.png" alt="" />
@@ -2862,6 +2927,14 @@ function renderWorkoutList() {
 				renderWorkoutList();
 			saveWorkoutDraft();
 			});
+		
+		const notesBtn = li.querySelector('.workout-exercise-notes-btn');
+		if (notesBtn) {
+			notesBtn.addEventListener('click', () => {
+				const exerciseKey = ex.key || ex.display || '';
+				openExerciseNotesModal(exerciseKey, idx);
+			});
+		}
 		
 		workoutList.appendChild(li);
 	});
@@ -3379,11 +3452,26 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 			li.addEventListener('click', (e) => {
 				if (e.target.closest('.workout-actions')) return;
 				if (e.target.closest('.exercise-info-btn')) return;
+				if (e.target.closest('.workout-exercise-notes-btn')) return;
 				if (e.target.closest('.exercise-video-inline')) return;
 				if (!details) return;
 				details.classList.toggle('expanded');
 				details.classList.add('readonly');
 				details.classList.remove('inline-edit');
+			});
+			
+			// Add event listeners for notes buttons in workout view
+			const notesButtons = li.querySelectorAll('.workout-exercise-notes-btn');
+			notesButtons.forEach(notesBtn => {
+				notesBtn.addEventListener('click', (e) => {
+					e.stopPropagation();
+					const exerciseKey = notesBtn.dataset.exerciseKey || '';
+					// Find exercise index in workout
+					const exerciseIndex = workout.exercises.findIndex(ex => (ex.key || ex.display) === exerciseKey);
+					if (exerciseIndex >= 0) {
+						openExerciseNotesModal(exerciseKey, exerciseIndex);
+					}
+				});
 			});
 			
 			if (editBtn) {
@@ -3411,6 +3499,9 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 			workoutsList.appendChild(li);
 		});
 	}
+	
+	// Render workout heatmap in workouts tab
+	renderWorkoutHeatmap(workouts);
 }
 
 function buildWorkoutExercisesMarkup(workout) {
@@ -3445,6 +3536,16 @@ function buildWorkoutExercisesMarkup(workout) {
 			: `<div class="workout-set-line empty">No sets recorded</div>`;
 		
 		const infoButtonHtml = renderExerciseInfoButton(exercise);
+		const exerciseKey = exercise.key || exercise.display || '';
+		const notesButtonHtml = `<button class="workout-exercise-notes-btn ${getExerciseNotes(exerciseKey) ? 'has-notes' : ''}" data-exercise-key="${exerciseKey}" aria-label="Exercise notes" title="Add notes">
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+				<polyline points="14 2 14 8 20 8"></polyline>
+				<line x1="16" y1="13" x2="8" y2="13"></line>
+				<line x1="16" y1="17" x2="8" y2="17"></line>
+				<polyline points="10 9 9 9 8 9"></polyline>
+			</svg>
+		</button>`;
 		return `
 			<div class="workout-exercise workout-view-exercise">
 				<div class="workout-view-header">
@@ -3453,6 +3554,7 @@ function buildWorkoutExercisesMarkup(workout) {
 						<div class="workout-exercise-name">${exercise.display || exercise.key || 'Exercise'}</div>
 					</div>
 					<div class="workout-view-actions">
+						${notesButtonHtml}
 						${infoButtonHtml}
 					</div>
 				</div>
@@ -4004,7 +4106,11 @@ async function loadProgress() {
 		unitLabel.textContent = getWeightUnitLabel().toLowerCase();
 	}
 	
-	renderWeightChart(progress);
+	// Weight Chart - DISABLED (code preserved for future use)
+	// renderWeightChart(progress);
+	renderWorkoutHeatmap(workouts);
+	renderMonthlyHeatmap(workouts);
+	initMonthlyHeatmapNavigation();
 	await renderMuscleFocus(workouts);
 	updateExerciseInsightsOptions(workouts);
 	renderPRTimeline(workouts);
@@ -4958,10 +5064,11 @@ function initRestTimer() {
 	const overlay = document.getElementById('rest-timer-overlay');
 	const closeBtn = document.getElementById('rest-timer-close');
 	const startBtn = document.getElementById('rest-timer-start');
-	const addMinuteBtn = document.getElementById('rest-timer-add-minute');
+	const add30SecBtn = document.getElementById('rest-timer-add-30sec');
+	const subtract30SecBtn = document.getElementById('rest-timer-subtract-30sec');
 	const timeDisplay = document.getElementById('rest-timer-time');
 	
-	if (!overlay || !closeBtn || !startBtn || !addMinuteBtn || !timeDisplay) return;
+	if (!overlay || !closeBtn || !startBtn || !add30SecBtn || !subtract30SecBtn || !timeDisplay) return;
 	
 	// Close button
 	closeBtn.addEventListener('click', () => {
@@ -4978,14 +5085,44 @@ function initRestTimer() {
 		}
 	});
 	
-	// Add minute button
-	addMinuteBtn.addEventListener('click', async () => {
-		restTimerSeconds += 60;
-		updateRestTimerDisplay();
-		// Reschedule notification with new time if timer is running
-		if (restTimerRunning) {
+	// Add 30 seconds button
+	add30SecBtn.addEventListener('click', async () => {
+		if (restTimerRunning && restTimerStartTime) {
+			// Timer is running - calculate current remaining time and add 30 seconds
+			const elapsed = Math.floor((Date.now() - restTimerStartTime) / 1000);
+			const currentRemaining = Math.max(0, restTimerInitialSeconds - elapsed);
+			restTimerSeconds = currentRemaining + 30;
+			restTimerInitialSeconds = restTimerSeconds;
+			restTimerStartTime = Date.now(); // Reset start time
 			await scheduleRestTimerNotification(restTimerSeconds);
+		} else {
+			// Timer is not running - just add 30 seconds
+			restTimerSeconds += 30;
 		}
+		updateRestTimerDisplay();
+	});
+	
+	// Subtract 30 seconds button
+	subtract30SecBtn.addEventListener('click', async () => {
+		if (restTimerRunning && restTimerStartTime) {
+			// Timer is running - calculate current remaining time and subtract 30 seconds
+			const elapsed = Math.floor((Date.now() - restTimerStartTime) / 1000);
+			const currentRemaining = Math.max(0, restTimerInitialSeconds - elapsed);
+			restTimerSeconds = Math.max(0, currentRemaining - 30);
+			restTimerInitialSeconds = restTimerSeconds;
+			restTimerStartTime = Date.now(); // Reset start time
+			if (restTimerSeconds > 0) {
+				await scheduleRestTimerNotification(restTimerSeconds);
+			} else {
+				// Timer reached 0, stop it
+				stopRestTimer();
+				showRestTimerComplete();
+			}
+		} else {
+			// Timer is not running - just subtract 30 seconds
+			restTimerSeconds = Math.max(0, restTimerSeconds - 30);
+		}
+		updateRestTimerDisplay();
 	});
 	
 	// Update display initially
@@ -5000,8 +5137,8 @@ async function startRestTimer() {
 	}
 	
 	if (restTimerSeconds === 0) {
-		restTimerSeconds = 60; // Default to 1 minute
-		restTimerInitialSeconds = 60;
+		restTimerSeconds = 180; // Default to 3 minutes
+		restTimerInitialSeconds = 180;
 	} else if (restTimerInitialSeconds === 0) {
 		// If initialSeconds is 0 but restTimerSeconds has a value, set it
 		restTimerInitialSeconds = restTimerSeconds;
@@ -5186,6 +5323,11 @@ function openRestTimer() {
 	const overlay = document.getElementById('rest-timer-overlay');
 	if (!overlay) return;
 	
+	// Hide keyboard by blurring active input field
+	if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+		document.activeElement.blur();
+	}
+	
 	// Don't reset timer if it's already running - just show the overlay
 	if (restTimerRunning && restTimerStartTime) {
 		// Timer is running - just update display with current remaining time
@@ -5202,8 +5344,8 @@ function openRestTimer() {
 	// Timer is not running - set default if needed
 	overlay.classList.remove('hidden');
 	if (restTimerSeconds === 0) {
-		restTimerSeconds = 60; // Default 1 minute
-		restTimerInitialSeconds = 60;
+		restTimerSeconds = 180; // Default 3 minutes
+		restTimerInitialSeconds = 180;
 	} else {
 		// If timer has a value but initialSeconds is 0, set it
 		if (restTimerInitialSeconds === 0) {
@@ -6096,10 +6238,17 @@ function openAIDetectChat() {
 			// Show user message with image preview
 			addAIDetectChatMessage('user', 'Welke oefening is dit?', file);
 			
+			// Check if file input is disabled (no credits)
+			if (fileInput.disabled) {
+				addAIDetectChatMessage('bot', 'You are out of your monthly credits', null);
+				return;
+			}
+			
 			// Check credits before starting
 			const creditsInfo = await getUserCredits();
 			if (creditsInfo.credits_remaining <= 0) {
-				addAIDetectChatMessage('bot', 'You have no credits left this month. Credits reset on the 1st of each month.', null);
+				addAIDetectChatMessage('bot', 'You are out of your monthly credits', null);
+				updateAIDetectButtons();
 				return;
 			}
 			
@@ -6137,7 +6286,8 @@ function openAIDetectChat() {
 					if (res.status === 403) {
 						const errorData = await res.json();
 						if (errorData.error === 'no_credits') {
-							addAIDetectChatMessage('bot', 'You have no credits left this month. Credits reset on the 1st of each month.', null);
+							addAIDetectChatMessage('bot', 'You are out of your monthly credits', null);
+							updateAIDetectButtons();
 							return;
 						}
 					}
@@ -6152,6 +6302,8 @@ function openAIDetectChat() {
 				// Update credits display if provided
 				if (data.credits_remaining !== undefined) {
 					showCreditsMessage(data.credits_remaining);
+					// Update buttons based on new credits
+					updateAIDetectButtons();
 				}
 				
 				// Remove loading message
@@ -6277,6 +6429,481 @@ function addAIDetectChatMessage(role, text, file, isLoading = false) {
 }
 
 // Make exercise selector accessible from workout builder
+// ========== WORKOUT HEATMAP ==========
+let currentHeatmapWeekStart = getWeekStart(new Date()); // Monday of current week
+let currentHeatmapMonth = new Date(); // Current month for monthly heatmap
+currentHeatmapMonth.setDate(1); // First day of month
+currentHeatmapMonth.setHours(0, 0, 0, 0);
+
+function getWeekStart(date) {
+	const d = new Date(date);
+	d.setHours(0, 0, 0, 0);
+	const day = d.getDay();
+	const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+	const weekStart = new Date(d.setDate(diff));
+	weekStart.setHours(0, 0, 0, 0);
+	return weekStart;
+}
+
+function formatWeekLabel(weekStart) {
+	const weekEnd = new Date(weekStart);
+	weekEnd.setDate(weekEnd.getDate() + 6);
+	
+	const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+		'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+	
+	const startMonth = monthNames[weekStart.getMonth()];
+	const endMonth = monthNames[weekEnd.getMonth()];
+	
+	if (weekStart.getMonth() === weekEnd.getMonth()) {
+		return `${weekStart.getDate()}-${weekEnd.getDate()} ${startMonth}`;
+	} else {
+		return `${weekStart.getDate()} ${startMonth} - ${weekEnd.getDate()} ${endMonth}`;
+	}
+}
+
+function renderWorkoutHeatmap(workouts) {
+	const heatmapContainer = document.getElementById('progress-heatmap');
+	
+	if (!heatmapContainer) return;
+	
+	// Count sets per day for the current week
+	const setsByDay = {};
+	// Ensure weekStart is normalized
+	const weekStart = new Date(currentHeatmapWeekStart);
+	weekStart.setHours(0, 0, 0, 0);
+	const weekEnd = new Date(weekStart);
+	weekEnd.setDate(weekEnd.getDate() + 6);
+	weekEnd.setHours(23, 59, 59, 999); // End of Sunday
+	
+	workouts.forEach(workout => {
+		if (!workout.date && !workout.originalDate) return;
+		
+		// Get date string (YYYY-MM-DD)
+		let dateStr = workout.originalDate || workout.date;
+		if (dateStr && dateStr.length > 10) {
+			dateStr = dateStr.slice(0, 10);
+		}
+		
+		if (!dateStr) return;
+		
+		const workoutDate = new Date(dateStr + 'T12:00:00');
+		workoutDate.setHours(0, 0, 0, 0);
+		
+		// Only count sets in workouts from the current week
+		if (workoutDate >= weekStart && workoutDate <= weekEnd) {
+			const dayKey = dateStr;
+			
+			// Count total sets across all exercises in this workout
+			let totalSets = 0;
+			if (workout.exercises && Array.isArray(workout.exercises)) {
+				workout.exercises.forEach(exercise => {
+					if (exercise.sets && Array.isArray(exercise.sets)) {
+						// Count sets that have at least weight or reps filled in
+						exercise.sets.forEach(set => {
+							if ((set.weight && set.weight !== '' && set.weight !== '0') || 
+							    (set.reps && set.reps !== '' && set.reps !== '0')) {
+								totalSets++;
+							}
+						});
+					}
+				});
+			}
+			
+			if (totalSets > 0) {
+				setsByDay[dayKey] = (setsByDay[dayKey] || 0) + totalSets;
+			}
+		}
+	});
+	
+	// Clear container
+	heatmapContainer.innerHTML = '';
+	
+	// Get today's date for comparison
+	const today = new Date();
+	today.setHours(0, 0, 0, 0);
+	
+	// Add cells for each day of the week (Monday to Sunday)
+	const dayNames = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+	const fullDayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+	
+	for (let i = 0; i < 7; i++) {
+		const currentDay = new Date(weekStart);
+		currentDay.setDate(currentDay.getDate() + i);
+		currentDay.setHours(0, 0, 0, 0);
+		
+		const year = currentDay.getFullYear();
+		const month = String(currentDay.getMonth() + 1).padStart(2, '0');
+		const day = String(currentDay.getDate()).padStart(2, '0');
+		const dateStr = `${year}-${month}-${day}`;
+		const setCount = setsByDay[dateStr] || 0;
+		
+		// Check if this is today
+		const isToday = currentDay.getTime() === today.getTime();
+		const isPast = currentDay < today;
+		const isFuture = currentDay > today;
+		
+		const dayCell = document.createElement('div');
+		dayCell.className = 'heatmap-day-week';
+		dayCell.dataset.day = day;
+		dayCell.dataset.date = dateStr;
+		dayCell.dataset.count = setCount;
+		
+		// Simple: purple if has sets, grey otherwise
+		if (setCount > 0) {
+			dayCell.classList.add('has-sets');
+		}
+		
+		// Add today class for styling
+		if (isToday) {
+			dayCell.classList.add('today');
+		}
+		
+		if (isPast) {
+			dayCell.classList.add('past');
+		}
+		if (isFuture) {
+			dayCell.classList.add('future');
+		}
+		
+		// Create day label
+		const dayLabel = document.createElement('div');
+		dayLabel.className = 'heatmap-day-label';
+		dayLabel.textContent = dayNames[i];
+		
+		// Create date label
+		const dateLabel = document.createElement('div');
+		dateLabel.className = 'heatmap-date-label';
+		dateLabel.textContent = day;
+		
+		dayCell.appendChild(dayLabel);
+		dayCell.appendChild(dateLabel);
+		
+		// Add tooltip
+		if (setCount > 0) {
+			dayCell.title = `${setCount} set${setCount > 1 ? 's' : ''} on ${fullDayNames[i]}`;
+		} else {
+			dayCell.title = `No sets on ${fullDayNames[i]}`;
+		}
+		
+		heatmapContainer.appendChild(dayCell);
+	}
+}
+
+function renderMonthlyHeatmap(workouts) {
+	const heatmapContainer = document.getElementById('progress-heatmap-monthly');
+	const monthLabel = document.getElementById('progress-heatmap-month-label');
+	
+	if (!heatmapContainer) return;
+	
+	// Get first and last day of current month
+	const monthStart = new Date(currentHeatmapMonth);
+	monthStart.setDate(1);
+	monthStart.setHours(0, 0, 0, 0);
+	
+	const monthEnd = new Date(currentHeatmapMonth);
+	// Calculate end of month safely
+	const year = monthEnd.getFullYear();
+	const month = monthEnd.getMonth();
+	const lastDay = new Date(year, month + 1, 0).getDate();
+	monthEnd.setDate(lastDay);
+	monthEnd.setHours(23, 59, 59, 999);
+	
+	// Update month label
+	if (monthLabel) {
+		const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+			'July', 'August', 'September', 'October', 'November', 'December'];
+		monthLabel.textContent = `${monthNames[monthStart.getMonth()]} ${monthStart.getFullYear()}`;
+	}
+	
+	// Count sets per day for the current month
+	const setsByDay = {};
+	
+	workouts.forEach(workout => {
+		if (!workout.date && !workout.originalDate) return;
+		
+		// Get date string (YYYY-MM-DD)
+		let dateStr = workout.originalDate || workout.date;
+		if (dateStr && dateStr.length > 10) {
+			dateStr = dateStr.slice(0, 10);
+		}
+		
+		if (!dateStr) return;
+		
+		const workoutDate = new Date(dateStr + 'T12:00:00');
+		workoutDate.setHours(0, 0, 0, 0);
+		
+		// Only count sets in workouts from the current month
+		if (workoutDate >= monthStart && workoutDate <= monthEnd) {
+			const dayKey = dateStr;
+			
+			// Count total sets across all exercises in this workout
+			let totalSets = 0;
+			if (workout.exercises && Array.isArray(workout.exercises)) {
+				workout.exercises.forEach(exercise => {
+					if (exercise.sets && Array.isArray(exercise.sets)) {
+						// Count sets that have at least weight or reps filled in
+						exercise.sets.forEach(set => {
+							if ((set.weight && set.weight !== '' && set.weight !== '0') || 
+							    (set.reps && set.reps !== '' && set.reps !== '0')) {
+								totalSets++;
+							}
+						});
+					}
+				});
+			}
+			
+			if (totalSets > 0) {
+				setsByDay[dayKey] = (setsByDay[dayKey] || 0) + totalSets;
+			}
+		}
+	});
+	
+	// Clear container
+	heatmapContainer.innerHTML = '';
+	
+	// Get today's date for comparison
+	const today = new Date();
+	today.setHours(0, 0, 0, 0);
+	
+	// Get first day of week for the first day of month (0 = Sunday, 1 = Monday, etc.)
+	const firstDayOfMonth = monthStart.getDay();
+	// Adjust to Monday = 0 (so Sunday = 6)
+	const firstDayOfWeek = (firstDayOfMonth + 6) % 7;
+	
+	// Get number of days in month
+	const daysInMonth = monthEnd.getDate();
+	
+	// Add empty cells for days before the first day of month
+	for (let i = 0; i < firstDayOfWeek; i++) {
+		const emptyCell = document.createElement('div');
+		emptyCell.className = 'heatmap-day-month empty';
+		heatmapContainer.appendChild(emptyCell);
+	}
+	
+	// Add cells for each day of the month
+	for (let day = 1; day <= daysInMonth; day++) {
+		const currentDay = new Date(monthStart);
+		currentDay.setDate(day);
+		currentDay.setHours(0, 0, 0, 0);
+		
+		const year = currentDay.getFullYear();
+		const month = String(currentDay.getMonth() + 1).padStart(2, '0');
+		const dayStr = String(day).padStart(2, '0');
+		const dateStr = `${year}-${month}-${dayStr}`;
+		const setCount = setsByDay[dateStr] || 0;
+		
+		// Check if this is today
+		const isToday = currentDay.getTime() === today.getTime();
+		const isPast = currentDay < today;
+		const isFuture = currentDay > today;
+		
+		const dayCell = document.createElement('div');
+		dayCell.className = 'heatmap-day-month';
+		dayCell.dataset.date = dateStr;
+		dayCell.dataset.count = setCount;
+		
+		// Simple: purple if has sets, grey otherwise
+		if (setCount > 0) {
+			dayCell.classList.add('has-sets');
+		}
+		
+		// Add today class for styling
+		if (isToday) {
+			dayCell.classList.add('today');
+		}
+		if (isPast) {
+			dayCell.classList.add('past');
+		}
+		if (isFuture) {
+			dayCell.classList.add('future');
+		}
+		
+		// Create date label
+		const dateLabel = document.createElement('div');
+		dateLabel.className = 'heatmap-date-label-month';
+		dateLabel.textContent = day;
+		
+		dayCell.appendChild(dateLabel);
+		
+		// Add tooltip
+		if (setCount > 0) {
+			const dateObj = new Date(dateStr);
+			const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dateObj.getDay()];
+			dayCell.title = `${setCount} set${setCount > 1 ? 's' : ''} on ${dayName}, ${dateStr}`;
+		} else {
+			dayCell.title = `No sets on ${dateStr}`;
+		}
+		
+		heatmapContainer.appendChild(dayCell);
+	}
+}
+
+// Initialize monthly heatmap navigation
+let monthlyHeatmapNavInitialized = false;
+function initMonthlyHeatmapNavigation() {
+	// Prevent multiple initializations
+	if (monthlyHeatmapNavInitialized) return;
+	monthlyHeatmapNavInitialized = true;
+	
+	const prevBtn = document.getElementById('progress-heatmap-prev-month');
+	const nextBtn = document.getElementById('progress-heatmap-next-month');
+	
+	if (prevBtn) {
+		prevBtn.addEventListener('click', () => {
+			// Get current year and month
+			const year = currentHeatmapMonth.getFullYear();
+			const month = currentHeatmapMonth.getMonth();
+			
+			// Calculate previous month - simple subtraction
+			let newYear = year;
+			let newMonth = month - 1;
+			
+			// Handle year rollover
+			if (newMonth < 0) {
+				newMonth = 11;
+				newYear = year - 1;
+			}
+			
+			// Create new date object - always use day 1
+			currentHeatmapMonth = new Date(newYear, newMonth, 1);
+			currentHeatmapMonth.setHours(0, 0, 0, 0);
+			
+			console.log('Previous month clicked:', newYear, newMonth, currentHeatmapMonth);
+			
+			const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+			renderMonthlyHeatmap(workouts);
+		});
+	}
+	
+	if (nextBtn) {
+		nextBtn.addEventListener('click', () => {
+			// Get current year and month
+			const year = currentHeatmapMonth.getFullYear();
+			const month = currentHeatmapMonth.getMonth();
+			
+			// Calculate next month - simple addition
+			let newYear = year;
+			let newMonth = month + 1;
+			
+			// Handle year rollover
+			if (newMonth > 11) {
+				newMonth = 0;
+				newYear = year + 1;
+			}
+			
+			// Create new date object - always use day 1
+			currentHeatmapMonth = new Date(newYear, newMonth, 1);
+			currentHeatmapMonth.setHours(0, 0, 0, 0);
+			
+			console.log('Next month clicked:', newYear, newMonth, currentHeatmapMonth);
+			
+			const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+			renderMonthlyHeatmap(workouts);
+		});
+	}
+}
+
+// ========== EXERCISE NOTES ==========
+// Get notes for an exercise by key
+function getExerciseNotes(exerciseKey) {
+	if (!exerciseKey) return '';
+	const notesKey = `exercise-notes-${exerciseKey}`;
+	return localStorage.getItem(notesKey) || '';
+}
+
+// Save notes for an exercise by key
+function saveExerciseNotesToStorage(exerciseKey, notes) {
+	if (!exerciseKey) return;
+	const notesKey = `exercise-notes-${exerciseKey}`;
+	if (notes && notes.trim()) {
+		localStorage.setItem(notesKey, notes.trim());
+	} else {
+		localStorage.removeItem(notesKey);
+	}
+}
+
+function openExerciseNotesModal(exerciseKey, exerciseIndex) {
+	// Create modal if it doesn't exist
+	let modal = document.getElementById('exercise-notes-modal');
+	if (!modal) {
+		modal = document.createElement('div');
+		modal.id = 'exercise-notes-modal';
+		modal.className = 'exercise-notes-modal hidden';
+		modal.innerHTML = `
+			<div class="exercise-notes-backdrop"></div>
+			<div class="exercise-notes-container">
+				<div class="exercise-notes-header">
+					<h3 class="exercise-notes-title">Notes</h3>
+					<button class="exercise-notes-close" aria-label="Close">×</button>
+				</div>
+				<div class="exercise-notes-content">
+					<textarea id="exercise-notes-textarea" class="exercise-notes-textarea" placeholder="Add your notes here..."></textarea>
+				</div>
+				<div class="exercise-notes-footer">
+					<button class="btn primary exercise-notes-save">Save</button>
+				</div>
+			</div>
+		`;
+		document.body.appendChild(modal);
+		
+		// Close on X button only (no backdrop click)
+		const closeBtn = modal.querySelector('.exercise-notes-close');
+		closeBtn.addEventListener('click', () => {
+			closeExerciseNotesModal();
+		});
+		
+		// Save button
+		const saveBtn = modal.querySelector('.exercise-notes-save');
+		saveBtn.addEventListener('click', () => {
+			saveExerciseNotes(exerciseKey, exerciseIndex);
+		});
+	}
+	
+	// Set current exercise key and index
+	modal.dataset.exerciseKey = exerciseKey;
+	modal.dataset.exerciseIndex = exerciseIndex;
+	
+	// Load existing notes from localStorage
+	const textarea = modal.querySelector('#exercise-notes-textarea');
+	textarea.value = getExerciseNotes(exerciseKey);
+	
+	// Show modal
+	modal.classList.remove('hidden');
+	
+	// Focus textarea
+	setTimeout(() => {
+		textarea.focus();
+	}, 100);
+}
+
+function closeExerciseNotesModal() {
+	const modal = document.getElementById('exercise-notes-modal');
+	if (modal) {
+		modal.classList.add('hidden');
+	}
+}
+
+function saveExerciseNotes(exerciseKey, exerciseIndex) {
+	const modal = document.getElementById('exercise-notes-modal');
+	if (!modal) return;
+	
+	const textarea = modal.querySelector('#exercise-notes-textarea');
+	const notes = textarea.value.trim();
+	
+	// Save to localStorage (linked to exercise key, not workout)
+	saveExerciseNotesToStorage(exerciseKey, notes);
+	
+	// Also update current workout exercise for immediate display
+	if (currentWorkout && currentWorkout.exercises && currentWorkout.exercises[exerciseIndex]) {
+		currentWorkout.exercises[exerciseIndex].notes = notes;
+		saveWorkoutDraft();
+		renderWorkoutList();
+	}
+	
+	closeExerciseNotesModal();
+}
+
 window.openExerciseSelector = openExerciseSelector;
 window.addExerciseToWorkout = addExerciseToWorkout;
 
