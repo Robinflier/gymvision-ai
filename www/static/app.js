@@ -2998,24 +2998,23 @@ function renderWorkoutList() {
 				
 				setsContainer.appendChild(setRow);
 			});
-		
-		const addSetBtn = document.createElement('button');
-		addSetBtn.className = 'workout-edit-add-set';
-		addSetBtn.type = 'button';
-		addSetBtn.textContent = '+ Add Set';
-		addSetBtn.addEventListener('click', () => {
-			if (!ex.sets) {
-				ex.sets = [];
-			}
-			ex.sets.push({ weight: '', reps: '' });
-			renderWorkoutList();
-		});
-		
-		li.appendChild(setsContainer);
-		// Only append "Add Set" button for non-cardio exercises
-		if (!isCardio) {
+			
+			// Only show "Add Set" button for non-cardio exercises
+			const addSetBtn = document.createElement('button');
+			addSetBtn.className = 'workout-edit-add-set';
+			addSetBtn.type = 'button';
+			addSetBtn.textContent = '+ Add Set';
+			addSetBtn.addEventListener('click', () => {
+				if (!ex.sets) {
+					ex.sets = [];
+				}
+				ex.sets.push({ weight: '', reps: '' });
+				renderWorkoutList();
+			});
 			li.appendChild(addSetBtn);
 		}
+		
+		li.appendChild(setsContainer);
 		
 		const deleteExerciseBtn = li.querySelector('.workout-edit-exercise-delete');
 		deleteExerciseBtn.addEventListener('click', () => {
