@@ -2987,18 +2987,17 @@ function renderWorkoutList() {
 					const weightValue = weightInput ? weightInput.value : '';
 					checkAndTriggerRestTimer(ex.sets[setIdx], weightValue, e.target.value, ex);
 				});
-			}
-			
-			const deleteBtn = setRow.querySelector('.workout-edit-set-delete');
-			
-			deleteBtn.addEventListener('click', () => {
-					ex.sets.splice(setIdx, 1);
-					renderWorkoutList();
-				saveWorkoutDraft();
-				});
-			
-			setsContainer.appendChild(setRow);
-		});
+				
+				if (deleteBtn) {
+					deleteBtn.addEventListener('click', () => {
+						ex.sets.splice(setIdx, 1);
+						renderWorkoutList();
+						saveWorkoutDraft();
+					});
+				}
+				
+				setsContainer.appendChild(setRow);
+			});
 		
 		const addSetBtn = document.createElement('button');
 		addSetBtn.className = 'workout-edit-add-set';
