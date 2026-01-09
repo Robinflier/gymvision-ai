@@ -129,7 +129,8 @@ function getWeightUnitLabel() {
 
 function createDefaultSets(count = DEFAULT_SET_COUNT, isCardio = false) {
 	if (isCardio) {
-		return Array.from({ length: count }, () => ({ min: '', notes: '' }));
+		// Cardio: always just 1 set with min, km, notes
+		return [{ min: '', km: '', notes: '' }];
 	}
 	return Array.from({ length: count }, () => ({ weight: '', reps: '' }));
 }
@@ -2859,77 +2860,80 @@ function renderWorkoutList() {
 			setsContainer.classList.add('cardio');
 		}
 		
-		const headerRow = document.createElement('div');
-		headerRow.className = 'workout-edit-set-row workout-edit-set-header';
 		if (isCardio) {
-			headerRow.innerHTML = `
-				<div class="set-col">Set</div>
-				<div class="min-col">Min</div>
-				<div class="notes-col">Notes</div>
-				<div class="action-col"></div>
+			// Cardio: Special layout with Min, KM, and large Notes field
+			const set = ex.sets[0] || { min: '', km: '', notes: '' };
+			const prevSet = Array.isArray(ex.previousSets) ? ex.previousSets[0] : null;
+			
+			const cardioRow = document.createElement('div');
+			cardioRow.className = 'workout-edit-cardio-row';
+			cardioRow.innerHTML = `
+				<div class="cardio-left">
+					<div class="cardio-field">
+						<label class="cardio-label">Min</label>
+						<input type="number" class="workout-edit-set-input cardio-min" placeholder="0" inputmode="numeric" value="${set.min ?? ''}" aria-label="Minutes">
+					</div>
+					<div class="cardio-field">
+						<label class="cardio-label">KM</label>
+						<input type="number" class="workout-edit-set-input cardio-km" placeholder="0" inputmode="decimal" value="${set.km ?? ''}" aria-label="Kilometers">
+					</div>
+				</div>
+				<div class="cardio-right">
+					<label class="cardio-label">Notes</label>
+					<textarea class="workout-edit-set-input cardio-notes" placeholder="" aria-label="Notes">${set.notes ?? ''}</textarea>
+				</div>
 			`;
+			
+			const minInput = cardioRow.querySelector('.cardio-min');
+			const kmInput = cardioRow.querySelector('.cardio-km');
+			const notesInput = cardioRow.querySelector('.cardio-notes');
+			
+			if (minInput) {
+				minInput.addEventListener('input', (e) => {
+					if (!ex.sets[0]) ex.sets[0] = { min: '', km: '', notes: '' };
+					ex.sets[0].min = e.target.value ? Number(e.target.value) : '';
+					saveWorkoutDraft();
+				});
+			}
+			
+			if (kmInput) {
+				kmInput.addEventListener('input', (e) => {
+					if (!ex.sets[0]) ex.sets[0] = { min: '', km: '', notes: '' };
+					ex.sets[0].km = e.target.value ? Number(e.target.value) : '';
+					saveWorkoutDraft();
+				});
+			}
+			
+			if (notesInput) {
+				notesInput.addEventListener('input', (e) => {
+					if (!ex.sets[0]) ex.sets[0] = { min: '', km: '', notes: '' };
+					ex.sets[0].notes = e.target.value;
+					saveWorkoutDraft();
+				});
+			}
+			
+			setsContainer.appendChild(cardioRow);
 		} else {
+			// Regular exercises: header and multiple sets
+			const headerRow = document.createElement('div');
+			headerRow.className = 'workout-edit-set-row workout-edit-set-header';
 			headerRow.innerHTML = `
 				<div class="set-col">Set</div>
 				${isBodyweight ? '' : `<div class="weight-col">${getWeightUnitLabel()}</div>`}
 				<div class="reps-col">Reps</div>
 				<div class="action-col"></div>
 			`;
-		}
-		setsContainer.appendChild(headerRow);
-		
-		ex.sets.forEach((set, setIdx) => {
-			// Get placeholder values from previousSets or from the set itself if it has values
-			const prevSet = Array.isArray(ex.previousSets) ? ex.previousSets[setIdx] : null;
+			setsContainer.appendChild(headerRow);
 			
-			const setRow = document.createElement('div');
-			setRow.className = 'workout-edit-set-row data';
-			if ((setIdx % 2) === 1) {
-				setRow.classList.add('even');
-			}
-			
-			if (isCardio) {
-				// Cardio: Min and Notes columns
-				const minPlaceholder = (set.min != null && set.min !== '') 
-					? set.min 
-					: (prevSet && prevSet.min != null && prevSet.min !== '' ? prevSet.min : '');
-				const notesValue = set.notes ?? '';
+			ex.sets.forEach((set, setIdx) => {
+				// Get placeholder values from previousSets or from the set itself if it has values
+				const prevSet = Array.isArray(ex.previousSets) ? ex.previousSets[setIdx] : null;
 				
-				setRow.innerHTML = `
-					<div class="set-col">
-						<div class="workout-edit-set-number">${setIdx + 1}</div>
-					</div>
-					<div class="min-col">
-						<input type="number" class="workout-edit-set-input min" placeholder="${minPlaceholder}" inputmode="numeric" value="${set.min ?? ''}" aria-label="Set minutes">
-					</div>
-					<div class="notes-col">
-						<input type="text" class="workout-edit-set-input notes" placeholder="Stand/Intensity" value="${notesValue}" aria-label="Set notes">
-					</div>
-					<div class="action-col">
-						<button type="button" class="workout-edit-set-delete" aria-label="Delete set">
-							<img src="static/close.png" alt="">
-						</button>
-					</div>
-				`;
-				
-				const minInput = setRow.querySelector('.min');
-				const notesInput = setRow.querySelector('.notes');
-				const deleteBtn = setRow.querySelector('.workout-edit-set-delete');
-				
-				if (minInput) {
-					minInput.addEventListener('input', (e) => {
-						ex.sets[setIdx].min = e.target.value ? Number(e.target.value) : '';
-						saveWorkoutDraft();
-					});
+				const setRow = document.createElement('div');
+				setRow.className = 'workout-edit-set-row data';
+				if ((setIdx % 2) === 1) {
+					setRow.classList.add('even');
 				}
-				
-				if (notesInput) {
-					notesInput.addEventListener('input', (e) => {
-						ex.sets[setIdx].notes = e.target.value;
-						saveWorkoutDraft();
-					});
-				}
-			} else {
 				// Regular: Weight and Reps columns
 				// For weight placeholder: use set value if it exists, otherwise use previousSet, otherwise 0
 				// Convert to display unit (kg or lbs)
@@ -3009,7 +3013,10 @@ function renderWorkoutList() {
 		});
 		
 		li.appendChild(setsContainer);
-		li.appendChild(addSetBtn);
+		// Only append "Add Set" button for non-cardio exercises
+		if (!isCardio) {
+			li.appendChild(addSetBtn);
+		}
 		
 		const deleteExerciseBtn = li.querySelector('.workout-edit-exercise-delete');
 		deleteExerciseBtn.addEventListener('click', () => {
@@ -3608,21 +3615,22 @@ function buildWorkoutExercisesMarkup(workout) {
 		const setsMarkup = sets.length
 			? sets.map((set, idx) => {
 				if (isCardio) {
+					const cardioSet = sets[0] || { min: '', km: '', notes: '' };
 					return `
-				<div class="workout-edit-set-row view${(idx % 2) === 1 ? ' even' : ''}">
-					<div class="set-col">
-						<div class="workout-edit-set-number">${idx + 1}</div>
+				<div class="workout-edit-cardio-row view">
+					<div class="cardio-left">
+						<div class="cardio-field">
+							<label class="cardio-label">Min</label>
+							<div class="workout-view-value">${cardioSet.min || '0'}</div>
+						</div>
+						<div class="cardio-field">
+							<label class="cardio-label">KM</label>
+							<div class="workout-view-value">${cardioSet.km || '0'}</div>
+						</div>
 					</div>
-					<div class="min-col">
-						<div class="workout-view-value">${set.min ?? '-'}</div>
-					</div>
-					<div class="notes-col">
-						<div class="workout-view-value">${set.notes || '-'}</div>
-					</div>
-					<div class="action-col">
-						<button type="button" class="workout-edit-set-delete" aria-label="Set actions" disabled>
-							<img src="static/close.png" alt="">
-						</button>
+					<div class="cardio-right">
+						<label class="cardio-label">Notes</label>
+						<div class="workout-view-value cardio-notes-view">${cardioSet.notes || '-'}</div>
 					</div>
 				</div>
 			`;
@@ -3673,20 +3681,15 @@ function buildWorkoutExercisesMarkup(workout) {
 					</div>
 				</div>
 				<div class="workout-edit-sets view-mode ${isBodyweight ? 'bodyweight' : ''} ${isCardio ? 'cardio' : ''}">
+					${isCardio ? setsMarkup : `
 					<div class="workout-edit-set-row workout-edit-set-header">
-						${isCardio ? `
-						<div class="set-col">Set</div>
-						<div class="min-col">Min</div>
-						<div class="notes-col">Notes</div>
-						<div class="action-col"></div>
-						` : `
 						<div class="set-col">Set</div>
 						${isBodyweight ? '' : `<div class="weight-col">${getWeightUnitLabel()}</div>`}
 						<div class="reps-col">Reps</div>
 						<div class="action-col"></div>
-						`}
 					</div>
 					${setsMarkup}
+					`}
 				</div>
 			</div>
 		`;

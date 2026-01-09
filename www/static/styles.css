@@ -580,9 +580,20 @@ body{
 .workout-edit-sets{display:flex;flex-direction:column;gap:2px;margin-top:6px}
 .workout-edit-set-row{display:grid;grid-template-columns:56px 0.9fr 1fr 36px;align-items:center;gap:10px;padding:2px 0}
 .workout-edit-sets.bodyweight .workout-edit-set-row{grid-template-columns:56px 1fr 36px}
-.workout-edit-sets.cardio .workout-edit-set-row{grid-template-columns:56px 0.9fr 1.5fr 36px}
-.workout-edit-sets.cardio .min-col,
-.workout-edit-sets.cardio .notes-col{text-align:center}
+.workout-edit-sets.cardio{display:flex;flex-direction:row;gap:12px;align-items:flex-start}
+.workout-edit-cardio-row{display:flex;flex-direction:row;gap:12px;width:100%;align-items:flex-start}
+.cardio-left{display:flex;flex-direction:column;gap:12px;flex:0 0 120px}
+.cardio-right{flex:1;display:flex;flex-direction:column;gap:6px}
+.cardio-field{display:flex;flex-direction:column;gap:6px}
+.cardio-label{color:var(--sub);font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;opacity:.85}
+.workout-edit-set-input.cardio-min,
+.workout-edit-set-input.cardio-km{width:100%;background:#0f0f12;color:#fff;border:1px solid #2b2b34;border-radius:8px;padding:10px 12px;font-weight:600;font-size:14px;text-align:center}
+.workout-edit-set-input.cardio-min::placeholder,
+.workout-edit-set-input.cardio-km::placeholder{color:#666;opacity:1}
+.workout-edit-set-input.cardio-notes{width:100%;background:#0f0f12;color:#fff;border:1px solid #2b2b34;border-radius:8px;padding:10px 12px;font-weight:500;font-size:14px;min-height:120px;resize:vertical;font-family:inherit}
+.workout-edit-set-input.cardio-notes::placeholder{color:transparent}
+.workout-edit-cardio-row.view{display:flex;flex-direction:row;gap:12px;width:100%;align-items:flex-start;padding:0}
+.workout-view-value.cardio-notes-view{min-height:120px;padding:10px 12px;background:#0f0f12;border:1px solid #2b2b34;border-radius:8px;white-space:pre-wrap;word-wrap:break-word}
 .workout-edit-set-row.data{border-radius:0;padding:6px 12px;margin:0 -12px}
 .workout-edit-set-row.data.even{background:rgba(255,255,255,0.03)}
 .workout-edit-sets.view-mode{margin-top:10px}
