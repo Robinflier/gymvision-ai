@@ -4099,7 +4099,6 @@ function reuseWorkout(workout) {
 					return { weight: s.weight ?? 0, reps: s.reps ?? 0 };
 				}
 			}) : [];
-			const isCardio = isCardioExercise(ex);
 			const sets = createDefaultSets(prevSets.length || DEFAULT_SET_COUNT, isCardio);
 			reused.exercises.push({
 				...ex,
