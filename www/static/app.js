@@ -2855,15 +2855,27 @@ function renderWorkoutList() {
 		if (isBodyweight) {
 			setsContainer.classList.add('bodyweight');
 		}
+		if (isCardio) {
+			setsContainer.classList.add('cardio');
+		}
 		
 		const headerRow = document.createElement('div');
 		headerRow.className = 'workout-edit-set-row workout-edit-set-header';
-		headerRow.innerHTML = `
-			<div class="set-col">Set</div>
-			${isBodyweight ? '' : `<div class="weight-col">${getWeightUnitLabel()}</div>`}
-			<div class="reps-col">Reps</div>
-			<div class="action-col"></div>
-		`;
+		if (isCardio) {
+			headerRow.innerHTML = `
+				<div class="set-col">Set</div>
+				<div class="min-col">Min</div>
+				<div class="notes-col">Notes</div>
+				<div class="action-col"></div>
+			`;
+		} else {
+			headerRow.innerHTML = `
+				<div class="set-col">Set</div>
+				${isBodyweight ? '' : `<div class="weight-col">${getWeightUnitLabel()}</div>`}
+				<div class="reps-col">Reps</div>
+				<div class="action-col"></div>
+			`;
+		}
 		setsContainer.appendChild(headerRow);
 		
 		ex.sets.forEach((set, setIdx) => {
