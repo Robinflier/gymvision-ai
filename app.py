@@ -1058,16 +1058,40 @@ def vision_detect():
 			max_tokens=200
 		)
 		
+		# Get user ID for credit deduction
+		user_id = None
+		auth_header = request.headers.get("Authorization")
+		if auth_header and auth_header.startswith("Bearer "):
+			access_token = auth_header.replace("Bearer ", "").strip()
+			if access_token and SUPABASE_AVAILABLE:
+				try:
+					SUPABASE_URL = os.getenv("SUPABASE_URL")
+					SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+					if SUPABASE_URL and SUPABASE_ANON_KEY:
+						supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+						user_response = supabase_client.auth.get_user(access_token)
+						if user_response.user:
+							user_id = user_response.user.id
+				except Exception as e:
+					print(f"[WARNING] Could not get user ID for credit deduction: {e}")
+		
 		# Extract response
 		if response.choices and len(response.choices) > 0:
 			response_content = response.choices[0].message.content
 			if response_content:
 				chat_response = response_content.strip()
 				print(f"[SUCCESS] AI chat response: {chat_response}")
-				return jsonify({
+				
+				# Deduct credit if user is authenticated (only on successful recognition)
+				result = {
 					"success": True,
 					"message": chat_response
-				}), 200
+				}
+				if user_id:
+					credits_info = _deduct_credit_for_user(user_id)
+					result["credits_remaining"] = credits_info["credits_remaining"]
+				
+				return jsonify(result), 200
 		
 		# Fallback if OpenAI response is empty
 		print("[ERROR] OpenAI returned empty response")
@@ -1090,13 +1114,34 @@ def vision_detect():
 # /predict endpoint removed - now using /api/vision-detect with OpenAI Vision
 
 
-@app.route("/api/recognize-exercise", methods=["POST"])
+@app.route("/api/recognize-exercise", methods=["POST", "OPTIONS"])
 def recognize_exercise():
 	"""
 	Exercise recognition endpoint: image → exercise name.
 	Same pattern as vision-detect - just call OpenAI Vision directly.
+	Also deducts 1 credit from user's account on successful recognition.
 	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
 	import base64
+	
+	# Get user ID for credit deduction
+	user_id = None
+	auth_header = request.headers.get("Authorization")
+	if auth_header and auth_header.startswith("Bearer "):
+		access_token = auth_header.replace("Bearer ", "").strip()
+		if access_token and SUPABASE_AVAILABLE:
+			try:
+				SUPABASE_URL = os.getenv("SUPABASE_URL")
+				SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+				if SUPABASE_URL and SUPABASE_ANON_KEY:
+					supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+					user_response = supabase_client.auth.get_user(access_token)
+					if user_response.user:
+						user_id = user_response.user.id
+			except Exception as e:
+				print(f"[WARNING] Could not get user ID for credit deduction: {e}")
 	
 	try:
 		if not OPENAI_AVAILABLE:
@@ -1191,7 +1236,14 @@ def recognize_exercise():
 					pass
 				
 				print(f"[DEBUG] Final exercise: '{exercise_name}'")
-				return jsonify({"exercise": exercise_name}), 200
+				
+				# Deduct credit if user is authenticated (only on successful recognition)
+				result = {"exercise": exercise_name}
+				if user_id:
+					credits_info = _deduct_credit_for_user(user_id)
+					result["credits_remaining"] = credits_info["credits_remaining"]
+				
+				return jsonify(result), 200
 		
 		print("[DEBUG] No response from OpenAI")
 		return jsonify({"exercise": "unknown exercise"}), 200
@@ -1201,6 +1253,188 @@ def recognize_exercise():
 		import traceback
 		traceback.print_exc()
 		return jsonify({"exercise": "unknown exercise"}), 200
+
+
+@app.route("/api/user-credits", methods=["GET", "OPTIONS"])
+def user_credits():
+	"""
+	Get user credits from Supabase.
+	Handles monthly reset automatically.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# Get Authorization header
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Missing or invalid Authorization header"}), 401
+	
+	# Extract access token
+	access_token = auth_header.replace("Bearer ", "").strip()
+	if not access_token:
+		return jsonify({"error": "Missing access token"}), 401
+	
+	# Initialize Supabase clients
+	SUPABASE_URL = os.getenv("SUPABASE_URL")
+	SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+	
+	if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+		return jsonify({"error": "Supabase configuration missing"}), 500
+	
+	try:
+		# Get user from token
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+		
+		user_id = user_response.user.id
+		
+		# Use service role key for database operations
+		if SUPABASE_SERVICE_ROLE_KEY:
+			admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		else:
+			# Fallback to anon key if service role not available
+			admin_client = supabase_client
+		
+		# Get current month
+		now = datetime.now()
+		current_month = now.strftime("%Y-%m")
+		
+		# Try to get existing credits record
+		credits_response = admin_client.table("user_credits").select("*").eq("user_id", user_id).execute()
+		
+		if credits_response.data and len(credits_response.data) > 0:
+			credits_record = credits_response.data[0]
+			last_reset_month = credits_record.get("last_reset_month")
+			
+			# Reset credits if it's a new month
+			if last_reset_month != current_month:
+				# Reset to 10 credits for new month
+				update_response = admin_client.table("user_credits").update({
+					"credits_remaining": 10,
+					"last_reset_month": current_month,
+					"updated_at": now.isoformat()
+				}).eq("user_id", user_id).execute()
+				
+				credits_remaining = 10
+			else:
+				credits_remaining = credits_record.get("credits_remaining", 10)
+		else:
+			# Create new record with 10 credits
+			insert_response = admin_client.table("user_credits").insert({
+				"user_id": user_id,
+				"credits_remaining": 10,
+				"last_reset_month": current_month
+			}).execute()
+			
+			credits_remaining = 10
+		
+		return jsonify({
+			"credits_remaining": credits_remaining,
+			"last_reset_month": current_month
+		}), 200
+		
+	except Exception as e:
+		print(f"[ERROR] Error getting user credits: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": "Failed to get credits", "details": str(e)}), 500
+
+
+@app.route("/api/user-credits/deduct", methods=["POST", "OPTIONS"])
+def deduct_user_credits():
+	"""
+	Deduct 1 credit from user's account.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# Get Authorization header
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Missing or invalid Authorization header"}), 401
+	
+	# Extract access token
+	access_token = auth_header.replace("Bearer ", "").strip()
+	if not access_token:
+		return jsonify({"error": "Missing access token"}), 401
+	
+	# Initialize Supabase clients
+	SUPABASE_URL = os.getenv("SUPABASE_URL")
+	SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+	
+	if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+		return jsonify({"error": "Supabase configuration missing"}), 500
+	
+	try:
+		# Get user from token
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+		
+		user_id = user_response.user.id
+		
+		# Use service role key for database operations
+		if SUPABASE_SERVICE_ROLE_KEY:
+			admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		else:
+			admin_client = supabase_client
+		
+		# Get current month
+		now = datetime.now()
+		current_month = now.strftime("%Y-%m")
+		
+		# Get existing credits record
+		credits_response = admin_client.table("user_credits").select("*").eq("user_id", user_id).execute()
+		
+		if credits_response.data and len(credits_response.data) > 0:
+			credits_record = credits_response.data[0]
+			last_reset_month = credits_record.get("last_reset_month")
+			current_credits = credits_record.get("credits_remaining", 10)
+			
+			# Reset if new month
+			if last_reset_month != current_month:
+				credits_remaining = 10
+			else:
+				credits_remaining = max(0, current_credits - 1)
+			
+			# Update credits
+			update_response = admin_client.table("user_credits").update({
+				"credits_remaining": credits_remaining,
+				"last_reset_month": current_month,
+				"updated_at": now.isoformat()
+			}).eq("user_id", user_id).execute()
+		else:
+			# Create new record with 9 credits (10 - 1)
+			insert_response = admin_client.table("user_credits").insert({
+				"user_id": user_id,
+				"credits_remaining": 9,
+				"last_reset_month": current_month
+			}).execute()
+			credits_remaining = 9
+		
+		return jsonify({
+			"credits_remaining": credits_remaining,
+			"last_reset_month": current_month
+		}), 200
+		
+	except Exception as e:
+		print(f"[ERROR] Error deducting credits: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": "Failed to deduct credits", "details": str(e)}), 500
 
 
 @app.route("/health", methods=["GET"])
