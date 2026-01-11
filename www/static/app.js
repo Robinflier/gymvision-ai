@@ -267,9 +267,11 @@ async function updateAIDetectButtons() {
 			if (hasNoCredits) {
 				aiDetectBtn.style.opacity = '0.5';
 				aiDetectBtn.style.cursor = 'not-allowed';
+				aiDetectBtn.style.pointerEvents = 'none';
 			} else {
 				aiDetectBtn.style.opacity = '1';
 				aiDetectBtn.style.cursor = 'pointer';
+				aiDetectBtn.style.pointerEvents = 'auto';
 			}
 		}
 		
@@ -1798,11 +1800,14 @@ function initExerciseSelector() {
 					
 					if (!res.ok) {
 						if (res.status === 403) {
-							const errorData = await res.json();
+							const errorData = await res.json().catch(() => ({}));
 							if (errorData.error === 'no_credits') {
 								alert('You are out of your monthly credits');
 								// Update buttons to reflect no credits
 								updateAIDetectButtons();
+								aiDetectBtn.disabled = false;
+								aiDetectBtn.textContent = 'AI-detect';
+								fileInput.value = '';
 								return;
 							}
 						}

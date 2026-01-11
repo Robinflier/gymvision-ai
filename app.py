@@ -1107,7 +1107,51 @@ def vision_detect():
 		# Get user message (optional, defaults to "welke oefening is dit?")
 		user_message = request.form.get("message", "Welke oefening is dit?")
 		
-		# Call OpenAI Vision for chat response
+		# Get user ID and check credits BEFORE making OpenAI API call
+		user_id = None
+		auth_header = request.headers.get("Authorization")
+		if auth_header and auth_header.startswith("Bearer "):
+			access_token = auth_header.replace("Bearer ", "").strip()
+			if access_token and SUPABASE_AVAILABLE:
+				try:
+					SUPABASE_URL = os.getenv("SUPABASE_URL")
+					SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+					if SUPABASE_URL and SUPABASE_ANON_KEY:
+						supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+						user_response = supabase_client.auth.get_user(access_token)
+						if user_response.user:
+							user_id = user_response.user.id
+							
+							# Check credits BEFORE making OpenAI API call
+							if user_id:
+								try:
+									# Check if user has credits (but don't deduct yet)
+									SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+									if SUPABASE_SERVICE_ROLE_KEY:
+										admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+										now = datetime.now()
+										current_month = now.strftime("%Y-%m")
+										credits_response = admin_client.table("user_credits").select("*").eq("user_id", user_id).execute()
+										
+										current_credits = 10  # Default if no record
+										if credits_response.data and len(credits_response.data) > 0:
+											credits_record = credits_response.data[0]
+											last_reset_month = credits_record.get("last_reset_month")
+											current_credits = credits_record.get("credits_remaining", 10)
+											# Reset if new month
+											if last_reset_month != current_month:
+												current_credits = 10
+										
+										# Check if user has credits BEFORE API call
+										if current_credits <= 0:
+											return jsonify({"success": False, "error": "no_credits", "message": "You are out of your monthly credits"}), 403
+								except Exception as e:
+									print(f"[WARNING] Could not check credits: {e}")
+									# Continue if credit check fails (fallback behavior)
+				except Exception as e:
+					print(f"[WARNING] Could not get user ID for credit deduction: {e}")
+		
+		# Call OpenAI Vision for chat response (only if user has credits)
 		client = OpenAI(api_key=api_key)
 		response = client.chat.completions.create(
 			model="gpt-4o-mini",
@@ -1127,23 +1171,6 @@ def vision_detect():
 			max_tokens=200
 		)
 		
-		# Get user ID for credit deduction
-		user_id = None
-		auth_header = request.headers.get("Authorization")
-		if auth_header and auth_header.startswith("Bearer "):
-			access_token = auth_header.replace("Bearer ", "").strip()
-			if access_token and SUPABASE_AVAILABLE:
-				try:
-					SUPABASE_URL = os.getenv("SUPABASE_URL")
-					SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
-					if SUPABASE_URL and SUPABASE_ANON_KEY:
-						supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-						user_response = supabase_client.auth.get_user(access_token)
-						if user_response.user:
-							user_id = user_response.user.id
-				except Exception as e:
-					print(f"[WARNING] Could not get user ID for credit deduction: {e}")
-		
 		# Extract response
 		if response.choices and len(response.choices) > 0:
 			response_content = response.choices[0].message.content
@@ -1152,6 +1179,7 @@ def vision_detect():
 				print(f"[SUCCESS] AI chat response: {chat_response}")
 				
 				# Deduct credit if user is authenticated (only on successful recognition)
+				# Credits were already checked before the API call, so this should always succeed
 				result = {
 					"success": True,
 					"message": chat_response
@@ -1161,7 +1189,7 @@ def vision_detect():
 						credits_info = _deduct_credit_for_user(user_id)
 						result["credits_remaining"] = credits_info["credits_remaining"]
 					except ValueError as e:
-						# No credits remaining - return error
+						# This should not happen since we checked before, but handle it anyway
 						if "No credits remaining" in str(e):
 							return jsonify({"success": False, "error": "no_credits", "message": "You are out of your monthly credits"}), 403
 						raise
@@ -1201,7 +1229,7 @@ def recognize_exercise():
 	
 	import base64
 	
-	# Get user ID for credit deduction
+	# Get user ID and check credits BEFORE making OpenAI API call
 	user_id = None
 	auth_header = request.headers.get("Authorization")
 	if auth_header and auth_header.startswith("Bearer "):
@@ -1215,6 +1243,33 @@ def recognize_exercise():
 					user_response = supabase_client.auth.get_user(access_token)
 					if user_response.user:
 						user_id = user_response.user.id
+						
+						# Check credits BEFORE making OpenAI API call
+						if user_id:
+							try:
+								# Check if user has credits (but don't deduct yet)
+								SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+								if SUPABASE_SERVICE_ROLE_KEY:
+									admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+									now = datetime.now()
+									current_month = now.strftime("%Y-%m")
+									credits_response = admin_client.table("user_credits").select("*").eq("user_id", user_id).execute()
+									
+									current_credits = 10  # Default if no record
+									if credits_response.data and len(credits_response.data) > 0:
+										credits_record = credits_response.data[0]
+										last_reset_month = credits_record.get("last_reset_month")
+										current_credits = credits_record.get("credits_remaining", 10)
+										# Reset if new month
+										if last_reset_month != current_month:
+											current_credits = 10
+									
+									# Check if user has credits BEFORE API call
+									if current_credits <= 0:
+										return jsonify({"error": "no_credits", "message": "You are out of your monthly credits"}), 403
+							except Exception as e:
+								print(f"[WARNING] Could not check credits: {e}")
+								# Continue if credit check fails (fallback behavior)
 			except Exception as e:
 				print(f"[WARNING] Could not get user ID for credit deduction: {e}")
 	

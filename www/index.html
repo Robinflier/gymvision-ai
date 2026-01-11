@@ -403,9 +403,29 @@
 				</div>
 			</section>
 
-			<!-- Weight Chart - REMOVED (code preserved in app.js for future use) -->
-
-			<!-- Heatmap moved to workouts tab -->
+			<section class="card progress-chart-card">
+				<div class="progress-chart-header">
+					<h3>Weight Progress</h3>
+					<input type="date" id="progress-date" class="progress-chart-date-input" />
+				</div>
+				<div class="progress-chart-wrapper" data-unit="kg">
+					<canvas id="progress-chart"></canvas>
+					<div id="progress-empty" class="progress-empty">No weight data yet</div>
+					<div id="progress-y-labels" class="progress-y-labels"></div>
+					<div id="progress-x-labels" class="progress-x-labels"></div>
+					<div id="progress-tooltip" class="progress-tooltip"></div>
+				</div>
+				<form id="progress-form" class="progress-inline-form">
+					<div class="progress-weight-group">
+						<label for="progress-weight" class="progress-weight-label">Weight</label>
+						<div class="progress-weight-input-wrapper">
+							<input type="number" id="progress-weight" placeholder="0" step="0.1" min="0" />
+							<span id="progress-unit-label" class="progress-inline-unit">kg</span>
+						</div>
+					</div>
+					<button type="submit" class="btn primary progress-inline-submit">Add</button>
+				</form>
+			</section>
 
 			
 		</div>
@@ -630,6 +650,57 @@
 			<button id="exercise-video-close" class="video-modal-close" type="button">✕</button>
 			<div class="video-modal-frame">
 				<iframe id="exercise-video-frame" src="" title="Exercise video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+			</div>
+		</div>
+	</div>
+
+	<!-- Custom Exercise Modal -->
+	<div id="custom-exercise-modal" class="custom-exercise-modal hidden">
+		<div class="custom-exercise-backdrop"></div>
+		<div class="custom-exercise-content">
+			<div class="custom-exercise-header">
+				<h3>Create Custom Exercise</h3>
+				<button id="custom-exercise-close" class="custom-exercise-close" type="button">✕</button>
+			</div>
+			<div class="custom-exercise-form">
+				<div class="custom-exercise-field">
+					<label for="custom-exercise-name">Exercise Name</label>
+					<input type="text" id="custom-exercise-name" placeholder="Enter exercise name" autocomplete="off">
+				</div>
+				<div class="custom-exercise-field">
+					<label>Exercise Type</label>
+					<div class="custom-exercise-type-options">
+						<button type="button" class="custom-exercise-type-btn active" data-type="weight-reps">
+							Weights
+						</button>
+						<button type="button" class="custom-exercise-type-btn" data-type="bodyweight">
+							Bodyweight
+						</button>
+						<button type="button" class="custom-exercise-type-btn" data-type="cardio">
+							Cardio
+						</button>
+					</div>
+				</div>
+				<div class="custom-exercise-field" id="custom-exercise-muscle-field">
+					<label for="custom-exercise-muscle">Primary Muscle</label>
+					<select id="custom-exercise-muscle" class="custom-exercise-muscle-select">
+						<option value="">Select muscle...</option>
+						<option value="chest">Chest</option>
+						<option value="back">Back</option>
+						<option value="shoulders">Shoulders</option>
+						<option value="biceps">Biceps</option>
+						<option value="triceps">Triceps</option>
+						<option value="quads">Quads</option>
+						<option value="hamstrings">Hamstrings</option>
+						<option value="glutes">Glutes</option>
+						<option value="calves">Calves</option>
+						<option value="abs">Abs</option>
+					</select>
+				</div>
+				<div class="custom-exercise-actions">
+					<button type="button" id="custom-exercise-cancel" class="btn">Cancel</button>
+					<button type="button" id="custom-exercise-add" class="btn primary">Add to Workout</button>
+				</div>
 			</div>
 		</div>
 	</div>
