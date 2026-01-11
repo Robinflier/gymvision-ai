@@ -1003,16 +1003,20 @@ def predict():
 	})
 
 def _deduct_credit_for_user(user_id: str) -> dict:
-	"""Helper function to deduct 1 credit from user's account. Returns updated credits info."""
+	"""
+	Helper function to deduct 1 credit from user's account. 
+	Returns updated credits info.
+	Raises ValueError if user has no credits remaining.
+	"""
 	if not SUPABASE_AVAILABLE:
-		return {"credits_remaining": 10, "last_reset_month": None}
+		raise ValueError("Credits system not available")
 	
 	try:
 		SUPABASE_URL = os.getenv("SUPABASE_URL")
 		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 		
 		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-			return {"credits_remaining": 10, "last_reset_month": None}
+			raise ValueError("Credits system not configured")
 		
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 		now = datetime.now()
@@ -1021,6 +1025,9 @@ def _deduct_credit_for_user(user_id: str) -> dict:
 		# Get existing credits record
 		credits_response = admin_client.table("user_credits").select("*").eq("user_id", user_id).execute()
 		
+		current_credits = 10  # Default if no record
+		last_reset_month = None
+		
 		if credits_response.data and len(credits_response.data) > 0:
 			credits_record = credits_response.data[0]
 			last_reset_month = credits_record.get("last_reset_month")
@@ -1028,31 +1035,40 @@ def _deduct_credit_for_user(user_id: str) -> dict:
 			
 			# Reset if new month
 			if last_reset_month != current_month:
-				credits_remaining = 10
-			else:
-				credits_remaining = max(0, current_credits - 1)
-			
-			# Update credits
+				current_credits = 10
+		
+		# Check if user has credits before deducting
+		if current_credits <= 0:
+			raise ValueError("No credits remaining")
+		
+		# Deduct 1 credit
+		credits_remaining = current_credits - 1
+		
+		# Update or create credits record
+		if credits_response.data and len(credits_response.data) > 0:
+			# Update existing record
 			admin_client.table("user_credits").update({
 				"credits_remaining": credits_remaining,
 				"last_reset_month": current_month,
 				"updated_at": now.isoformat()
 			}).eq("user_id", user_id).execute()
 		else:
-			# Create new record with 9 credits (10 - 1)
+			# Create new record
 			admin_client.table("user_credits").insert({
 				"user_id": user_id,
-				"credits_remaining": 9,
+				"credits_remaining": credits_remaining,
 				"last_reset_month": current_month
 			}).execute()
-			credits_remaining = 9
 		
 		return {"credits_remaining": credits_remaining, "last_reset_month": current_month}
+	except ValueError:
+		# Re-raise ValueError (no credits)
+		raise
 	except Exception as e:
 		print(f"[ERROR] Error deducting credit: {e}")
 		import traceback
 		traceback.print_exc()
-		return {"credits_remaining": 10, "last_reset_month": None}
+		raise ValueError(f"Failed to deduct credit: {str(e)}")
 
 
 @app.route("/api/vision-detect", methods=["POST"])
@@ -1141,8 +1157,14 @@ def vision_detect():
 					"message": chat_response
 				}
 				if user_id:
-					credits_info = _deduct_credit_for_user(user_id)
-					result["credits_remaining"] = credits_info["credits_remaining"]
+					try:
+						credits_info = _deduct_credit_for_user(user_id)
+						result["credits_remaining"] = credits_info["credits_remaining"]
+					except ValueError as e:
+						# No credits remaining - return error
+						if "No credits remaining" in str(e):
+							return jsonify({"success": False, "error": "no_credits", "message": "You are out of your monthly credits"}), 403
+						raise
 				
 				return jsonify(result), 200
 		
@@ -1293,8 +1315,14 @@ def recognize_exercise():
 				# Deduct credit if user is authenticated (only on successful recognition)
 				result = {"exercise": exercise_name}
 				if user_id:
-					credits_info = _deduct_credit_for_user(user_id)
-					result["credits_remaining"] = credits_info["credits_remaining"]
+					try:
+						credits_info = _deduct_credit_for_user(user_id)
+						result["credits_remaining"] = credits_info["credits_remaining"]
+					except ValueError as e:
+						# No credits remaining - return error
+						if "No credits remaining" in str(e):
+							return jsonify({"error": "no_credits", "message": "You are out of your monthly credits"}), 403
+						raise
 				
 				return jsonify(result), 200
 		

@@ -129,8 +129,8 @@ function getWeightUnitLabel() {
 
 function createDefaultSets(count = DEFAULT_SET_COUNT, isCardio = false) {
 	if (isCardio) {
-		// Cardio: always just 1 set with min, km, notes
-		return [{ min: '', km: '', notes: '' }];
+		// Cardio: always just 1 set with min, sec, km, cal, notes
+		return [{ min: '', sec: '', km: '', cal: '', notes: '' }];
 	}
 	return Array.from({ length: count }, () => ({ weight: '', reps: '' }));
 }
@@ -170,6 +170,11 @@ function getLastExerciseData(exerciseKey) {
 }
 
 function isBodyweightExercise(exercise) {
+	// Check if custom exercise with bodyweight type
+	if (exercise.isCustom && exercise.exerciseType === 'bodyweight') {
+		return true;
+	}
+	
 	const key = (exercise.key || '').toLowerCase();
 	const display = (exercise.display || '').toLowerCase();
 	
@@ -190,6 +195,14 @@ function isBodyweightExercise(exercise) {
 }
 
 function isCardioExercise(exercise) {
+	// Check if custom exercise with Cardio muscle group
+	if (exercise.muscles && Array.isArray(exercise.muscles)) {
+		const musclesLower = exercise.muscles.map(m => (m || '').toLowerCase());
+		if (musclesLower.includes('cardio')) {
+			return true;
+		}
+	}
+	
 	const key = (exercise.key || '').toLowerCase();
 	const display = (exercise.display || '').toLowerCase();
 	
@@ -244,6 +257,7 @@ async function updateAIDetectButtons() {
 		const aiDetectBtn = document.getElementById('exercise-selector-ai-detect');
 		const aiDetectChatFile = document.getElementById('ai-detect-chat-file');
 		const aiDetectChatFileLabel = document.querySelector('.ai-detect-chat-file-label');
+		const fileInput = document.getElementById('exercise-selector-file');
 		
 		const hasNoCredits = creditsInfo.credits_remaining <= 0;
 		
@@ -257,6 +271,11 @@ async function updateAIDetectButtons() {
 				aiDetectBtn.style.opacity = '1';
 				aiDetectBtn.style.cursor = 'pointer';
 			}
+		}
+		
+		// Disable/enable file input for AI detect
+		if (fileInput) {
+			fileInput.disabled = hasNoCredits;
 		}
 		
 		// Disable/enable AI detect chat file input
@@ -1891,6 +1910,16 @@ function initExerciseSelector() {
 			};
 			musclesContainer.appendChild(btn);
 		});
+		
+		// Add "+" button for custom exercise
+		const addCustomBtn = document.createElement('button');
+		addCustomBtn.textContent = '+';
+		addCustomBtn.className = 'exercise-selector-add-custom';
+				addCustomBtn.style.cssText = 'background:var(--accent);border:1px solid var(--accent);color:#fff;font-weight:700;font-size:18px;';
+		addCustomBtn.onclick = () => {
+			openCustomExerciseModal();
+		};
+		musclesContainer.appendChild(addCustomBtn);
 	}
 	
 	if (searchInput) {
@@ -1946,8 +1975,18 @@ function initExerciseSelector() {
 		}
 		
 		filtered.forEach(ex => {
+			const isCustom = ex.isCustom === true;
+			
+			// Create wrapper for custom exercises with delete button
+			const wrapper = document.createElement('div');
+			wrapper.className = 'exercise-selector-item-wrapper';
+			wrapper.style.cssText = 'display:flex;align-items:center;gap:8px;position:relative;';
+			
 			const item = document.createElement('button');
 			item.className = 'exercise-selector-item';
+			if (isCustom) {
+				item.style.flex = '1';
+			}
 			const imageSrc = getExerciseImageSource(ex);
 			const initial = (ex.display || ex.key || '?').charAt(0).toUpperCase();
 			item.innerHTML = `
@@ -1957,7 +1996,7 @@ function initExerciseSelector() {
 						: `<div class="exercise-selector-item-image" style="background:rgba(124,92,255,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;">${initial}</div>`}
 				<div class="exercise-selector-item-content">
 					<div style="font-weight: 600;">${ex.display}</div>
-					${ex.muscles && ex.muscles.length > 0 ? `<span>${[...new Set(ex.muscles)].join(', ')}</span>` : ''}
+					${ex.muscles && ex.muscles.length > 0 ? `<span>${[...new Set(ex.muscles.filter(m => m && m !== '-'))].join(', ')}</span>` : ''}
 					</div>
 				</div>
 			`;
@@ -2031,9 +2070,181 @@ function initExerciseSelector() {
 				selector.classList.add('hidden');
 				document.body.classList.remove('selector-open');
 			};
+			
+			if (isCustom) {
+				// Add delete button for custom exercises
+				const deleteBtn = document.createElement('button');
+				deleteBtn.className = 'exercise-selector-delete-custom';
+				deleteBtn.setAttribute('data-exercise-key', ex.key);
+				deleteBtn.setAttribute('aria-label', 'Delete custom exercise');
+				deleteBtn.innerHTML = '<img src="static/close.png" alt="Delete" style="width:14px;height:14px;filter:invert(1);">';
+				deleteBtn.onclick = (e) => {
+					e.stopPropagation();
+					if (confirm('Are you sure you want to delete this custom exercise?')) {
+						deleteCustomExercise(ex.key);
+						// Refresh the exercise list
+						filterExercises(searchInput?.value || '', selectedMuscle);
+					}
+				};
+				wrapper.appendChild(item);
+				wrapper.appendChild(deleteBtn);
+				resultsContainer.appendChild(wrapper);
+			} else {
 			resultsContainer.appendChild(item);
+			}
 		});
 	}
+
+	// Custom Exercise Modal Functions
+	function openCustomExerciseModal() {
+		const modal = document.getElementById('custom-exercise-modal');
+		const nameInput = document.getElementById('custom-exercise-name');
+		const muscleField = document.getElementById('custom-exercise-muscle-field');
+		if (modal) {
+			modal.classList.remove('hidden');
+			document.body.classList.add('custom-exercise-modal-open');
+			// Show muscle field by default (weight-reps is default)
+			if (muscleField) {
+				muscleField.style.display = '';
+			}
+			if (nameInput) {
+				setTimeout(() => nameInput.focus(), 100);
+			}
+		}
+	}
+
+	function closeCustomExerciseModal() {
+		const modal = document.getElementById('custom-exercise-modal');
+		const nameInput = document.getElementById('custom-exercise-name');
+		const muscleSelect = document.getElementById('custom-exercise-muscle');
+		if (modal) {
+			modal.classList.add('hidden');
+			document.body.classList.remove('custom-exercise-modal-open');
+			if (nameInput) {
+				nameInput.value = '';
+			}
+			if (muscleSelect) {
+				muscleSelect.value = '';
+			}
+			// Reset type to default
+			const typeBtns = document.querySelectorAll('.custom-exercise-type-btn');
+			typeBtns.forEach(btn => btn.classList.remove('active'));
+			if (typeBtns[0]) typeBtns[0].classList.add('active');
+			// Show muscle field by default
+			const muscleField = document.getElementById('custom-exercise-muscle-field');
+			if (muscleField) {
+				muscleField.style.display = '';
+			}
+		}
+	}
+
+	function initCustomExerciseModal() {
+		const modal = document.getElementById('custom-exercise-modal');
+		if (!modal) return;
+
+		const closeBtn = document.getElementById('custom-exercise-close');
+		const cancelBtn = document.getElementById('custom-exercise-cancel');
+		const addBtn = document.getElementById('custom-exercise-add');
+		const nameInput = document.getElementById('custom-exercise-name');
+		const muscleSelect = document.getElementById('custom-exercise-muscle');
+		const muscleField = document.getElementById('custom-exercise-muscle-field');
+		const typeBtns = document.querySelectorAll('.custom-exercise-type-btn');
+		const backdrop = modal.querySelector('.custom-exercise-backdrop');
+
+		let selectedType = 'weight-reps';
+
+		// Type selection
+		typeBtns.forEach(btn => {
+			btn.addEventListener('click', () => {
+				typeBtns.forEach(b => b.classList.remove('active'));
+				btn.classList.add('active');
+				selectedType = btn.dataset.type;
+				
+				// Show/hide muscle field based on type
+				if (muscleField) {
+					if (selectedType === 'cardio') {
+						muscleField.style.display = 'none';
+					} else {
+						muscleField.style.display = '';
+					}
+				}
+			});
+		});
+
+		// Close handlers
+		if (closeBtn) {
+			closeBtn.addEventListener('click', closeCustomExerciseModal);
+		}
+		if (cancelBtn) {
+			cancelBtn.addEventListener('click', closeCustomExerciseModal);
+		}
+		if (backdrop) {
+			backdrop.addEventListener('click', closeCustomExerciseModal);
+		}
+
+		// Add exercise handler
+		if (addBtn && nameInput) {
+			addBtn.addEventListener('click', () => {
+				const exerciseName = nameInput.value.trim();
+				if (!exerciseName) {
+					alert('Please enter an exercise name');
+					return;
+				}
+
+				// Create custom exercise object
+				const isCardio = selectedType === 'cardio';
+				const isBodyweight = selectedType === 'bodyweight';
+				const selectedMuscle = muscleSelect?.value || '';
+				
+				// Validate muscle selection for non-cardio exercises
+				if (!isCardio && !selectedMuscle) {
+					alert('Please select a primary muscle for this exercise');
+					return;
+				}
+
+				const customExercise = {
+					key: `custom_${Date.now()}_${exerciseName.toLowerCase().replace(/\s+/g, '_')}`,
+					display: exerciseName,
+					isCustom: true, // Mark as custom so it doesn't try to fetch metadata
+					exerciseType: selectedType, // Store the type: 'weight-reps', 'bodyweight', or 'cardio'
+					muscles: isCardio ? ['Cardio', '-', '-'] : [selectedMuscle.toLowerCase(), '-', '-'],
+					video: null, // No video for custom exercises
+					sets: createDefaultSets(DEFAULT_SET_COUNT, isCardio)
+				};
+
+				// Save custom exercise to localStorage
+				saveCustomExercise(customExercise);
+
+				// Add to workout (custom exercises don't need metadata lookup)
+				if (!currentWorkout) {
+					startNewWorkout();
+				}
+
+				currentWorkout.exercises.push(customExercise);
+
+				renderWorkoutList();
+				saveWorkoutDraft();
+				
+				// Close modals
+				closeCustomExerciseModal();
+				if (selector) selector.classList.add('hidden');
+				document.body.classList.remove('selector-open');
+			});
+		}
+
+		// Enter key to add
+		if (nameInput) {
+			nameInput.addEventListener('keypress', (e) => {
+				if (e.key === 'Enter') {
+					e.preventDefault();
+					if (addBtn) addBtn.click();
+				}
+			});
+		}
+	}
+
+	// Initialize custom exercise modal
+	initCustomExerciseModal();
 
 	// Expose filter for external callers (e.g. when opening selector)
 	window.filterExercisesForSelector = (query, muscle) => {
@@ -2658,6 +2869,9 @@ function hydrateExerciseFromMetadata(exercise) {
 
 function renderExerciseInfoButton(exercise) {
 	if (!exercise) return '';
+	// Don't show info button for custom exercises (no video)
+	if (exercise.isCustom) return '';
+	
 	let videoUrl = exercise.video;
 	if (!videoUrl) {
 		const meta = findExerciseMetadata(exercise);
@@ -2756,9 +2970,9 @@ async function addExerciseToWorkout(exercise) {
 		startNewWorkout();
 	}
 	
-	// Get full exercise info if we only have a key
+	// Get full exercise info if we only have a key (skip for custom exercises)
 	let exerciseData = exercise;
-	if (typeof exercise === 'string' || (exercise && !exercise.display)) {
+	if (!exercise.isCustom && (typeof exercise === 'string' || (exercise && !exercise.display))) {
 		try {
 		const apiUrl = getApiUrl('/exercise-info');
 		const res = await fetch(apiUrl, {
@@ -2784,9 +2998,15 @@ async function addExerciseToWorkout(exercise) {
 		// Reuse case - use previousSets as placeholders, sets start empty
 		const isCardio = isCardioExercise(exerciseData);
 		if (isCardio) {
-			previousSetsForPlaceholder = exerciseData.previousSets.map(s => ({ min: s.min || '', notes: s.notes || '' }));
+			previousSetsForPlaceholder = exerciseData.previousSets.map(s => ({ 
+				min: s.min || '', 
+				sec: s.sec || '', 
+				km: s.km || '', 
+				cal: s.cal || '', 
+				notes: s.notes || '' 
+			}));
 		} else {
-			previousSetsForPlaceholder = exerciseData.previousSets.map(s => ({ weight: s.weight || '', reps: s.reps || '' }));
+		previousSetsForPlaceholder = exerciseData.previousSets.map(s => ({ weight: s.weight || '', reps: s.reps || '' }));
 		}
 		existingSets = createDefaultSets(previousSetsForPlaceholder.length || DEFAULT_SET_COUNT, isCardio);
 	} else {
@@ -2861,21 +3081,31 @@ function renderWorkoutList() {
 		}
 		
 		if (isCardio) {
-			// Cardio: Special layout with Min, KM, and large Notes field
-			const set = ex.sets[0] || { min: '', km: '', notes: '' };
+			// Cardio: Special layout with Min, Sec, KM, Cal, and Notes field
+			const set = ex.sets[0] || { min: '', sec: '', km: '', cal: '', notes: '' };
 			const prevSet = Array.isArray(ex.previousSets) ? ex.previousSets[0] : null;
 			
 			const cardioRow = document.createElement('div');
 			cardioRow.className = 'workout-edit-cardio-row';
 			cardioRow.innerHTML = `
 				<div class="cardio-left">
-					<div class="cardio-field">
-						<label class="cardio-label">Min</label>
-						<input type="number" class="workout-edit-set-input cardio-min" placeholder="0" inputmode="numeric" value="${set.min ?? ''}" aria-label="Minutes">
-					</div>
-					<div class="cardio-field">
-						<label class="cardio-label">KM</label>
-						<input type="number" class="workout-edit-set-input cardio-km" placeholder="0" inputmode="decimal" value="${set.km ?? ''}" aria-label="Kilometers">
+					<div class="cardio-fields-grid">
+						<div class="cardio-field">
+							<label class="cardio-label">Min</label>
+							<input type="number" class="workout-edit-set-input cardio-input" placeholder="0" inputmode="numeric" value="${set.min ?? ''}" aria-label="Minutes">
+						</div>
+						<div class="cardio-field">
+							<label class="cardio-label">Sec</label>
+							<input type="number" class="workout-edit-set-input cardio-input" placeholder="0" inputmode="numeric" value="${set.sec ?? ''}" aria-label="Seconds">
+						</div>
+						<div class="cardio-field">
+							<label class="cardio-label">KM</label>
+							<input type="number" class="workout-edit-set-input cardio-input" placeholder="0" inputmode="decimal" value="${set.km ?? ''}" aria-label="Kilometers">
+						</div>
+						<div class="cardio-field">
+							<label class="cardio-label">Cal</label>
+							<input type="number" class="workout-edit-set-input cardio-input" placeholder="0" inputmode="numeric" value="${set.cal ?? ''}" aria-label="Calories">
+						</div>
 					</div>
 				</div>
 				<div class="cardio-right">
@@ -2884,29 +3114,21 @@ function renderWorkoutList() {
 				</div>
 			`;
 			
-			const minInput = cardioRow.querySelector('.cardio-min');
-			const kmInput = cardioRow.querySelector('.cardio-km');
+			const inputs = cardioRow.querySelectorAll('.cardio-input');
 			const notesInput = cardioRow.querySelector('.cardio-notes');
 			
-			if (minInput) {
-				minInput.addEventListener('input', (e) => {
-					if (!ex.sets[0]) ex.sets[0] = { min: '', km: '', notes: '' };
-					ex.sets[0].min = e.target.value ? Number(e.target.value) : '';
+			inputs.forEach((input, idx) => {
+				const fieldName = ['min', 'sec', 'km', 'cal'][idx];
+				input.addEventListener('input', (e) => {
+					if (!ex.sets[0]) ex.sets[0] = { min: '', sec: '', km: '', cal: '', notes: '' };
+					ex.sets[0][fieldName] = e.target.value ? Number(e.target.value) : '';
 					saveWorkoutDraft();
 				});
-			}
-			
-			if (kmInput) {
-				kmInput.addEventListener('input', (e) => {
-					if (!ex.sets[0]) ex.sets[0] = { min: '', km: '', notes: '' };
-					ex.sets[0].km = e.target.value ? Number(e.target.value) : '';
-					saveWorkoutDraft();
-				});
-			}
+			});
 			
 			if (notesInput) {
 				notesInput.addEventListener('input', (e) => {
-					if (!ex.sets[0]) ex.sets[0] = { min: '', km: '', notes: '' };
+					if (!ex.sets[0]) ex.sets[0] = { min: '', sec: '', km: '', cal: '', notes: '' };
 					ex.sets[0].notes = e.target.value;
 					saveWorkoutDraft();
 				});
@@ -2915,102 +3137,102 @@ function renderWorkoutList() {
 			setsContainer.appendChild(cardioRow);
 		} else {
 			// Regular exercises: header and multiple sets
-			const headerRow = document.createElement('div');
-			headerRow.className = 'workout-edit-set-row workout-edit-set-header';
-			headerRow.innerHTML = `
-				<div class="set-col">Set</div>
-				${isBodyweight ? '' : `<div class="weight-col">${getWeightUnitLabel()}</div>`}
-				<div class="reps-col">Reps</div>
-				<div class="action-col"></div>
-			`;
-			setsContainer.appendChild(headerRow);
+		const headerRow = document.createElement('div');
+		headerRow.className = 'workout-edit-set-row workout-edit-set-header';
+		headerRow.innerHTML = `
+			<div class="set-col">Set</div>
+			${isBodyweight ? '' : `<div class="weight-col">${getWeightUnitLabel()}</div>`}
+			<div class="reps-col">Reps</div>
+			<div class="action-col"></div>
+		`;
+		setsContainer.appendChild(headerRow);
+		
+		ex.sets.forEach((set, setIdx) => {
+			// Get placeholder values from previousSets or from the set itself if it has values
+			const prevSet = Array.isArray(ex.previousSets) ? ex.previousSets[setIdx] : null;
 			
-			ex.sets.forEach((set, setIdx) => {
-				// Get placeholder values from previousSets or from the set itself if it has values
-				const prevSet = Array.isArray(ex.previousSets) ? ex.previousSets[setIdx] : null;
-				
 				const setRow = document.createElement('div');
 				setRow.className = 'workout-edit-set-row data';
 				if ((setIdx % 2) === 1) {
 					setRow.classList.add('even');
 				}
 				// Regular: Weight and Reps columns
-				// For weight placeholder: use set value if it exists, otherwise use previousSet, otherwise 0
-				// Convert to display unit (kg or lbs)
-				const weightKg = (set.weight != null && set.weight !== '') 
-					? set.weight 
-					: (prevSet && prevSet.weight != null && prevSet.weight !== '' ? prevSet.weight : 0);
-				const weightPlaceholder = convertWeightForDisplay(weightKg);
-				const weightDisplayValue = set.weight != null && set.weight !== '' ? convertWeightForDisplay(set.weight) : '';
-				
-				// For reps placeholder: use set value if it exists, otherwise use previousSet, otherwise 0
-				const repsPlaceholder = (set.reps != null && set.reps !== '') 
-					? set.reps 
-					: (prevSet && prevSet.reps != null && prevSet.reps !== '' ? prevSet.reps : 0);
-				
-				setRow.innerHTML = `
-					<div class="set-col">
-						<div class="workout-edit-set-number">${setIdx + 1}</div>
-					</div>
-					${isBodyweight ? '' : `<div class="weight-col">
-						<input type="number" class="workout-edit-set-input weight" placeholder="${weightPlaceholder}" inputmode="decimal" value="${weightDisplayValue}" aria-label="Set weight (${getWeightUnitLabel().toLowerCase()})">
-					</div>`}
-					<div class="reps-col">
-						<input type="number" class="workout-edit-set-input reps" placeholder="${repsPlaceholder}" inputmode="numeric" value="${set.reps ?? ''}" aria-label="Set reps">
-					</div>
-					<div class="action-col">
-						<button type="button" class="workout-edit-set-delete" aria-label="Delete set">
-							<img src="static/close.png" alt="">
-						</button>
-					</div>
-				`;
-				
-				const weightInput = setRow.querySelector('.weight');
-				const repsInput = setRow.querySelector('.reps');
-				const deleteBtn = setRow.querySelector('.workout-edit-set-delete');
-				
-				if (weightInput) {
-					weightInput.addEventListener('input', (e) => {
-						// Convert input value (in current unit) to kg for storage
-						const currentUnit = getWeightUnit();
-						ex.sets[setIdx].weight = convertWeightForStorage(e.target.value, currentUnit);
-						saveWorkoutDraft();
-						// Auto-trigger rest timer if enabled and set is complete (both weight and reps)
-						checkAndTriggerRestTimer(ex.sets[setIdx], e.target.value, repsInput.value, ex);
-					});
-				}
-				
-				repsInput.addEventListener('input', (e) => {
-					ex.sets[setIdx].reps = e.target.value ? Number(e.target.value) : '';
+			// For weight placeholder: use set value if it exists, otherwise use previousSet, otherwise 0
+			// Convert to display unit (kg or lbs)
+			const weightKg = (set.weight != null && set.weight !== '') 
+				? set.weight 
+				: (prevSet && prevSet.weight != null && prevSet.weight !== '' ? prevSet.weight : 0);
+			const weightPlaceholder = convertWeightForDisplay(weightKg);
+			const weightDisplayValue = set.weight != null && set.weight !== '' ? convertWeightForDisplay(set.weight) : '';
+			
+			// For reps placeholder: use set value if it exists, otherwise use previousSet, otherwise 0
+			const repsPlaceholder = (set.reps != null && set.reps !== '') 
+				? set.reps 
+				: (prevSet && prevSet.reps != null && prevSet.reps !== '' ? prevSet.reps : 0);
+			
+			setRow.innerHTML = `
+				<div class="set-col">
+				<div class="workout-edit-set-number">${setIdx + 1}</div>
+				</div>
+				${isBodyweight ? '' : `<div class="weight-col">
+					<input type="number" class="workout-edit-set-input weight" placeholder="${weightPlaceholder}" inputmode="decimal" value="${weightDisplayValue}" aria-label="Set weight (${getWeightUnitLabel().toLowerCase()})">
+				</div>`}
+				<div class="reps-col">
+					<input type="number" class="workout-edit-set-input reps" placeholder="${repsPlaceholder}" inputmode="numeric" value="${set.reps ?? ''}" aria-label="Set reps">
+				</div>
+				<div class="action-col">
+					<button type="button" class="workout-edit-set-delete" aria-label="Delete set">
+						<img src="static/close.png" alt="">
+					</button>
+				</div>
+			`;
+			
+			const weightInput = setRow.querySelector('.weight');
+			const repsInput = setRow.querySelector('.reps');
+			const deleteBtn = setRow.querySelector('.workout-edit-set-delete');
+			
+			if (weightInput) {
+				weightInput.addEventListener('input', (e) => {
+					// Convert input value (in current unit) to kg for storage
+					const currentUnit = getWeightUnit();
+					ex.sets[setIdx].weight = convertWeightForStorage(e.target.value, currentUnit);
 					saveWorkoutDraft();
 					// Auto-trigger rest timer if enabled and set is complete (both weight and reps)
-					const weightValue = weightInput ? weightInput.value : '';
-					checkAndTriggerRestTimer(ex.sets[setIdx], weightValue, e.target.value, ex);
+					checkAndTriggerRestTimer(ex.sets[setIdx], e.target.value, repsInput.value, ex);
 				});
-				
-				if (deleteBtn) {
-					deleteBtn.addEventListener('click', () => {
-						ex.sets.splice(setIdx, 1);
-						renderWorkoutList();
-						saveWorkoutDraft();
-					});
-				}
-				
-				setsContainer.appendChild(setRow);
-			});
+			}
 			
-			// Only show "Add Set" button for non-cardio exercises
-			const addSetBtn = document.createElement('button');
-			addSetBtn.className = 'workout-edit-add-set';
-			addSetBtn.type = 'button';
-			addSetBtn.textContent = '+ Add Set';
-			addSetBtn.addEventListener('click', () => {
-				if (!ex.sets) {
-					ex.sets = [];
+				repsInput.addEventListener('input', (e) => {
+				ex.sets[setIdx].reps = e.target.value ? Number(e.target.value) : '';
+				saveWorkoutDraft();
+				// Auto-trigger rest timer if enabled and set is complete (both weight and reps)
+				const weightValue = weightInput ? weightInput.value : '';
+				checkAndTriggerRestTimer(ex.sets[setIdx], weightValue, e.target.value, ex);
+				});
+			
+				if (deleteBtn) {
+			deleteBtn.addEventListener('click', () => {
+					ex.sets.splice(setIdx, 1);
+					renderWorkoutList();
+				saveWorkoutDraft();
+				});
 				}
-				ex.sets.push({ weight: '', reps: '' });
-				renderWorkoutList();
-			});
+			
+			setsContainer.appendChild(setRow);
+		});
+		
+			// Only show "Add Set" button for non-cardio exercises
+		const addSetBtn = document.createElement('button');
+		addSetBtn.className = 'workout-edit-add-set';
+		addSetBtn.type = 'button';
+		addSetBtn.textContent = '+ Add Set';
+		addSetBtn.addEventListener('click', () => {
+			if (!ex.sets) {
+				ex.sets = [];
+			}
+			ex.sets.push({ weight: '', reps: '' });
+			renderWorkoutList();
+		});
 			setsContainer.appendChild(addSetBtn);
 		}
 		
@@ -3587,7 +3809,9 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 			if (deleteBtn) {
 				deleteBtn.addEventListener('click', (e) => {
 				e.stopPropagation();
+					if (confirm('Are you sure that you want to delete this workout?')) {
 					deleteWorkout(workout.id);
+					}
 			});
 			}
 			
@@ -3613,17 +3837,27 @@ function buildWorkoutExercisesMarkup(workout) {
 		const setsMarkup = sets.length
 			? sets.map((set, idx) => {
 				if (isCardio) {
-					const cardioSet = sets[0] || { min: '', km: '', notes: '' };
+					const cardioSet = sets[0] || { min: '', sec: '', km: '', cal: '', notes: '' };
 					return `
 				<div class="workout-edit-cardio-row view">
 					<div class="cardio-left">
-						<div class="cardio-field">
-							<label class="cardio-label">Min</label>
-							<div class="workout-view-value">${cardioSet.min || '0'}</div>
-						</div>
-						<div class="cardio-field">
-							<label class="cardio-label">KM</label>
-							<div class="workout-view-value">${cardioSet.km || '0'}</div>
+						<div class="cardio-fields-grid">
+							<div class="cardio-field">
+								<label class="cardio-label">Min</label>
+								<div class="workout-view-value">${cardioSet.min || '0'}</div>
+							</div>
+							<div class="cardio-field">
+								<label class="cardio-label">Sec</label>
+								<div class="workout-view-value">${cardioSet.sec || '0'}</div>
+							</div>
+							<div class="cardio-field">
+								<label class="cardio-label">KM</label>
+								<div class="workout-view-value">${cardioSet.km || '0'}</div>
+							</div>
+							<div class="cardio-field">
+								<label class="cardio-label">Cal</label>
+								<div class="workout-view-value">${cardioSet.cal || '0'}</div>
+							</div>
 						</div>
 					</div>
 					<div class="cardio-right">
@@ -3733,6 +3967,10 @@ function getExerciseImageSource(exercise) {
 }
 
 function getExerciseImageCandidates(exercise) {
+	// Custom exercises don't have images from metadata
+	if (exercise.isCustom) {
+		return [];
+	}
 	if (!exercise) return [];
 	if (exercise.image) {
 		// If it's an external URL (http/https), use it directly
@@ -4095,7 +4333,13 @@ function reuseWorkout(workout) {
 			const isCardio = isCardioExercise(ex);
 			const prevSets = Array.isArray(ex.sets) ? ex.sets.map(s => {
 				if (isCardio) {
-					return { min: s.min ?? 0, notes: s.notes ?? '' };
+					return { 
+						min: s.min ?? 0, 
+						sec: s.sec ?? 0, 
+						km: s.km ?? 0, 
+						cal: s.cal ?? 0, 
+						notes: s.notes ?? '' 
+					};
 				} else {
 					return { weight: s.weight ?? 0, reps: s.reps ?? 0 };
 				}
@@ -4123,9 +4367,7 @@ function reuseWorkout(workout) {
 
 // ========== PROGRESS ==========
 function initProgress() {
-	// Weight Chart - DISABLED (code preserved for future use)
 	// Set default date to today
-	/*
 	const dateInput = document.getElementById('progress-date');
 	if (dateInput && !dateInput.value) {
 		const today = new Date();
@@ -4184,7 +4426,6 @@ function initProgress() {
 			}
 		});
 	}
-	*/
 	
 	const filterBtns = document.querySelectorAll('.progress-filter-btn');
 	filterBtns.forEach(btn => {
@@ -4206,15 +4447,12 @@ function initProgress() {
 	
 	loadProgress();
 
-	// Weight Chart - DISABLED (code preserved for future use)
 	// Ensure date input defaults to today on first load
-	/*
 	const dateEl = document.getElementById('progress-date');
 	if (dateEl && !dateEl.value) {
 		const today = new Date();
 		dateEl.value = today.toISOString().slice(0, 10);
 	}
-	*/
 }
 
 async function loadProgress() {
@@ -4238,8 +4476,7 @@ async function loadProgress() {
 		unitLabel.textContent = getWeightUnitLabel().toLowerCase();
 	}
 	
-	// Weight Chart - DISABLED (code preserved for future use)
-	// renderWeightChart(progress);
+	renderWeightChart(progress);
 	renderWorkoutHeatmap(workouts);
 	renderMonthlyHeatmap(workouts);
 	initMonthlyHeatmapNavigation();
@@ -4286,10 +4523,7 @@ function renderWeightChart(progress) {
 		return aKey.localeCompare(bKey);
 	});
 	
-	// Remove the first data point if there are multiple points
-	if (sorted.length > 1) {
-		sorted.shift(); // Remove first element
-	}
+	// Create points from all sorted data - show all dates that were entered
 	const points = sorted.map((p, idx) => ({
 		x: idx,
 		y: p.weight,
@@ -4331,6 +4565,7 @@ function renderWeightChart(progress) {
 	const w = canvas.width - padX * 2;
 	const h = canvas.height - padY * 2;
 
+	// Scale X: if only 1 point, place it in the center; otherwise distribute across width
 	const scaleX = points.length > 1 ? w / (points.length - 1) : 0;
 	const scaleY = maxY === minY ? 1 : h / (maxY - minY);
 
@@ -5249,12 +5484,12 @@ function initRestTimer() {
 			restTimerInitialSeconds = restTimerSeconds;
 			restTimerStartTime = Date.now(); // Reset start time
 			if (restTimerSeconds > 0) {
-				await scheduleRestTimerNotification(restTimerSeconds);
+			await scheduleRestTimerNotification(restTimerSeconds);
 			} else {
 				// Timer reached 0, stop it
 				stopRestTimer();
 				showRestTimerComplete();
-			}
+		}
 		} else {
 			// Timer is not running - just subtract 30 seconds
 			restTimerSeconds = Math.max(0, restTimerSeconds - 30);
@@ -6255,11 +6490,55 @@ async function loadExercises() {
 		}
 		const data = await res.json();
 		allExercises = data.exercises || [];
-		console.log(`[DEBUG] Loaded ${allExercises.length} exercises`);
+		
+		// Load custom exercises from localStorage and add to allExercises
+		const customExercises = getCustomExercises();
+		allExercises = [...allExercises, ...customExercises];
+		
+		console.log(`[DEBUG] Loaded ${allExercises.length} exercises (${customExercises.length} custom)`);
 	} catch (e) {
 		console.error('Failed to load exercises:', e);
 		allExercises = []; // Set empty array on error
 	}
+}
+
+// Custom exercises management
+function getCustomExercises() {
+	try {
+		const stored = localStorage.getItem('custom-exercises');
+		if (!stored) return [];
+		return JSON.parse(stored);
+	} catch (e) {
+		console.error('Failed to load custom exercises:', e);
+		return [];
+	}
+}
+
+function saveCustomExercise(exercise) {
+	const customExercises = getCustomExercises();
+	// Check if exercise already exists (by key)
+	const existingIndex = customExercises.findIndex(ex => ex.key === exercise.key);
+	if (existingIndex >= 0) {
+		customExercises[existingIndex] = exercise;
+	} else {
+		customExercises.push(exercise);
+	}
+	localStorage.setItem('custom-exercises', JSON.stringify(customExercises));
+	// Update allExercises
+	const index = allExercises.findIndex(ex => ex.key === exercise.key);
+	if (index >= 0) {
+		allExercises[index] = exercise;
+	} else {
+		allExercises.push(exercise);
+	}
+}
+
+function deleteCustomExercise(exerciseKey) {
+	const customExercises = getCustomExercises();
+	const filtered = customExercises.filter(ex => ex.key !== exerciseKey);
+	localStorage.setItem('custom-exercises', JSON.stringify(filtered));
+	// Remove from allExercises
+	allExercises = allExercises.filter(ex => ex.key !== exerciseKey);
 }
 
 function loadStreak() {
