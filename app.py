@@ -1002,6 +1002,59 @@ def predict():
 		"top_predictions": top_payloads,
 	})
 
+def _deduct_credit_for_user(user_id: str) -> dict:
+	"""Helper function to deduct 1 credit from user's account. Returns updated credits info."""
+	if not SUPABASE_AVAILABLE:
+		return {"credits_remaining": 10, "last_reset_month": None}
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+		
+		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+			return {"credits_remaining": 10, "last_reset_month": None}
+		
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		now = datetime.now()
+		current_month = now.strftime("%Y-%m")
+		
+		# Get existing credits record
+		credits_response = admin_client.table("user_credits").select("*").eq("user_id", user_id).execute()
+		
+		if credits_response.data and len(credits_response.data) > 0:
+			credits_record = credits_response.data[0]
+			last_reset_month = credits_record.get("last_reset_month")
+			current_credits = credits_record.get("credits_remaining", 10)
+			
+			# Reset if new month
+			if last_reset_month != current_month:
+				credits_remaining = 10
+			else:
+				credits_remaining = max(0, current_credits - 1)
+			
+			# Update credits
+			admin_client.table("user_credits").update({
+				"credits_remaining": credits_remaining,
+				"last_reset_month": current_month,
+				"updated_at": now.isoformat()
+			}).eq("user_id", user_id).execute()
+		else:
+			# Create new record with 9 credits (10 - 1)
+			admin_client.table("user_credits").insert({
+				"user_id": user_id,
+				"credits_remaining": 9,
+				"last_reset_month": current_month
+			}).execute()
+			credits_remaining = 9
+		
+		return {"credits_remaining": credits_remaining, "last_reset_month": current_month}
+	except Exception as e:
+		print(f"[ERROR] Error deducting credit: {e}")
+		import traceback
+		traceback.print_exc()
+		return {"credits_remaining": 10, "last_reset_month": None}
+
+
 @app.route("/api/vision-detect", methods=["POST"])
 def vision_detect():
 	"""Chat endpoint: photo + question → AI chat response."""
