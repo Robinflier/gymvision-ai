@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 import json
 import sqlite3
+import time
+import urllib.parse
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -594,6 +597,24 @@ def register():
 	supabase_url = os.getenv("SUPABASE_URL") or ""
 	supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or ""
 	return render_template("register.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
+
+
+@app.route("/gym-login", methods=["GET"])
+def gym_login():
+	"""Gym login page."""
+	return render_template("gym-login.html")
+
+
+@app.route("/gym-register", methods=["GET"])
+def gym_register():
+	"""Gym registration page."""
+	return render_template("gym-register.html")
+
+
+@app.route("/gym-dashboard", methods=["GET"])
+def gym_dashboard():
+	"""Gym dashboard page."""
+	return render_template("gym-dashboard.html")
 
 
 # /verify and /resend-code endpoints removed - using Supabase for email verification
@@ -1635,6 +1656,658 @@ def exercises_list():
 
 
 # /model-classes endpoint removed - no longer using YOLO models
+
+
+def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = None, has_consent: Optional[bool] = None):
+	"""
+	Sync gym data from user_metadata to gym_analytics table.
+	This function should be called whenever a user updates their gym name or consent.
+	"""
+	if not SUPABASE_AVAILABLE:
+		return False
+	
+	SUPABASE_URL = os.getenv("SUPABASE_URL")
+	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+	
+	if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+		print("[GYM SYNC] Supabase configuration missing")
+		return False
+	
+	try:
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		
+		# Get current user data from auth.users
+		user_response = admin_client.auth.admin.get_user_by_id(user_id)
+		if not user_response.user:
+			print(f"[GYM SYNC] User {user_id} not found")
+			return False
+		
+		user_metadata = user_response.user.user_metadata or {}
+		gym_place_id = user_metadata.get("gym_place_id")
+		
+		# Use provided values or get from metadata
+		if gym_name is None:
+			gym_name = user_metadata.get("gym_name")
+		if has_consent is None:
+			has_consent = user_metadata.get("data_collection_consent", False)
+		
+		# Find matching gym account if gym_name is provided
+		gym_id = None
+		if gym_name:
+			# Search for gym account with matching gym_name
+			all_users = admin_client.auth.admin.list_users()
+			for user in all_users.users:
+				user_meta = user.user_metadata or {}
+				if (user_meta.get("is_gym_account") == True and 
+					user_meta.get("gym_name") and 
+					user_meta.get("gym_name").lower().strip() == gym_name.lower().strip()):
+					gym_id = user.id
+					break
+		
+		# Parse timestamps
+		consent_given_at = None
+		consent_revoked_at = None
+		if has_consent:
+			consent_given_at_str = user_metadata.get("consent_updated_at")
+			if consent_given_at_str:
+				try:
+					consent_given_at = datetime.fromisoformat(consent_given_at_str.replace('Z', '+00:00'))
+				except:
+					consent_given_at = datetime.now()
+		else:
+			consent_revoked_at_str = user_metadata.get("consent_updated_at")
+			if consent_revoked_at_str:
+				try:
+					consent_revoked_at = datetime.fromisoformat(consent_revoked_at_str.replace('Z', '+00:00'))
+				except:
+					consent_revoked_at = datetime.now()
+		
+		gym_name_updated_at = None
+		gym_name_updated_at_str = user_metadata.get("gym_name_updated_at")
+		if gym_name_updated_at_str:
+			try:
+				gym_name_updated_at = datetime.fromisoformat(gym_name_updated_at_str.replace('Z', '+00:00'))
+			except:
+				pass
+		
+		# Check if record exists
+		existing = admin_client.table("gym_analytics").select("*").eq("user_id", user_id).execute()
+		
+		data_to_upsert = {
+			"user_id": user_id,
+			"gym_name": gym_name,
+			"data_collection_consent": has_consent,
+			"updated_at": datetime.now().isoformat()
+		}
+
+		# Store place_id if the table has the column (backwards compatible)
+		if gym_place_id:
+			data_to_upsert["gym_place_id"] = gym_place_id
+		
+		if gym_id:
+			data_to_upsert["gym_id"] = gym_id
+		
+		if consent_given_at:
+			data_to_upsert["consent_given_at"] = consent_given_at.isoformat()
+		if consent_revoked_at:
+			data_to_upsert["consent_revoked_at"] = consent_revoked_at.isoformat()
+		if gym_name_updated_at:
+			data_to_upsert["gym_name_updated_at"] = gym_name_updated_at.isoformat()
+		
+		if existing.data and len(existing.data) > 0:
+			# Update existing record
+			result = admin_client.table("gym_analytics").update(data_to_upsert).eq("user_id", user_id).execute()
+			print(f"[GYM SYNC] Updated gym analytics for user {user_id}, linked to gym_id: {gym_id}")
+		else:
+			# Insert new record
+			data_to_upsert["created_at"] = datetime.now().isoformat()
+			result = admin_client.table("gym_analytics").insert(data_to_upsert).execute()
+			print(f"[GYM SYNC] Created gym analytics record for user {user_id}, linked to gym_id: {gym_id}")
+		
+		return True
+	except Exception as e:
+		print(f"[GYM SYNC] Error syncing gym data: {e}")
+		import traceback
+		traceback.print_exc()
+		return False
+
+
+@app.route("/api/gym-data", methods=["GET", "OPTIONS"])
+def get_gym_data():
+	"""
+	Get gym/sportschool data from users who have given consent.
+	This endpoint can be used for analytics and data collection.
+	Only returns data for users who have data_collection_consent = true.
+	
+	Query parameters:
+	- gym_name: Filter by specific gym name
+	- format: 'json' (default) or 'csv' for export
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# Get Authorization header (admin/service role key required for this endpoint)
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Authentication required"}), 401
+	
+	# Extract token
+	token = auth_header.replace("Bearer ", "").strip()
+	
+	# Check if it's a service role key (for admin access)
+	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+	if not SUPABASE_SERVICE_ROLE_KEY or token != SUPABASE_SERVICE_ROLE_KEY:
+		return jsonify({"error": "Unauthorized - service role key required"}), 403
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		if not SUPABASE_URL:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
+		# Create admin client
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		
+		# Get query parameters
+		gym_name_filter = request.args.get("gym_name")
+		format_type = request.args.get("format", "json")
+		
+		# Query gym_analytics table - only users with consent
+		query = admin_client.table("gym_analytics").select("*").eq("data_collection_consent", True)
+		
+		if gym_name_filter:
+			query = query.eq("gym_name", gym_name_filter)
+		
+		result = query.execute()
+		
+		if format_type == "csv":
+			# Return CSV format
+			import csv
+			import io
+			output = io.StringIO()
+			writer = csv.writer(output)
+			
+			# Write header
+			writer.writerow(["user_id", "gym_name", "consent_given_at", "gym_name_updated_at", "created_at"])
+			
+			# Write data
+			for row in result.data:
+				writer.writerow([
+					row.get("user_id", ""),
+					row.get("gym_name", ""),
+					row.get("consent_given_at", ""),
+					row.get("gym_name_updated_at", ""),
+					row.get("created_at", "")
+				])
+			
+			from flask import Response
+			return Response(
+				output.getvalue(),
+				mimetype="text/csv",
+				headers={"Content-Disposition": "attachment; filename=gym_analytics.csv"}
+			)
+		else:
+			# Return JSON format
+			# Group by gym name for analytics
+			gym_stats = {}
+			for row in result.data:
+				gym_name = row.get("gym_name") or "Unknown"
+				if gym_name not in gym_stats:
+					gym_stats[gym_name] = {
+						"gym_name": gym_name,
+						"user_count": 0,
+						"users": []
+					}
+				gym_stats[gym_name]["user_count"] += 1
+				gym_stats[gym_name]["users"].append({
+					"user_id": row.get("user_id"),
+					"consent_given_at": row.get("consent_given_at"),
+					"gym_name_updated_at": row.get("gym_name_updated_at")
+				})
+			
+			return jsonify({
+				"total_users": len(result.data),
+				"total_gyms": len(gym_stats),
+				"gym_statistics": list(gym_stats.values()),
+				"raw_data": result.data if request.args.get("include_raw") == "true" else None
+			}), 200
+		
+	except Exception as e:
+		print(f"[GYM DATA] Error: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to get gym data: {str(e)}"}), 500
+
+
+@app.route("/api/collect-gym-data", methods=["POST", "OPTIONS"])
+def collect_gym_data():
+	"""
+	Endpoint to collect gym name and data consent from the frontend.
+	Updates user_metadata in Supabase and syncs to gym_analytics table.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	access_token = request.headers.get("Authorization", "").replace("Bearer ", "")
+	if not access_token:
+		return jsonify({"error": "Authentication required"}), 401
+
+	SUPABASE_URL = os.getenv("SUPABASE_URL")
+	SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+	if not SUPABASE_URL or not SUPABASE_ANON_KEY or not SUPABASE_SERVICE_ROLE_KEY:
+		return jsonify({"error": "Supabase configuration missing"}), 500
+
+	try:
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+
+		user_id = user_response.user.id
+		data = request.get_json() or {}
+		gym_name = data.get("gym_name")
+		gym_place_id = data.get("gym_place_id")
+		data_consent = data.get("data_consent")
+
+		# Update user metadata
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		
+		# Fetch current metadata to merge
+		current_metadata = admin_client.auth.admin.get_user_by_id(user_id).user.user_metadata or {}
+		
+		updated_metadata = {**current_metadata}
+		now_iso = datetime.now().isoformat()
+		
+		if gym_name is not None:
+			updated_metadata["gym_name"] = gym_name
+			updated_metadata["gym_name_updated_at"] = now_iso
+
+		if gym_place_id is not None:
+			updated_metadata["gym_place_id"] = gym_place_id
+		
+		if data_consent is not None:
+			updated_metadata["data_collection_consent"] = data_consent
+			updated_metadata["consent_updated_at"] = now_iso
+
+		admin_client.auth.admin.update_user(user_id, {"user_metadata": updated_metadata})
+
+		# Automatically sync to gym_analytics table
+		sync_gym_data_to_analytics_table(user_id, gym_name, data_consent)
+
+		return jsonify({"success": True, "message": "Gym data updated successfully"}), 200
+
+	except Exception as e:
+		print(f"Error collecting gym data: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to update gym data: {str(e)}"}), 500
+
+
+@app.route("/api/gym-data/sync", methods=["POST", "OPTIONS"])
+def sync_gym_data():
+	"""
+	Sync gym data from user_metadata to gym_analytics table.
+	This endpoint is called automatically when a user updates their gym name or consent.
+	Can also be called manually to sync existing data.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# Get Authorization header (user access token)
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Authentication required"}), 401
+	
+	access_token = auth_header.replace("Bearer ", "").strip()
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+		
+		if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
+		# Verify user
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+		
+		user_id = user_response.user.id
+		
+		# Get data from request body (optional - if not provided, will fetch from user_metadata)
+		data = request.get_json() or {}
+		gym_name = data.get("gym_name")
+		has_consent = data.get("data_collection_consent")
+		
+		# Sync to analytics table
+		success = sync_gym_data_to_analytics_table(user_id, gym_name, has_consent)
+		
+		if success:
+			return jsonify({"success": True, "message": "Gym data synced successfully"}), 200
+		else:
+			return jsonify({"error": "Failed to sync gym data"}), 500
+		
+	except Exception as e:
+		print(f"[GYM SYNC] Error: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to sync gym data: {str(e)}"}), 500
+
+
+@app.route("/api/gym/register", methods=["POST", "OPTIONS"])
+def register_gym_account():
+	"""
+	Register a new gym account.
+	Creates a Supabase user with is_gym_account flag in metadata.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	try:
+		data = request.get_json()
+		email = data.get("email")
+		password = data.get("password")
+		gym_name = data.get("gym_name")
+		contact_name = data.get("contact_name", "")
+		contact_phone = data.get("contact_phone", "")
+		
+		if not email or not password or not gym_name:
+			return jsonify({"error": "Email, password, and gym name are required"}), 400
+		
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+		
+		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		
+		# Check if gym name already exists
+		all_users = admin_client.auth.admin.list_users()
+		for user in all_users.users:
+			user_meta = user.user_metadata or {}
+			if (user_meta.get("is_gym_account") == True and 
+				user_meta.get("gym_name") and 
+				user_meta.get("gym_name").lower().strip() == gym_name.lower().strip()):
+				return jsonify({"error": "A gym account with this name already exists"}), 400
+		
+		# Create gym account user
+		user_response = admin_client.auth.admin.create_user({
+			"email": email,
+			"password": password,
+			"email_confirm": True,  # Auto-confirm email for gym accounts
+			"user_metadata": {
+				"is_gym_account": True,
+				"gym_name": gym_name.strip(),
+				"contact_name": contact_name.strip(),
+				"contact_phone": contact_phone.strip()
+			}
+		})
+		
+		if user_response.user:
+			return jsonify({
+				"success": True,
+				"message": "Gym account created successfully",
+				"user_id": user_response.user.id
+			}), 201
+		else:
+			return jsonify({"error": "Failed to create gym account"}), 500
+		
+	except Exception as e:
+		print(f"[GYM REGISTER] Error: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to register gym account: {str(e)}"}), 500
+
+
+@app.route("/api/gym/dashboard", methods=["GET", "OPTIONS"])
+def get_gym_dashboard():
+	"""
+	Get dashboard data for a gym account.
+	Returns statistics about users linked to this gym.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# Get Authorization header
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Authentication required"}), 401
+	
+	access_token = auth_header.replace("Bearer ", "").strip()
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+		
+		if not SUPABASE_URL or not SUPABASE_ANON_KEY or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
+		# Verify user
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+		
+		user_metadata = user_response.user.user_metadata or {}
+		
+		# Check if this is a gym account
+		if user_metadata.get("is_gym_account") != True:
+			return jsonify({"error": "This endpoint is only available for gym accounts"}), 403
+		
+		gym_id = user_response.user.id
+		gym_name = user_metadata.get("gym_name", "Unknown")
+		
+		# Get analytics data for this gym
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		
+		# Get all users linked to this gym
+		analytics_data = admin_client.table("gym_analytics").select("*").eq("gym_id", gym_id).eq("data_collection_consent", True).execute()
+		
+		# Calculate statistics
+		total_users = len(analytics_data.data) if analytics_data.data else 0
+		
+		# Get recent users (last 10)
+		recent_users = []
+		if analytics_data.data:
+			sorted_users = sorted(analytics_data.data, key=lambda x: x.get("created_at", ""), reverse=True)[:10]
+			recent_users = [
+				{
+					"user_id": user.get("user_id"),
+					"gym_name": user.get("gym_name"),
+					"consent_given_at": user.get("consent_given_at"),
+					"created_at": user.get("created_at")
+				}
+				for user in sorted_users
+			]
+		
+		# Get monthly growth (users per month)
+		monthly_growth = {}
+		if analytics_data.data:
+			for user in analytics_data.data:
+				created_at = user.get("created_at")
+				if created_at:
+					try:
+						date = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+						month_key = date.strftime("%Y-%m")
+						monthly_growth[month_key] = monthly_growth.get(month_key, 0) + 1
+					except:
+						pass
+		
+		return jsonify({
+			"success": True,
+			"gym_id": gym_id,
+			"gym_name": gym_name,
+			"statistics": {
+				"total_users": total_users,
+				"users_with_consent": total_users,  # Only users with consent are shown
+				"recent_users": recent_users,
+				"monthly_growth": monthly_growth
+			}
+		}), 200
+		
+	except Exception as e:
+		print(f"[GYM DASHBOARD] Error: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to get gym dashboard: {str(e)}"}), 500
+
+
+@app.route("/api/gym/check", methods=["GET", "OPTIONS"])
+def check_gym_account():
+	"""
+	Check if the current user is a gym account.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# Get Authorization header
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"is_gym_account": False}), 200
+	
+	access_token = auth_header.replace("Bearer ", "").strip()
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+		
+		if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+			return jsonify({"is_gym_account": False}), 200
+		
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if not user_response.user:
+			return jsonify({"is_gym_account": False}), 200
+		
+		user_metadata = user_response.user.user_metadata or {}
+		is_gym_account = user_metadata.get("is_gym_account") == True
+		
+		return jsonify({
+			"is_gym_account": is_gym_account,
+			"gym_name": user_metadata.get("gym_name") if is_gym_account else None
+		}), 200
+		
+	except Exception as e:
+		print(f"[GYM CHECK] Error: {e}")
+		return jsonify({"is_gym_account": False}), 200
+
+
+@app.route("/api/google-places-key", methods=["GET", "OPTIONS"])
+def get_google_places_key():
+	"""
+	Get Google Places API key for frontend autocomplete.
+	This endpoint returns the API key that should be restricted to specific domains/IPs in Google Cloud Console.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	# SECURITY: Do not expose the Google Places API key to the frontend.
+	# Autocomplete is proxied through /api/gym-suggestions instead.
+	return jsonify({"error": "This endpoint is disabled. Use /api/gym-suggestions."}), 410
+
+
+def _google_places_get_json(base_url: str, params: dict) -> dict:
+	"""Backend helper to call Google Places without exposing the API key to clients."""
+	api_key = os.getenv("GOOGLE_PLACES_API_KEY")
+	if not api_key:
+		raise RuntimeError("Google Places API key not configured")
+	params = {**params, "key": api_key}
+	url = f"{base_url}?{urllib.parse.urlencode(params)}"
+	req = urllib.request.Request(url, headers={"User-Agent": "GymVision-AI/1.0"})
+	with urllib.request.urlopen(req, timeout=8) as resp:
+		body = resp.read().decode("utf-8")
+	return json.loads(body)
+
+
+_gym_suggestions_requests: dict[str, list[float]] = defaultdict(list)
+
+
+@app.route("/api/gym-suggestions", methods=["GET", "OPTIONS"])
+def gym_suggestions():
+	"""
+	Backend-proxy for gym autocomplete suggestions (Google Places).
+	Keeps the API key server-side and applies basic per-IP rate limiting.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+
+	q = (request.args.get("q") or "").strip()
+	if len(q) < 2:
+		return jsonify({"predictions": [], "status": "OK"}), 200
+
+	# Basic rate limit: 60 requests/minute per IP (best-effort; per-process)
+	ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",")[0].strip()
+	now = time.time()
+	window_seconds = 60
+	max_requests = 60
+	times = [t for t in _gym_suggestions_requests[ip] if now - t < window_seconds]
+	if len(times) >= max_requests:
+		_gym_suggestions_requests[ip] = times
+		return jsonify({"predictions": [], "status": "OVER_QUERY_LIMIT"}), 429
+	times.append(now)
+	_gym_suggestions_requests[ip] = times
+
+	try:
+		# Places Autocomplete web service endpoint – restricted to NL
+		data = _google_places_get_json(
+			"https://maps.googleapis.com/maps/api/place/autocomplete/json",
+			{
+				"input": q,
+				"language": "nl",
+				"components": "country:nl",
+				"types": "establishment",
+			},
+		)
+
+		status = data.get("status")
+		if status not in ("OK", "ZERO_RESULTS"):
+			return jsonify(
+				{
+					"predictions": [],
+					"status": status or "ERROR",
+					"error_message": data.get("error_message"),
+				}
+			), 200
+
+		preds: list[dict] = []
+		for p in (data.get("predictions") or [])[:6]:
+			sf = p.get("structured_formatting") or {}
+			preds.append(
+				{
+					"place_id": p.get("place_id"),
+					"main_text": (sf.get("main_text") or "").strip(),
+					"secondary_text": (sf.get("secondary_text") or "").strip(),
+					"description": (p.get("description") or "").strip(),
+				}
+			)
+
+		return jsonify({"predictions": preds, "status": status}), 200
+	except Exception as e:
+		print(f"[GYM SUGGESTIONS] Error: {e}")
+		return jsonify({"predictions": [], "status": "ERROR"}), 200
 
 
 @app.route("/api/vision-workout", methods=["POST"])

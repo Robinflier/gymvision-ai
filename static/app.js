@@ -2769,6 +2769,13 @@ async function addExerciseToWorkout(exercise) {
 		}
 	}
 	
+	// Ensure exercise always has a unique key
+	if (!exerciseData.key) {
+		// Generate unique key from display name if key doesn't exist
+		const displaySlug = (exerciseData.display || 'exercise').toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+		exerciseData.key = `${displaySlug}_${Date.now()}`;
+	}
+	
 	currentWorkout.exercises.push({
 		...exerciseData,
 		sets: existingSets,
@@ -2796,7 +2803,7 @@ function renderWorkoutList() {
 					<div class="workout-exercise-name">${ex.display || ex.key}</div>
 				</div>
 				<div class="workout-exercise-actions">
-					<button class="workout-exercise-notes-btn ${getExerciseNotes(ex.key) ? 'has-notes' : ''}" data-exercise-key="${ex.key || ex.display || ''}" data-exercise-index="${idx}" aria-label="Exercise notes" title="Add notes">
+					<button class="workout-exercise-notes-btn ${getExerciseNotes(ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`) ? 'has-notes' : ''}" data-exercise-key="${ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`}" data-exercise-index="${idx}" aria-label="Exercise notes" title="Add notes">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 							<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
 							<polyline points="14 2 14 8 20 8"></polyline>
@@ -2931,7 +2938,8 @@ function renderWorkoutList() {
 		const notesBtn = li.querySelector('.workout-exercise-notes-btn');
 		if (notesBtn) {
 			notesBtn.addEventListener('click', () => {
-				const exerciseKey = ex.key || ex.display || '';
+				// Use key if available, otherwise create unique key from display + index
+				const exerciseKey = ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`;
 				openExerciseNotesModal(exerciseKey, idx);
 			});
 		}
@@ -3043,26 +3051,26 @@ window.saveWorkout = async function() {
 			}
 			return;
 		}
-		
-		const workoutName = document.getElementById('workout-name');
-		if (workoutName) {
-			const nameValue = workoutName.value || 'Workout';
-			const capitalizedName = capitalizeFirstLetter(nameValue);
-			currentWorkout.name = capitalizedName;
-			workoutName.value = capitalizedName; // Update the input field to show capitalized version
-		}
-		
-		currentWorkout.exercises = (currentWorkout.exercises || []).map(ex => ({
-			...ex,
-			sets: (ex.sets || []).filter(set => set.weight !== '' || set.reps !== '')
-		}));
-		
-		let duration = currentWorkout.duration || 0;
-		if (!editingWorkoutId && workoutStartTime) {
-			duration = Date.now() - workoutStartTime;
-		}
-		currentWorkout.duration = duration;
-		
+	
+	const workoutName = document.getElementById('workout-name');
+	if (workoutName) {
+		const nameValue = workoutName.value || 'Workout';
+		const capitalizedName = capitalizeFirstLetter(nameValue);
+		currentWorkout.name = capitalizedName;
+		workoutName.value = capitalizedName; // Update the input field to show capitalized version
+	}
+	
+	currentWorkout.exercises = (currentWorkout.exercises || []).map(ex => ({
+		...ex,
+		sets: (ex.sets || []).filter(set => set.weight !== '' || set.reps !== '')
+	}));
+	
+	let duration = currentWorkout.duration || 0;
+	if (!editingWorkoutId && workoutStartTime) {
+		duration = Date.now() - workoutStartTime;
+	}
+	currentWorkout.duration = duration;
+	
 		// Calculate total volume
 		const volume = calculateWorkoutVolume(currentWorkout);
 		
@@ -3137,44 +3145,44 @@ window.saveWorkout = async function() {
 		}
 		
 		// Also save to localStorage as backup
-		const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-		const payload = {
-			...currentWorkout,
-			id: editingWorkoutId || currentWorkout.id || Date.now(),
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	const payload = {
+				...currentWorkout,
+		id: editingWorkoutId || currentWorkout.id || Date.now(),
 			date: workoutDate
-		};
-		
-		if (editingWorkoutId) {
-			const idx = workouts.findIndex(w => w.id === editingWorkoutId);
-			if (idx >= 0) {
-				workouts[idx] = payload;
-			} else {
-				workouts.push(payload);
-			}
+	};
+	
+	if (editingWorkoutId) {
+		const idx = workouts.findIndex(w => w.id === editingWorkoutId);
+		if (idx >= 0) {
+			workouts[idx] = payload;
 		} else {
 			workouts.push(payload);
 		}
-		localStorage.setItem('workouts', JSON.stringify(workouts));
-		
-		// Update streak for all workouts (recalculate from actual data)
-		loadStreak();
-		
-		// Update daily notification if user just worked out
-		updateDailyNotificationIfNeeded();
-		
-		editingWorkoutId = null;
-		clearWorkoutDraft();
-		
-		const saveSuccess = document.getElementById('save-success');
-		if (saveSuccess) {
-			saveSuccess.classList.remove('hidden');
-			setTimeout(() => {
-				saveSuccess.classList.add('hidden');
-			}, 2000);
-		}
-		
+	} else {
+		workouts.push(payload);
+	}
+	localStorage.setItem('workouts', JSON.stringify(workouts));
+	
+	// Update streak for all workouts (recalculate from actual data)
+	loadStreak();
+	
+	// Update daily notification if user just worked out
+	updateDailyNotificationIfNeeded();
+	
+	editingWorkoutId = null;
+	clearWorkoutDraft();
+	
+	const saveSuccess = document.getElementById('save-success');
+	if (saveSuccess) {
+		saveSuccess.classList.remove('hidden');
+		setTimeout(() => {
+			saveSuccess.classList.add('hidden');
+		}, 2000);
+	}
+	
 		await loadWorkouts();
-		switchTab('workouts');
+	switchTab('workouts');
 	} catch (error) {
 		console.error('[WORKOUT] Unexpected error saving workout:', error);
 		alert('An error occurred while saving the workout. Please try again.');
@@ -3304,11 +3312,11 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 		return;
 	}
 	
-	const { data: { session } } = await supabaseClient.auth.getSession();
-	if (!session) {
-		showLoginScreen();
-		return;
-	}
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			showLoginScreen();
+			return;
+		}
 	
 	let workouts = [];
 	
@@ -3466,8 +3474,8 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 				notesBtn.addEventListener('click', (e) => {
 					e.stopPropagation();
 					const exerciseKey = notesBtn.dataset.exerciseKey || '';
-					// Find exercise index in workout
-					const exerciseIndex = workout.exercises.findIndex(ex => (ex.key || ex.display) === exerciseKey);
+					// Find exercise index in workout - use key for matching
+					const exerciseIndex = workout.exercises.findIndex(ex => ex.key === exerciseKey || (ex.key || ex.display) === exerciseKey);
 					if (exerciseIndex >= 0) {
 						openExerciseNotesModal(exerciseKey, exerciseIndex);
 					}
@@ -3903,9 +3911,9 @@ async function deleteWorkout(id) {
 		}
 		
 		// Also remove from localStorage
-		const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
-		const filtered = workouts.filter(workout => workout.id !== id);
-		localStorage.setItem('workouts', JSON.stringify(filtered));
+	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+	const filtered = workouts.filter(workout => workout.id !== id);
+	localStorage.setItem('workouts', JSON.stringify(filtered));
 		
 		await loadWorkouts();
 	} catch (error) {
@@ -4799,9 +4807,24 @@ function renderProgressiveOverloadTracker(workouts) {
 	
 	// Collect best set per workout per exercise
 	const exerciseData = {};
-	workouts.forEach(workout => {
+	// Sort workouts by date first (newest first) to ensure correct order
+	const sortedWorkouts = [...workouts].sort((a, b) => {
+		const dateA = new Date(a.date || 0).getTime();
+		const dateB = new Date(b.date || 0).getTime();
+		return dateB - dateA; // Newest first
+	});
+	
+	sortedWorkouts.forEach(workout => {
 		if (!workout.exercises || !workout.date) return;
-		const workoutDate = new Date(workout.date);
+		// Parse date as YYYY-MM-DD string to avoid timezone issues
+		let workoutDate;
+		if (typeof workout.date === 'string' && workout.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+			// Use noon to avoid timezone issues
+			workoutDate = new Date(workout.date + 'T12:00:00');
+		} else {
+			workoutDate = new Date(workout.date);
+		}
+		
 		workout.exercises.forEach(exercise => {
 			if (!exercise.sets || !exercise.key) return;
 			const key = exercise.key;
@@ -4826,7 +4849,7 @@ function renderProgressiveOverloadTracker(workouts) {
 							weight,
 							reps,
 							volume,
-							date: workoutDate,
+							date: workoutDate.getTime(), // Store as timestamp for reliable sorting
 							workoutId: workout.id
 						};
 					}
@@ -4840,13 +4863,13 @@ function renderProgressiveOverloadTracker(workouts) {
 		});
 	});
 	
-	// Filter exercises with at least 2 workouts
+	// Filter exercises with at least 2 workouts and sort by date (newest first)
 	const exercisesWithData = Object.entries(exerciseData)
 		.filter(([_, data]) => data.bestSetsPerWorkout.length >= 2)
 		.map(([key, data]) => ({
 			key,
 			display: data.display,
-			bestSetsPerWorkout: data.bestSetsPerWorkout.sort((a, b) => a.date - b.date)
+			bestSetsPerWorkout: data.bestSetsPerWorkout.sort((a, b) => b.date - a.date) // Newest first
 		}));
 	
 	if (exercisesWithData.length === 0) {
@@ -4854,26 +4877,62 @@ function renderProgressiveOverloadTracker(workouts) {
 		return;
 	}
 	
-	// Analyze trend for each exercise - compare best sets from different workouts
+	// Analyze trend for each exercise - compare last workout with previous workout
 	const trends = exercisesWithData.map(ex => {
 		const bestSets = ex.bestSetsPerWorkout;
-		const workoutCount = bestSets.length;
-		const recentCount = Math.min(3, Math.floor(workoutCount / 2));
-		const oldCount = Math.min(3, Math.floor(workoutCount / 2));
 		
-		// Get best sets from recent workouts vs old workouts
-		const recentWorkouts = bestSets.slice(-recentCount);
-		const oldWorkouts = bestSets.slice(0, oldCount);
+		// Remove duplicates by workoutId to ensure we only compare unique workouts
+		const uniqueSets = [];
+		const seenWorkoutIds = new Set();
+		for (const set of bestSets) {
+			if (!seenWorkoutIds.has(set.workoutId)) {
+				seenWorkoutIds.add(set.workoutId);
+				uniqueSets.push(set);
+			}
+		}
 		
-		// Calculate average of best sets from each period
-		const recentAvgVolume = recentWorkouts.reduce((sum, s) => sum + s.volume, 0) / recentWorkouts.length;
-		const oldAvgVolume = oldWorkouts.reduce((sum, s) => sum + s.volume, 0) / oldWorkouts.length;
+		const workoutCount = uniqueSets.length;
 		
-		// Get best set from each period for display
-		const recentBestSet = recentWorkouts.reduce((best, s) => s.volume > best.volume ? s : best, recentWorkouts[0]);
-		const oldBestSet = oldWorkouts.reduce((best, s) => s.volume > best.volume ? s : best, oldWorkouts[0]);
+		// Get the last two unique workouts (most recent and previous)
+		// bestSets is already sorted newest first, so index 0 is most recent
+		const lastWorkout = uniqueSets[0];
+		const previousWorkout = uniqueSets[1];
 		
-		const changePercent = oldAvgVolume > 0 ? ((recentAvgVolume - oldAvgVolume) / oldAvgVolume) * 100 : 0;
+		// If we only have one workout, can't calculate change
+		if (!previousWorkout) {
+			const singleWeight = parseFloat(lastWorkout.weight) || 0;
+			const singleReps = parseInt(lastWorkout.reps) || 0;
+			return {
+				key: ex.key,
+				display: ex.display,
+				status: 'plateau',
+				statusClass: 'plateau',
+				statusText: 'Stable',
+				changePercent: '0.0',
+				recentBest: `${convertWeightForDisplay(singleWeight)}${getWeightUnitLabel().toLowerCase()} × ${singleReps}`,
+				oldBest: `${convertWeightForDisplay(singleWeight)}${getWeightUnitLabel().toLowerCase()} × ${singleReps}`,
+				workoutCount: workoutCount
+			};
+		}
+		
+		// Ensure weight and reps are numbers for accurate comparison
+		const lastWeight = parseFloat(lastWorkout.weight) || 0;
+		const lastReps = parseInt(lastWorkout.reps) || 0;
+		const previousWeight = parseFloat(previousWorkout.weight) || 0;
+		const previousReps = parseInt(previousWorkout.reps) || 0;
+		
+		// Recalculate volumes to ensure accuracy
+		const lastVolume = lastWeight * lastReps;
+		const previousVolume = previousWeight * previousReps;
+		
+		// If weight and reps are exactly the same, change is 0%
+		let changePercent = 0;
+		if (lastWeight === previousWeight && lastReps === previousReps) {
+			changePercent = 0;
+		} else {
+			// Calculate percentage change based on volume
+			changePercent = previousVolume > 0 ? ((lastVolume - previousVolume) / previousVolume) * 100 : 0;
+		}
 		
 		let status = 'plateau';
 		let statusClass = 'plateau';
@@ -4895,8 +4954,8 @@ function renderProgressiveOverloadTracker(workouts) {
 			statusClass,
 			statusText,
 			changePercent: Math.abs(changePercent).toFixed(1),
-			recentBest: `${convertWeightForDisplay(recentBestSet.weight)}${getWeightUnitLabel().toLowerCase()} × ${recentBestSet.reps}`,
-			oldBest: `${convertWeightForDisplay(oldBestSet.weight)}${getWeightUnitLabel().toLowerCase()} × ${oldBestSet.reps}`,
+			recentBest: `${convertWeightForDisplay(lastWeight)}${getWeightUnitLabel().toLowerCase()} × ${lastReps}`,
+			oldBest: `${convertWeightForDisplay(previousWeight)}${getWeightUnitLabel().toLowerCase()} × ${previousReps}`,
 			workoutCount: workoutCount
 		};
 	});
@@ -5014,6 +5073,326 @@ function initSettingsToggles() {
 		});
 	}
 	
+	// Gym/Sportschool input
+	initGymInput();
+	
+	// Data collection consent toggle
+	initDataConsentToggle();
+}
+
+// Initialize gym/sportschool input with backend-proxied Google Places suggestions
+async function initGymInput() {
+	const gymInput = document.getElementById('settings-gym-input');
+	const dropdown = document.getElementById('gym-autocomplete-dropdown');
+	
+	if (!gymInput) {
+		console.warn('[GYM INPUT] Input field not found!');
+		return;
+	}
+	
+	console.log('[GYM INPUT] Initializing gym input field (backend suggestions)');
+	
+	// Load saved gym name
+	loadGymName().then(gymName => {
+		if (gymName) {
+			gymInput.value = gymName;
+			console.log('[GYM INPUT] Loaded gym name:', gymName);
+		}
+	});
+	
+	// Always use backend-proxied suggestions (API key stays server-side)
+	setupBackendGymAutocomplete(gymInput, dropdown);
+}
+
+function setupBackendGymAutocomplete(gymInput, dropdown) {
+	let debounceTimer = null;
+	let lastQuery = '';
+	let lastResults = [];
+
+	async function fetchSuggestions(query) {
+		const apiUrl = getApiUrl(`/api/gym-suggestions?q=${encodeURIComponent(query)}`);
+		const res = await fetch(apiUrl);
+		const data = await res.json().catch(() => ({}));
+		return (data && data.predictions) ? data.predictions : [];
+	}
+
+	function render(predictions) {
+		if (!dropdown) return;
+		dropdown.innerHTML = '';
+		if (!predictions || predictions.length === 0) {
+			dropdown.style.display = 'none';
+			return;
+		}
+		predictions.slice(0, 6).forEach((p) => {
+			const item = document.createElement('div');
+			item.className = 'gym-autocomplete-item';
+			item.innerHTML = `
+				<div class="gym-autocomplete-item-name">${p.main_text || p.description || ''}</div>
+				<div class="gym-autocomplete-item-address">${p.secondary_text || ''}</div>
+			`;
+			item.addEventListener('click', async () => {
+				gymInput.value = (p.main_text || p.description || '').trim();
+				if (p.place_id) gymInput.dataset.placeId = p.place_id;
+				dropdown.style.display = 'none';
+				await saveGymName(gymInput.value, gymInput.dataset.placeId || null);
+			});
+			dropdown.appendChild(item);
+		});
+		dropdown.style.display = 'block';
+	}
+
+	gymInput.addEventListener('input', (e) => {
+		const query = (e.target.value || '').trim();
+		gymInput.dataset.placeId = ''; // reset unless user selects again
+		if (query.length < 2) {
+			if (dropdown) dropdown.style.display = 'none';
+			return;
+		}
+		lastQuery = query;
+		if (debounceTimer) clearTimeout(debounceTimer);
+		debounceTimer = setTimeout(async () => {
+			try {
+				const results = await fetchSuggestions(query);
+				// ignore out-of-order responses
+				if (query !== lastQuery) return;
+				lastResults = results || [];
+				render(lastResults);
+			} catch (err) {
+				console.warn('[GYM INPUT] Suggestions failed:', err);
+				if (dropdown) dropdown.style.display = 'none';
+			}
+		}, 200);
+	});
+
+	// Hide dropdown when clicking outside
+	document.addEventListener('click', (e) => {
+		if (dropdown && !gymInput.contains(e.target) && !dropdown.contains(e.target)) {
+			dropdown.style.display = 'none';
+		}
+	});
+
+	// Save on blur; if user didn't pick, we still save typed value (best-effort)
+	gymInput.addEventListener('blur', async () => {
+		const gymName = gymInput.value.trim();
+		if (gymName) {
+			await saveGymName(gymName, gymInput.dataset.placeId || null);
+		}
+	});
+
+	// Save on Enter key
+	gymInput.addEventListener('keypress', async (e) => {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			gymInput.blur();
+		}
+	});
+}
+
+function setupManualInput(gymInput) {
+	// Fallback: manual input only
+	gymInput.addEventListener('blur', async () => {
+		const gymName = gymInput.value.trim();
+		if (gymName) {
+			console.log('[GYM INPUT] Saving gym name (manual input):', gymName);
+			await saveGymName(gymName);
+		}
+	});
+	
+	// Also save on Enter key
+	gymInput.addEventListener('keypress', async (e) => {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			gymInput.blur();
+		}
+	});
+}
+
+// Initialize data collection consent toggle
+function initDataConsentToggle() {
+	const consentToggle = document.getElementById('settings-data-consent-toggle');
+	if (!consentToggle) return;
+	
+	// Load saved consent state
+	loadDataConsent().then(hasConsent => {
+		consentToggle.checked = hasConsent;
+	});
+	
+	consentToggle.addEventListener('change', async (e) => {
+		const hasConsent = e.target.checked;
+		await saveDataConsent(hasConsent);
+		
+		// If consent is given, also save gym name if it exists
+		if (hasConsent) {
+			const gymInput = document.getElementById('settings-gym-input');
+			if (gymInput && gymInput.value.trim()) {
+				await saveGymName(gymInput.value.trim());
+			}
+		}
+	});
+}
+
+// Save gym name to Supabase user_metadata and sync to analytics table
+async function saveGymName(gymName, placeId = null) {
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		console.warn('[GYM] Supabase not available, saving to localStorage only');
+		localStorage.setItem('user-gym-name', gymName);
+		return;
+	}
+	
+	try {
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			// Not logged in, save to localStorage only
+			localStorage.setItem('user-gym-name', gymName);
+			return;
+		}
+		
+		// Call backend endpoint to update user_metadata and sync to analytics table
+		const apiUrl = getApiUrl('/api/collect-gym-data');
+		const response = await fetch(apiUrl, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${session.access_token}`
+			},
+			body: JSON.stringify({
+				gym_name: gymName || null,
+				gym_place_id: placeId || null
+			})
+		});
+		
+		if (!response.ok) {
+			const errorData = await response.json().catch(() => ({}));
+			console.error('[GYM] Error saving gym name:', errorData);
+			// Fallback to localStorage
+			localStorage.setItem('user-gym-name', gymName);
+		} else {
+			console.log('[GYM] Gym name saved and synced successfully');
+			// Also save to localStorage as backup
+			if (gymName) {
+				localStorage.setItem('user-gym-name', gymName);
+			} else {
+				localStorage.removeItem('user-gym-name');
+			}
+		}
+	} catch (e) {
+		console.error('[GYM] Error saving gym name:', e);
+		// Fallback to localStorage
+		localStorage.setItem('user-gym-name', gymName);
+	}
+}
+
+// Load gym name from Supabase user_metadata or localStorage
+async function loadGymName() {
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		return localStorage.getItem('user-gym-name') || '';
+	}
+	
+	try {
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			return localStorage.getItem('user-gym-name') || '';
+		}
+		
+		const gymName = session.user.user_metadata?.gym_name || '';
+		if (gymName) {
+			// Also update localStorage as backup
+			localStorage.setItem('user-gym-name', gymName);
+			return gymName;
+		}
+		
+		// Fallback to localStorage
+		return localStorage.getItem('user-gym-name') || '';
+	} catch (e) {
+		console.error('[GYM] Error loading gym name:', e);
+		return localStorage.getItem('user-gym-name') || '';
+	}
+}
+
+// Save data collection consent to Supabase user_metadata and sync to analytics table
+async function saveDataConsent(hasConsent) {
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		console.warn('[CONSENT] Supabase not available, saving to localStorage only');
+		localStorage.setItem('user-data-consent', hasConsent ? 'true' : 'false');
+		return;
+	}
+	
+	try {
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			// Not logged in, save to localStorage only
+			localStorage.setItem('user-data-consent', hasConsent ? 'true' : 'false');
+			return;
+		}
+		
+		// Call backend endpoint to update user_metadata and sync to analytics table
+		const apiUrl = getApiUrl('/api/collect-gym-data');
+		const response = await fetch(apiUrl, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${session.access_token}`
+			},
+			body: JSON.stringify({
+				data_consent: hasConsent
+			})
+		});
+		
+		if (!response.ok) {
+			const errorData = await response.json().catch(() => ({}));
+			console.error('[CONSENT] Error saving consent:', errorData);
+			// Fallback to localStorage
+			localStorage.setItem('user-data-consent', hasConsent ? 'true' : 'false');
+		} else {
+			console.log('[CONSENT] Consent saved and synced successfully');
+			// Also save to localStorage as backup
+			localStorage.setItem('user-data-consent', hasConsent ? 'true' : 'false');
+		}
+	} catch (e) {
+		console.error('[CONSENT] Error saving consent:', e);
+		// Fallback to localStorage
+		localStorage.setItem('user-data-consent', hasConsent ? 'true' : 'false');
+	}
+}
+
+// Load data collection consent from Supabase user_metadata or localStorage
+async function loadDataConsent() {
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		return localStorage.getItem('user-data-consent') === 'true';
+	}
+	
+	try {
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			return localStorage.getItem('user-data-consent') === 'true';
+		}
+		
+		const consent = session.user.user_metadata?.data_collection_consent;
+		if (consent !== undefined) {
+			// Also update localStorage as backup
+			localStorage.setItem('user-data-consent', consent ? 'true' : 'false');
+			return consent === true;
+		}
+		
+		// Fallback to localStorage
+		return localStorage.getItem('user-data-consent') === 'true';
+	} catch (e) {
+		console.error('[CONSENT] Error loading consent:', e);
+		return localStorage.getItem('user-data-consent') === 'true';
+	}
+	
 	// Weight unit toggle (kg/lbs)
 	const unitToggle = document.getElementById('settings-unit-toggle');
 	if (unitToggle) {
@@ -5112,12 +5491,12 @@ function initRestTimer() {
 			restTimerInitialSeconds = restTimerSeconds;
 			restTimerStartTime = Date.now(); // Reset start time
 			if (restTimerSeconds > 0) {
-				await scheduleRestTimerNotification(restTimerSeconds);
+			await scheduleRestTimerNotification(restTimerSeconds);
 			} else {
 				// Timer reached 0, stop it
 				stopRestTimer();
 				showRestTimerComplete();
-			}
+		}
 		} else {
 			// Timer is not running - just subtract 30 seconds
 			restTimerSeconds = Math.max(0, restTimerSeconds - 30);
@@ -5752,6 +6131,20 @@ async function loadSettings() {
 				const email = user.email || '—';
 				emailEl.textContent = email;
 				console.log('[SETTINGS] Email set:', email);
+			}
+			
+			// Load gym name
+			const gymInput = document.getElementById('settings-gym-input');
+			if (gymInput) {
+				const gymName = user.user_metadata?.gym_name || localStorage.getItem('user-gym-name') || '';
+				gymInput.value = gymName;
+			}
+			
+			// Load data consent
+			const consentToggle = document.getElementById('settings-data-consent-toggle');
+			if (consentToggle) {
+				const hasConsent = user.user_metadata?.data_collection_consent === true || localStorage.getItem('user-data-consent') === 'true';
+				consentToggle.checked = hasConsent;
 			}
 		} else {
 			// No user but session exists - show placeholder
@@ -6853,16 +7246,23 @@ function openExerciseNotesModal(exerciseKey, exerciseIndex) {
 			closeExerciseNotesModal();
 		});
 		
-		// Save button
-		const saveBtn = modal.querySelector('.exercise-notes-save');
-		saveBtn.addEventListener('click', () => {
-			saveExerciseNotes(exerciseKey, exerciseIndex);
-		});
 	}
 	
-	// Set current exercise key and index
+	// Set current exercise key and index BEFORE setting up listener
 	modal.dataset.exerciseKey = exerciseKey;
 	modal.dataset.exerciseIndex = exerciseIndex;
+	
+	// Remove old save button listener and add new one to ensure it uses current values
+	const saveBtn = modal.querySelector('.exercise-notes-save');
+	// Clone button to remove old listeners
+	const newSaveBtn = saveBtn.cloneNode(true);
+	saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+	// Add new listener that reads from modal.dataset
+	newSaveBtn.addEventListener('click', () => {
+		const currentKey = modal.dataset.exerciseKey || '';
+		const currentIndex = parseInt(modal.dataset.exerciseIndex) || 0;
+		saveExerciseNotes(currentKey, currentIndex);
+	});
 	
 	// Load existing notes from localStorage
 	const textarea = modal.querySelector('#exercise-notes-textarea');
@@ -6888,14 +7288,24 @@ function saveExerciseNotes(exerciseKey, exerciseIndex) {
 	const modal = document.getElementById('exercise-notes-modal');
 	if (!modal) return;
 	
+	// Get values from modal dataset if not provided (fallback)
+	if (!exerciseKey) {
+		exerciseKey = modal.dataset.exerciseKey || '';
+	}
+	if (exerciseIndex === undefined || exerciseIndex === null) {
+		exerciseIndex = parseInt(modal.dataset.exerciseIndex) || 0;
+	}
+	
 	const textarea = modal.querySelector('#exercise-notes-textarea');
+	if (!textarea) return;
+	
 	const notes = textarea.value.trim();
 	
 	// Save to localStorage (linked to exercise key, not workout)
 	saveExerciseNotesToStorage(exerciseKey, notes);
 	
 	// Also update current workout exercise for immediate display
-	if (currentWorkout && currentWorkout.exercises && currentWorkout.exercises[exerciseIndex]) {
+	if (currentWorkout && currentWorkout.exercises && currentWorkout.exercises[exerciseIndex] !== undefined) {
 		currentWorkout.exercises[exerciseIndex].notes = notes;
 		saveWorkoutDraft();
 		renderWorkoutList();
