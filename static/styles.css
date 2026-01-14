@@ -890,6 +890,15 @@ body{
 .settings-toggle-label-left,.settings-toggle-label-right{font-size:11px;font-weight:600;color:#fff;text-transform:lowercase;letter-spacing:0.3px;opacity:1;transition:opacity .3s}
 .settings-toggle input:checked + .settings-toggle-slider .settings-toggle-label-right{opacity:1;color:#fff}
 .settings-toggle input:not(:checked) + .settings-toggle-slider .settings-toggle-label-left{opacity:1;color:#fff}
+
+/* Progress access gate modal */
+.progress-access-modal{position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center}
+.progress-access-modal.hidden{display:none}
+.progress-access-backdrop{position:absolute;inset:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(8px)}
+.progress-access-panel{position:relative;width:min(520px,92vw);background:#121215;border:1px solid rgba(255,255,255,0.10);border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,0.55);padding:18px 18px 14px;display:flex;flex-direction:column;gap:10px}
+.progress-access-title{font-size:18px;font-weight:800;color:#fff}
+.progress-access-text{white-space:pre-line;color:rgba(255,255,255,0.75);font-size:14px;line-height:1.4}
+.progress-access-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:6px}
 /* Weight unit options - vertical layout with white radio buttons */
 .settings-unit-options{display:flex;flex-direction:column;gap:10px}
 .settings-unit-option{display:flex;align-items:center;gap:10px;cursor:pointer;position:relative}

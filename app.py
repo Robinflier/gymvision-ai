@@ -1911,6 +1911,11 @@ def collect_gym_data():
 
 		user_id = user_response.user.id
 		data = request.get_json() or {}
+		# We must distinguish between "field not provided" and "explicitly clear (null)".
+		has_gym_name = "gym_name" in data
+		has_gym_place_id = "gym_place_id" in data
+		has_data_consent = "data_consent" in data
+
 		gym_name = data.get("gym_name")
 		gym_place_id = data.get("gym_place_id")
 		data_consent = data.get("data_consent")
@@ -1924,14 +1929,22 @@ def collect_gym_data():
 		updated_metadata = {**current_metadata}
 		now_iso = datetime.now().isoformat()
 		
-		if gym_name is not None:
-			updated_metadata["gym_name"] = gym_name
+		if has_gym_name:
+			# Allow clearing gym by sending null/empty string
+			if gym_name is None or (isinstance(gym_name, str) and gym_name.strip() == ""):
+				updated_metadata.pop("gym_name", None)
+				updated_metadata.pop("gym_place_id", None)
+			else:
+				updated_metadata["gym_name"] = gym_name
 			updated_metadata["gym_name_updated_at"] = now_iso
 
-		if gym_place_id is not None:
-			updated_metadata["gym_place_id"] = gym_place_id
+		if has_gym_place_id:
+			if gym_place_id is None or (isinstance(gym_place_id, str) and gym_place_id.strip() == ""):
+				updated_metadata.pop("gym_place_id", None)
+			else:
+				updated_metadata["gym_place_id"] = gym_place_id
 		
-		if data_consent is not None:
+		if has_data_consent and data_consent is not None:
 			updated_metadata["data_collection_consent"] = data_consent
 			updated_metadata["consent_updated_at"] = now_iso
 

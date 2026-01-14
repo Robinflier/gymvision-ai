@@ -1253,6 +1253,54 @@ function initNavigation() {
 	console.log('[NAV] Navigation initialized, buttons:', navButtons.length);
 }
 
+function showProgressAccessBlockedModal({ missingGym, missingConsent }) {
+	// Create modal if it doesn't exist
+	let modal = document.getElementById('progress-access-modal');
+	if (!modal) {
+		modal = document.createElement('div');
+		modal.id = 'progress-access-modal';
+		modal.className = 'progress-access-modal hidden';
+		modal.innerHTML = `
+			<div class="progress-access-backdrop" data-close="true"></div>
+			<div class="progress-access-panel" role="dialog" aria-modal="true">
+				<div class="progress-access-title">Progress is locked</div>
+				<div class="progress-access-text" id="progress-access-text"></div>
+				<div class="progress-access-actions">
+					<button type="button" class="btn" id="progress-access-cancel">OK</button>
+					<button type="button" class="btn primary" id="progress-access-go-settings">Go to settings</button>
+				</div>
+			</div>
+		`;
+		document.body.appendChild(modal);
+
+		const close = () => {
+			modal.classList.add('hidden');
+			document.body.classList.remove('modal-open');
+		};
+		modal.querySelectorAll('[data-close="true"]').forEach(el => el.addEventListener('click', close));
+		const cancelBtn = modal.querySelector('#progress-access-cancel');
+		if (cancelBtn) cancelBtn.addEventListener('click', close);
+		const goBtn = modal.querySelector('#progress-access-go-settings');
+		if (goBtn) {
+			goBtn.addEventListener('click', async () => {
+				close();
+				if (window.switchTab) await window.switchTab('settings');
+			});
+		}
+	}
+
+	const lines = [];
+	if (missingGym) lines.push('- Please select your gym in Settings.');
+	if (missingConsent) lines.push('- Please enable “Data collection” in Settings.');
+	const text = modal.querySelector('#progress-access-text');
+	if (text) {
+		text.textContent = `To use the Progress tab:\n\n${lines.join('\n')}`;
+	}
+
+	modal.classList.remove('hidden');
+	document.body.classList.add('modal-open');
+}
+
 // Make switchTab globally available
 window.switchTab = async function(tab) {
 	// If already on login screen, ignore
@@ -1282,6 +1330,33 @@ window.switchTab = async function(tab) {
 	const navbar = document.querySelector('.navbar');
 	if (navbar) {
 		navbar.style.display = '';
+	}
+
+	// Gate Progress tab: requires gym + consent
+	if (tab === 'progress') {
+		// Prefer current UI state (user may have toggled/typed but not yet synced)
+		const gymInputEl = document.getElementById('settings-gym-input');
+		const consentEl = document.getElementById('settings-data-consent-toggle');
+		const gymNameUI = (gymInputEl && typeof gymInputEl.value === 'string') ? gymInputEl.value.trim() : '';
+		const gymNameStored = (localStorage.getItem('user-gym-name') || '').trim();
+		const gymName = gymNameUI || gymNameStored || (await loadGymName()).trim();
+
+		const consentUI = (consentEl && typeof consentEl.checked === 'boolean') ? consentEl.checked : null;
+		const consentStored = localStorage.getItem('user-data-consent');
+		const consentLocal = consentStored === 'true' ? true : (consentStored === 'false' ? false : null);
+		const hasConsent = (consentUI !== null) ? consentUI : (consentLocal !== null ? consentLocal : await loadDataConsent());
+
+		// Best-effort: if user has consent ON locally but metadata might lag, try syncing
+		if (hasConsent === true && consentEl && consentEl.checked === true) {
+			try { saveDataConsent(true); } catch (e) {}
+		}
+		const missingGym = !gymName;
+		const missingConsent = !hasConsent;
+		if (missingGym || missingConsent) {
+			showProgressAccessBlockedModal({ missingGym, missingConsent });
+			// Keep nav state unchanged
+			return;
+		}
 	}
 	
 	// Update nav buttons
@@ -5110,14 +5185,23 @@ function setupBackendGymAutocomplete(gymInput, dropdown) {
 	let lastResults = [];
 	let lastStatus = null;
 	let lastErrorMessage = null;
+	let lastSentQuery = '';
+	let inFlightController = null;
 
 	async function fetchSuggestions(query) {
+		if (query === lastSentQuery) return lastResults || [];
+		lastSentQuery = query;
+		if (inFlightController) {
+			try { inFlightController.abort(); } catch (e) {}
+		}
+		inFlightController = new AbortController();
 		const apiUrl = getApiUrl(`/api/gym-suggestions?q=${encodeURIComponent(query)}`);
-		const res = await fetch(apiUrl);
+		const res = await fetch(apiUrl, { signal: inFlightController.signal });
 		const data = await res.json().catch(() => ({}));
 		lastStatus = data?.status || null;
 		lastErrorMessage = data?.error_message || null;
-		return (data && data.predictions) ? data.predictions : [];
+		lastResults = (data && data.predictions) ? data.predictions : [];
+		return lastResults;
 	}
 
 	function render(predictions) {
@@ -5157,7 +5241,8 @@ function setupBackendGymAutocomplete(gymInput, dropdown) {
 	gymInput.addEventListener('input', (e) => {
 		const query = (e.target.value || '').trim();
 		gymInput.dataset.placeId = ''; // reset unless user selects again
-		if (query.length < 2) {
+		// Cost control: don't query until user typed 3+ chars
+		if (query.length < 3) {
 			if (dropdown) dropdown.style.display = 'none';
 			return;
 		}
@@ -5174,7 +5259,7 @@ function setupBackendGymAutocomplete(gymInput, dropdown) {
 				console.warn('[GYM INPUT] Suggestions failed:', err);
 				if (dropdown) dropdown.style.display = 'none';
 			}
-		}, 200);
+		}, 450);
 	});
 
 	// Hide dropdown when clicking outside
@@ -5187,9 +5272,8 @@ function setupBackendGymAutocomplete(gymInput, dropdown) {
 	// Save on blur; if user didn't pick, we still save typed value (best-effort)
 	gymInput.addEventListener('blur', async () => {
 		const gymName = gymInput.value.trim();
-		if (gymName) {
-			await saveGymName(gymName, gymInput.dataset.placeId || null);
-		}
+		// IMPORTANT: allow clearing the gym (save null)
+		await saveGymName(gymName || null, gymInput.dataset.placeId || null);
 	});
 
 	// Save on Enter key
@@ -5246,12 +5330,25 @@ function initDataConsentToggle() {
 
 // Save gym name to Supabase user_metadata and sync to analytics table
 async function saveGymName(gymName, placeId = null) {
+	// Normalize and update localStorage immediately (so switching tabs doesn't revert)
+	const normalizedGym = (typeof gymName === 'string') ? gymName.trim() : '';
+	const normalizedPlaceId = (typeof placeId === 'string') ? placeId.trim() : '';
+	if (normalizedGym) {
+		localStorage.setItem('user-gym-name', normalizedGym);
+	} else {
+		localStorage.removeItem('user-gym-name');
+	}
+	if (normalizedPlaceId && normalizedGym) {
+		localStorage.setItem('user-gym-place-id', normalizedPlaceId);
+	} else {
+		localStorage.removeItem('user-gym-place-id');
+	}
+
 	if (!supabaseClient) {
 		await initSupabase();
 	}
 	if (!supabaseClient) {
 		console.warn('[GYM] Supabase not available, saving to localStorage only');
-		localStorage.setItem('user-gym-name', gymName);
 		return;
 	}
 	
@@ -5259,7 +5356,6 @@ async function saveGymName(gymName, placeId = null) {
 		const { data: { session } } = await supabaseClient.auth.getSession();
 		if (!session) {
 			// Not logged in, save to localStorage only
-			localStorage.setItem('user-gym-name', gymName);
 			return;
 		}
 		
@@ -5272,29 +5368,19 @@ async function saveGymName(gymName, placeId = null) {
 				'Authorization': `Bearer ${session.access_token}`
 			},
 			body: JSON.stringify({
-				gym_name: gymName || null,
-				gym_place_id: placeId || null
+				gym_name: normalizedGym || null,
+				gym_place_id: normalizedGym ? (normalizedPlaceId || null) : null
 			})
 		});
 		
 		if (!response.ok) {
 			const errorData = await response.json().catch(() => ({}));
 			console.error('[GYM] Error saving gym name:', errorData);
-			// Fallback to localStorage
-			localStorage.setItem('user-gym-name', gymName);
 		} else {
 			console.log('[GYM] Gym name saved and synced successfully');
-			// Also save to localStorage as backup
-			if (gymName) {
-				localStorage.setItem('user-gym-name', gymName);
-			} else {
-				localStorage.removeItem('user-gym-name');
-			}
 		}
 	} catch (e) {
 		console.error('[GYM] Error saving gym name:', e);
-		// Fallback to localStorage
-		localStorage.setItem('user-gym-name', gymName);
 	}
 }
 

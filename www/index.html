@@ -534,6 +534,44 @@
 						</div>
 					</div>
 					
+					<!-- Gym/Sportschool Input -->
+					<div class="settings-option-item" style="position: relative;">
+						<div class="settings-option-left">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+								<path d="M10 2L3 7V9C3 13 6 16.5 10 17.5C14 16.5 17 13 17 9V7L10 2Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+								<path d="M10 10C11.1 10 12 9.1 12 8C12 6.9 11.1 6 10 6C8.9 6 8 6.9 8 8C8 9.1 8.9 10 10 10Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+							</svg>
+							<span class="settings-option-label">Gym</span>
+						</div>
+						<div class="settings-option-right" style="position: relative;">
+							<input type="text" id="settings-gym-input" class="settings-gym-input" placeholder="Search gym..." autocomplete="off">
+							<div id="gym-autocomplete-dropdown" class="gym-autocomplete-dropdown" style="display: none;"></div>
+						</div>
+					</div>
+					
+					<!-- Data Collection Consent -->
+					<div class="settings-option-item">
+						<div class="settings-option-left">
+							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+								<path d="M10 2L3 7V9C3 13 6 16.5 10 17.5C14 16.5 17 13 17 9V7L10 2Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
+								<path d="M7 10L9 12L13 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+							</svg>
+							<div class="settings-option-label-wrapper">
+								<span class="settings-option-label">Data collection</span>
+								<span class="settings-option-sublabel">Allow your gym data to be collected for analytics</span>
+							</div>
+						</div>
+						<div class="settings-option-right">
+							<label class="settings-toggle">
+								<input type="checkbox" id="settings-data-consent-toggle">
+								<span class="settings-toggle-slider">
+									<span class="settings-toggle-label-left"></span>
+									<span class="settings-toggle-label-right"></span>
+								</span>
+							</label>
+						</div>
+					</div>
+					
 				</div>
 				
 				<!-- Action Buttons -->
