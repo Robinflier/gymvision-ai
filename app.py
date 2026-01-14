@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from collections import defaultdict
+from collections import OrderedDict
 from difflib import get_close_matches
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -2244,6 +2245,9 @@ def _google_places_get_json(base_url: str, params: dict) -> dict:
 
 
 _gym_suggestions_requests: dict[str, list[float]] = defaultdict(list)
+_gym_suggestions_cache: "OrderedDict[str, tuple[float, dict]]" = OrderedDict()
+_GYM_SUGGESTIONS_CACHE_TTL_SECONDS = 300  # 5 minutes
+_GYM_SUGGESTIONS_CACHE_MAX = 500
 
 
 @app.route("/api/gym-suggestions", methods=["GET", "OPTIONS"])
@@ -2259,11 +2263,20 @@ def gym_suggestions():
 	if len(q) < 2:
 		return jsonify({"predictions": [], "status": "OK"}), 200
 
+	# Cache (reduces Google billable calls; key is never exposed)
+	cache_key = q.lower().strip()
+	now_ts = time.time()
+	cached = _gym_suggestions_cache.get(cache_key)
+	if cached and (now_ts - cached[0] < _GYM_SUGGESTIONS_CACHE_TTL_SECONDS):
+		# refresh LRU position
+		_gym_suggestions_cache.move_to_end(cache_key)
+		return jsonify(cached[1]), 200
+
 	# Basic rate limit: 60 requests/minute per IP (best-effort; per-process)
 	ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",")[0].strip()
 	now = time.time()
 	window_seconds = 60
-	max_requests = 60
+	max_requests = 30
 	times = [t for t in _gym_suggestions_requests[ip] if now - t < window_seconds]
 	if len(times) >= max_requests:
 		_gym_suggestions_requests[ip] = times
@@ -2272,14 +2285,21 @@ def gym_suggestions():
 	_gym_suggestions_requests[ip] = times
 
 	try:
-		# Places Autocomplete web service endpoint – restricted to NL
+		# IMPORTANT: We only want gyms/sportscholen (not McDonald's/Albert Heijn/etc).
+		# Use Places Text Search with type=gym.
+		# This returns "results" rather than "predictions", but is much better filtered.
+		query = q
+		ql = q.lower()
+		if "sportschool" not in ql and "gym" not in ql:
+			query = f"{q} sportschool"
+
 		data = _google_places_get_json(
-			"https://maps.googleapis.com/maps/api/place/autocomplete/json",
+			"https://maps.googleapis.com/maps/api/place/textsearch/json",
 			{
-				"input": q,
+				"query": query,
+				"type": "gym",
 				"language": "nl",
-				"components": "country:nl",
-				"types": "establishment",
+				"region": "nl",
 			},
 		)
 
@@ -2294,18 +2314,22 @@ def gym_suggestions():
 			), 200
 
 		preds: list[dict] = []
-		for p in (data.get("predictions") or [])[:6]:
-			sf = p.get("structured_formatting") or {}
+		for r in (data.get("results") or [])[:6]:
 			preds.append(
 				{
-					"place_id": p.get("place_id"),
-					"main_text": (sf.get("main_text") or "").strip(),
-					"secondary_text": (sf.get("secondary_text") or "").strip(),
-					"description": (p.get("description") or "").strip(),
+					"place_id": r.get("place_id"),
+					"main_text": (r.get("name") or "").strip(),
+					"secondary_text": (r.get("formatted_address") or "").strip(),
+					"description": (r.get("name") or "").strip(),
 				}
 			)
 
-		return jsonify({"predictions": preds, "status": status}), 200
+		payload = {"predictions": preds, "status": status}
+		_gym_suggestions_cache[cache_key] = (now_ts, payload)
+		_gym_suggestions_cache.move_to_end(cache_key)
+		if len(_gym_suggestions_cache) > _GYM_SUGGESTIONS_CACHE_MAX:
+			_gym_suggestions_cache.popitem(last=False)
+		return jsonify(payload), 200
 	except Exception as e:
 		print(f"[GYM SUGGESTIONS] Error: {e}")
 		return jsonify({"predictions": [], "status": "ERROR"}), 200
