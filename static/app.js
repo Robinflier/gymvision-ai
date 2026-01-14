@@ -5108,11 +5108,15 @@ function setupBackendGymAutocomplete(gymInput, dropdown) {
 	let debounceTimer = null;
 	let lastQuery = '';
 	let lastResults = [];
+	let lastStatus = null;
+	let lastErrorMessage = null;
 
 	async function fetchSuggestions(query) {
 		const apiUrl = getApiUrl(`/api/gym-suggestions?q=${encodeURIComponent(query)}`);
 		const res = await fetch(apiUrl);
 		const data = await res.json().catch(() => ({}));
+		lastStatus = data?.status || null;
+		lastErrorMessage = data?.error_message || null;
 		return (data && data.predictions) ? data.predictions : [];
 	}
 
@@ -5120,7 +5124,16 @@ function setupBackendGymAutocomplete(gymInput, dropdown) {
 		if (!dropdown) return;
 		dropdown.innerHTML = '';
 		if (!predictions || predictions.length === 0) {
-			dropdown.style.display = 'none';
+			// Show a helpful message instead of silently hiding (debug + UX)
+			const msg = document.createElement('div');
+			msg.className = 'gym-autocomplete-item';
+			const friendly =
+				lastStatus === 'REQUEST_DENIED'
+					? 'Geen Google Places results. Check of je API key billing heeft en of zowel “Places API” als “Places API (New)” enabled zijn.'
+					: 'Geen sportscholen gevonden.';
+			msg.innerHTML = `<div class="gym-autocomplete-item-name">${friendly}</div>`;
+			dropdown.appendChild(msg);
+			dropdown.style.display = 'block';
 			return;
 		}
 		predictions.slice(0, 6).forEach((p) => {

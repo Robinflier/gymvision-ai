@@ -1934,7 +1934,8 @@ def collect_gym_data():
 			updated_metadata["data_collection_consent"] = data_consent
 			updated_metadata["consent_updated_at"] = now_iso
 
-		admin_client.auth.admin.update_user(user_id, {"user_metadata": updated_metadata})
+		# supabase-py v2: update_user_by_id (not update_user)
+		admin_client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
 
 		# Automatically sync to gym_analytics table
 		sync_gym_data_to_analytics_table(user_id, gym_name, data_consent)
