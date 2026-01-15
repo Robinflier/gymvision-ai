@@ -1697,7 +1697,15 @@ def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = Non
 		if gym_name:
 			# Search for gym account with matching gym_name
 			all_users = admin_client.auth.admin.list_users()
-			for user in all_users.users:
+			users_list = getattr(all_users, "users", None)
+			if users_list is None and isinstance(all_users, dict):
+				users_list = all_users.get("users")
+			if users_list is None and isinstance(all_users, list):
+				users_list = all_users
+			if users_list is None:
+				users_list = []
+
+			for user in users_list:
 				user_meta = user.user_metadata or {}
 				if (user_meta.get("is_gym_account") == True and 
 					user_meta.get("gym_name") and 
@@ -2052,7 +2060,15 @@ def register_gym_account():
 		
 		# Check if gym name already exists
 		all_users = admin_client.auth.admin.list_users()
-		for user in all_users.users:
+		users_list = getattr(all_users, "users", None)
+		if users_list is None and isinstance(all_users, dict):
+			users_list = all_users.get("users")
+		if users_list is None and isinstance(all_users, list):
+			users_list = all_users
+		if users_list is None:
+			users_list = []
+
+		for user in users_list:
 			user_meta = user.user_metadata or {}
 			if (user_meta.get("is_gym_account") == True and 
 				user_meta.get("gym_name") and 

@@ -5620,6 +5620,13 @@ function setupBackendGymAutocomplete(gymInput, dropdown) {
 	gymInput.addEventListener('input', (e) => {
 		const query = (e.target.value || '').trim();
 		gymInput.dataset.placeId = ''; // reset unless user selects again
+		// Persist immediately so switching tabs doesn't revert the field (blur is unreliable on iOS)
+		if (query) {
+			localStorage.setItem('user-gym-name', query);
+		} else {
+			localStorage.removeItem('user-gym-name');
+			localStorage.removeItem('user-gym-place-id');
+		}
 		// Cost control: don't query until user typed 3+ chars
 		if (query.length < 3) {
 			if (dropdown) dropdown.style.display = 'none';
