@@ -1763,15 +1763,26 @@ def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = Non
 		if gym_name_updated_at:
 			data_to_upsert["gym_name_updated_at"] = gym_name_updated_at.isoformat()
 		
-		if existing.data and len(existing.data) > 0:
-			# Update existing record
-			result = admin_client.table("gym_analytics").update(data_to_upsert).eq("user_id", user_id).execute()
-			print(f"[GYM SYNC] Updated gym analytics for user {user_id}, linked to gym_id: {gym_id}")
-		else:
-			# Insert new record
-			data_to_upsert["created_at"] = datetime.now().isoformat()
-			result = admin_client.table("gym_analytics").insert(data_to_upsert).execute()
-			print(f"[GYM SYNC] Created gym analytics record for user {user_id}, linked to gym_id: {gym_id}")
+		def _execute_upsert(payload: dict, exists: bool):
+			if exists:
+				return admin_client.table("gym_analytics").update(payload).eq("user_id", user_id).execute()
+			payload2 = {**payload, "created_at": datetime.now().isoformat()}
+			return admin_client.table("gym_analytics").insert(payload2).execute()
+
+		exists = bool(existing.data and len(existing.data) > 0)
+		try:
+			result = _execute_upsert(data_to_upsert, exists)
+		except Exception as e:
+			# If schema doesn't include gym_place_id yet, retry without it (avoids log spam)
+			msg = str(e)
+			if "gym_place_id" in msg and ("PGRST204" in msg or "schema cache" in msg):
+				payload = {k: v for k, v in data_to_upsert.items() if k != "gym_place_id"}
+				result = _execute_upsert(payload, exists)
+				print("[GYM SYNC] gym_place_id column missing; synced without gym_place_id (run migration to add column).")
+			else:
+				raise
+
+		print(f"[GYM SYNC] Synced gym analytics for user {user_id}, linked to gym_id: {gym_id}")
 		
 		return True
 	except Exception as e:

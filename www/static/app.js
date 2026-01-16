@@ -182,10 +182,15 @@ function isBodyweightExercise(exercise) {
 	if (key.includes('weighted') || display.includes('weighted')) {
 		return false;
 	}
+
+	// These exercises should allow adding weight (kg)
+	if (key === 'decline_sit_up' || key === 'ab_crunch_machine') {
+		return false;
+	}
 	
 	const bodyweightKeys = [
 		'push_up', 'pull_up', 'chin_up', 'dips', 'diamond_push_up',
-		'crunch', 'decline_sit_up', 'hanging_leg_raise', 'knee_raise'
+		'crunch', 'hanging_leg_raise', 'knee_raise'
 	];
 	return bodyweightKeys.includes(key) || 
 	       display.includes('push-up') || display.includes('pull-up') || 
@@ -5785,15 +5790,17 @@ async function loadGymName() {
 			return localStorage.getItem('user-gym-name') || '';
 		}
 		
-		const gymName = session.user.user_metadata?.gym_name || '';
+		// Prefer localStorage for UI (session metadata can lag behind admin updates)
+		const localGym = (localStorage.getItem('user-gym-name') || '').trim();
+		if (localGym) return localGym;
+
+		const gymName = (session.user.user_metadata?.gym_name || '').trim();
 		if (gymName) {
-			// Also update localStorage as backup
 			localStorage.setItem('user-gym-name', gymName);
 			return gymName;
 		}
-		
-		// Fallback to localStorage
-		return localStorage.getItem('user-gym-name') || '';
+
+		return '';
 	} catch (e) {
 		console.error('[GYM] Error loading gym name:', e);
 		return localStorage.getItem('user-gym-name') || '';
@@ -6621,7 +6628,9 @@ async function loadSettings() {
 			// Load gym name
 			const gymInput = document.getElementById('settings-gym-input');
 			if (gymInput) {
-				const gymName = user.user_metadata?.gym_name || localStorage.getItem('user-gym-name') || '';
+				// Prefer localStorage: it's updated immediately when user types/selects.
+				// Supabase user_metadata can lag behind (admin updates don't refresh session immediately).
+				const gymName = localStorage.getItem('user-gym-name') || user.user_metadata?.gym_name || '';
 				gymInput.value = gymName;
 			}
 			
