@@ -849,6 +849,40 @@ function initLoginForm() {
 		// Verify session exists
 		const { data: { session } } = await supabaseClient.auth.getSession();
 		if (session) {
+			// Enforce auth role (User vs Gym)
+			const role = getAuthRole();
+			const isGymAccount = session.user?.user_metadata?.is_gym_account === true;
+			if (role === 'gym') {
+				if (!isGymAccount) {
+					await supabaseClient.auth.signOut();
+					if (errorEl) {
+						errorEl.textContent = 'This is a user account. Switch to User to sign in.';
+						errorEl.classList.add('show');
+					}
+					if (submitBtn) {
+						submitBtn.disabled = false;
+						submitBtn.textContent = 'Sign In';
+					}
+					return;
+				}
+				// Gym accounts go to the gym dashboard
+				openGymPortal('/gym-dashboard');
+				return;
+			} else {
+				if (isGymAccount) {
+					await supabaseClient.auth.signOut();
+					if (errorEl) {
+						errorEl.textContent = 'This is a gym account. Switch to Gym to sign in.';
+						errorEl.classList.add('show');
+					}
+					if (submitBtn) {
+						submitBtn.disabled = false;
+						submitBtn.textContent = 'Sign In';
+					}
+					return;
+				}
+			}
+
 			console.log('[LOGIN] Login successful, initializing app...');
 			// Hide login content
 			const loginContent = document.getElementById('login-content');
@@ -925,8 +959,12 @@ function initRegisterForm() {
 		const email = document.getElementById('register-email')?.value;
 		const password = document.getElementById('register-password')?.value;
 		const username = document.getElementById('register-username')?.value; // Optional
+		const role = getAuthRole();
+		const gymName = document.getElementById('register-gym-name')?.value?.trim() || '';
+		const contactName = document.getElementById('register-contact-name')?.value?.trim() || '';
+		const contactPhone = document.getElementById('register-contact-phone')?.value?.trim() || '';
 		
-		if (!email || !password) {
+		if (!email || !password || (role === 'gym' && !gymName)) {
 			if (errorEl) {
 				errorEl.textContent = 'Please fill in all required fields';
 				errorEl.classList.add('show');
@@ -935,7 +973,7 @@ function initRegisterForm() {
 			}
 			if (submitBtn) {
 				submitBtn.disabled = false;
-				submitBtn.textContent = 'Sign Up';
+				submitBtn.textContent = (role === 'gym') ? 'Create Gym Account' : 'Sign Up';
 			}
 			return;
 		}
@@ -957,6 +995,68 @@ function initRegisterForm() {
 			return;
 		}
 		
+		// Gym registration uses backend endpoint (service role) so we can set is_gym_account metadata
+		if (role === 'gym') {
+			const apiUrl = getApiUrl('/api/gym/register');
+			const response = await fetch(apiUrl, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					gym_name: gymName,
+					email,
+					password,
+					contact_name: contactName,
+					contact_phone: contactPhone
+				})
+			});
+			const data = await response.json().catch(() => ({}));
+			if (!response.ok) {
+				const msg = data?.error || 'Registration failed';
+				if (errorEl) {
+					errorEl.textContent = msg;
+					errorEl.classList.add('show');
+				} else {
+					alert(msg);
+				}
+				if (submitBtn) {
+					submitBtn.disabled = false;
+					submitBtn.textContent = 'Create Gym Account';
+				}
+				return;
+			}
+
+			// Auto-login and redirect to dashboard
+			const { data: loginData, error: loginError } = await supabaseClient.auth.signInWithPassword({ email, password });
+			if (loginError) {
+				if (errorEl) {
+					errorEl.textContent = loginError.message || 'Failed to sign in';
+					errorEl.classList.add('show');
+				}
+				if (submitBtn) {
+					submitBtn.disabled = false;
+					submitBtn.textContent = 'Create Gym Account';
+				}
+				return;
+			}
+
+			const isGymAccount = loginData?.user?.user_metadata?.is_gym_account === true;
+			if (!isGymAccount) {
+				try { await supabaseClient.auth.signOut(); } catch (e) {}
+				if (errorEl) {
+					errorEl.textContent = 'This account was created as a user account. Please try again.';
+					errorEl.classList.add('show');
+				}
+				if (submitBtn) {
+					submitBtn.disabled = false;
+					submitBtn.textContent = 'Create Gym Account';
+				}
+				return;
+			}
+
+			openGymPortal('/gym-dashboard');
+			return;
+		}
+
 		const { error } = await supabaseClient.auth.signUp({
 			email,
 			password,
@@ -1165,8 +1265,87 @@ async function showLoginScreen() {
 		setTimeout(() => {
 			initLoginForm();
 			initRegisterLink();
+			initAuthRoleToggle();
 		}, 150);
 	}
+}
+
+// ======================
+// 🧑‍💼 USER vs 🏢 GYM AUTH MODE (in-app)
+// ======================
+const AUTH_ROLE_STORAGE_KEY = 'auth-role';
+
+function getAuthRole() {
+	const v = (localStorage.getItem(AUTH_ROLE_STORAGE_KEY) || '').toLowerCase().trim();
+	return v === 'gym' ? 'gym' : 'user';
+}
+
+function setAuthRole(role) {
+	localStorage.setItem(AUTH_ROLE_STORAGE_KEY, role === 'gym' ? 'gym' : 'user');
+	updateAuthRoleUI();
+}
+
+function openGymPortal(path) {
+	const p = path || '/gym-dashboard';
+	// In native app we need absolute URL
+	if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
+		window.location.href = `https://gymvision-ai.onrender.com${p}`;
+		return;
+	}
+	window.location.href = p;
+}
+
+function initAuthRoleToggle() {
+	const buttons = document.querySelectorAll('.auth-role-btn');
+	if (!buttons || !buttons.length) return;
+	buttons.forEach(btn => {
+		if (btn.dataset.bound === 'true') return;
+		btn.dataset.bound = 'true';
+		btn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			setAuthRole(btn.dataset.role === 'gym' ? 'gym' : 'user');
+		});
+	});
+	updateAuthRoleUI();
+}
+
+function updateAuthRoleUI() {
+	const role = getAuthRole();
+	// Toggle active state
+	document.querySelectorAll('.auth-role-toggle').forEach(toggle => {
+		toggle.querySelectorAll('.auth-role-btn').forEach(btn => {
+			btn.classList.toggle('active', (btn.dataset.role === role));
+		});
+	});
+
+	// Update copy
+	const loginSubtitle = document.querySelector('#login-content .auth-subtitle');
+	if (loginSubtitle) loginSubtitle.textContent = (role === 'gym') ? 'Sign in to view your gym analytics' : 'Sign in to continue';
+	const registerTitle = document.querySelector('#register-content .auth-title');
+	const registerSubtitle = document.querySelector('#register-content .auth-subtitle');
+	if (registerTitle) registerTitle.textContent = (role === 'gym') ? 'Register Gym' : 'Create Account';
+	if (registerSubtitle) registerSubtitle.textContent = (role === 'gym') ? 'Create your gym analytics account' : 'Start your fitness journey';
+
+	// Register fields
+	const gymGroup = document.getElementById('register-gym-name-group');
+	const usernameGroup = document.getElementById('register-username-group');
+	const contactNameGroup = document.getElementById('register-contact-name-group');
+	const contactPhoneGroup = document.getElementById('register-contact-phone-group');
+	const gymInput = document.getElementById('register-gym-name');
+	const usernameInput = document.getElementById('register-username');
+
+	const isGym = role === 'gym';
+	if (gymGroup) gymGroup.style.display = isGym ? '' : 'none';
+	if (contactNameGroup) contactNameGroup.style.display = isGym ? '' : 'none';
+	if (contactPhoneGroup) contactPhoneGroup.style.display = isGym ? '' : 'none';
+	if (usernameGroup) usernameGroup.style.display = isGym ? 'none' : '';
+
+	if (gymInput) gymInput.required = isGym;
+	if (usernameInput) usernameInput.required = !isGym;
+
+	const submitBtn = document.getElementById('register-submit-btn');
+	if (submitBtn) submitBtn.textContent = isGym ? 'Create Gym Account' : 'Sign Up';
 }
 
 // Initialize register link
@@ -1199,12 +1378,19 @@ function initRegisterLink() {
 				const registerEmail = document.getElementById('register-email');
 				const registerUsername = document.getElementById('register-username');
 				const registerPassword = document.getElementById('register-password');
+				const registerGymName = document.getElementById('register-gym-name');
+				const registerContactName = document.getElementById('register-contact-name');
+				const registerContactPhone = document.getElementById('register-contact-phone');
 				if (registerEmail) registerEmail.value = '';
 				if (registerUsername) registerUsername.value = '';
 				if (registerPassword) registerPassword.value = '';
+				if (registerGymName) registerGymName.value = '';
+				if (registerContactName) registerContactName.value = '';
+				if (registerContactPhone) registerContactPhone.value = '';
 				// Initialize register form
 				initRegisterForm();
 				initBackToLoginLink();
+				initAuthRoleToggle();
 			}
 		});
 	}
@@ -1243,6 +1429,7 @@ function initBackToLoginLink() {
 				if (loginPassword) loginPassword.value = '';
 				initLoginForm();
 				initRegisterLink();
+				initAuthRoleToggle();
 			}
 		});
 	}
