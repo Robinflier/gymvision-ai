@@ -2185,16 +2185,18 @@ def get_gym_dashboard():
 		except Exception:
 			pass
 		
-		# Get all users linked to this gym
-		analytics_data = admin_client.table("gym_analytics").select("*").eq("gym_id", gym_id).eq("data_collection_consent", True).execute()
+		# Get users linked to this gym (all), and the subset with consent
+		analytics_all = admin_client.table("gym_analytics").select("*").eq("gym_id", gym_id).execute()
+		analytics_consent = admin_client.table("gym_analytics").select("*").eq("gym_id", gym_id).eq("data_collection_consent", True).execute()
 		
 		# Calculate statistics
-		total_users = len(analytics_data.data) if analytics_data.data else 0
+		total_users = len(analytics_all.data) if analytics_all.data else 0
+		users_with_consent = len(analytics_consent.data) if analytics_consent.data else 0
 		
-		# Get recent users (last 10)
+		# Get recent users (last 10) - only users with consent
 		recent_users = []
-		if analytics_data.data:
-			sorted_users = sorted(analytics_data.data, key=lambda x: x.get("created_at", ""), reverse=True)[:10]
+		if analytics_consent.data:
+			sorted_users = sorted(analytics_consent.data, key=lambda x: x.get("created_at", ""), reverse=True)[:10]
 			recent_users = [
 				{
 					"user_id": user.get("user_id"),
@@ -2205,10 +2207,10 @@ def get_gym_dashboard():
 				for user in sorted_users
 			]
 		
-		# Get monthly growth (users per month)
+		# Get monthly growth (users per month) - only users with consent
 		monthly_growth = {}
-		if analytics_data.data:
-			for user in analytics_data.data:
+		if analytics_consent.data:
+			for user in analytics_consent.data:
 				created_at = user.get("created_at")
 				if created_at:
 					try:
@@ -2224,7 +2226,7 @@ def get_gym_dashboard():
 			"gym_name": gym_name,
 			"statistics": {
 				"total_users": total_users,
-				"users_with_consent": total_users,  # Only users with consent are shown
+				"users_with_consent": users_with_consent,
 				"recent_users": recent_users,
 				"monthly_growth": monthly_growth
 			}
