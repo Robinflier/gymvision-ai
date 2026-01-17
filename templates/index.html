@@ -318,10 +318,19 @@
 				<section class="card workout" id="workout">
 					<div class="workout-header">
 						<div class="workout-header-top">
-							<label for="workout-name" class="workout-label">Workout name:</label>
+							<div class="workout-gym-header">
+								<span class="location-icon workout-gym-pin" aria-hidden="true">
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+										<path d="M12 21s7-4.5 7-11a7 7 0 1 0-14 0c0 6.5 7 11 7 11Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+										<path d="M12 13.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" stroke="currentColor" stroke-width="1.8"/>
+									</svg>
+								</span>
+								<span id="workout-gym-name" class="workout-gym-name">Not set</span>
+							</div>
 							<div id="workout-timer" class="workout-timer-value">00:00</div>
 						</div>
 						<div class="workout-name-container">
+							<label for="workout-name" class="workout-label">Workout name:</label>
 							<input id="workout-name" class="workout-name" placeholder="Workout name" value="Workout" />
 						</div>
 					</div>
@@ -468,6 +477,18 @@
 							<div class="settings-stat-label">Hours</div>
 						</div>
 					</div>
+					<!-- Gym input (moved into the purple profile card) -->
+					<div class="settings-profile-gym">
+						<div class="settings-profile-gym-header">
+							<img src="static/nav/dumbell.png" class="settings-profile-gym-icon" alt="" aria-hidden="true" />
+							<span class="settings-profile-gym-label">Gym</span>
+						</div>
+						<div class="settings-profile-gym-field">
+							<input type="text" id="settings-gym-input" class="settings-gym-input" placeholder="Search gym..." autocomplete="off">
+							<button type="button" id="settings-gym-clear" class="settings-gym-clear" aria-label="Clear gym" title="Clear">×</button>
+							<div id="gym-autocomplete-dropdown" class="gym-autocomplete-dropdown" style="display: none;"></div>
+						</div>
+					</div>
 				</div>
 				
 				<!-- Settings Options -->
@@ -534,21 +555,6 @@
 						</div>
 					</div>
 					
-					<!-- Gym/Sportschool Input -->
-					<div class="settings-option-item" style="position: relative;">
-						<div class="settings-option-left">
-							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-								<path d="M10 2L3 7V9C3 13 6 16.5 10 17.5C14 16.5 17 13 17 9V7L10 2Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
-								<path d="M10 10C11.1 10 12 9.1 12 8C12 6.9 11.1 6 10 6C8.9 6 8 6.9 8 8C8 9.1 8.9 10 10 10Z" stroke="currentColor" stroke-width="1.5" fill="none"/>
-							</svg>
-							<span class="settings-option-label">Gym</span>
-						</div>
-						<div class="settings-option-right" style="position: relative;">
-							<input type="text" id="settings-gym-input" class="settings-gym-input" placeholder="Search gym..." autocomplete="off">
-							<div id="gym-autocomplete-dropdown" class="gym-autocomplete-dropdown" style="display: none;"></div>
-						</div>
-					</div>
-					
 					<!-- Data Collection Consent -->
 					<div class="settings-option-item">
 						<div class="settings-option-left">
@@ -557,8 +563,10 @@
 								<path d="M7 10L9 12L13 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 							</svg>
 							<div class="settings-option-label-wrapper">
-								<span class="settings-option-label">Data collection</span>
-								<span class="settings-option-sublabel">Allow your gym data to be collected for analytics</span>
+								<div class="settings-option-label-row">
+									<span class="settings-option-label">Data collection</span>
+									<button type="button" id="settings-data-consent-info" class="settings-info-btn" aria-label="About data collection" title="About">i</button>
+								</div>
 							</div>
 						</div>
 						<div class="settings-option-right">

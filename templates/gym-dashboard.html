@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+	<title>Gym Dashboard - GymVision AI</title>
+	<link rel="manifest" href="/static/manifest.webmanifest">
+	<meta name="theme-color" content="#0f0f10">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+	<link rel="stylesheet" href="/static/styles.css">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+	<!-- Supabase library - MUST load before app.js -->
+	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+	<script>
+		const { createClient } = supabase;
+		window.createClient = createClient;
+		window.SUPABASE_URL = "https://jugdkqzhcbqbjbvktqlz.supabase.co";
+		window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp1Z2RrcXpoY2JxYmpidmt0cWx6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODI2NzIsImV4cCI6MjA4MDI1ODY3Mn0.rqCqBK14sOZvsxNUhIHIxaOnVMvdnNOjx_0YIXy1VIY";
+	</script>
+	<style>
+		.gym-dashboard {
+			min-height: 100vh;
+			background: #0f0f10;
+			color: #fff;
+			padding: 20px;
+		}
+		.gym-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			margin-bottom: 30px;
+			padding-bottom: 20px;
+			border-bottom: 1px solid #252528;
+		}
+		.gym-title {
+			font-size: 24px;
+			font-weight: 700;
+		}
+		.gym-logout {
+			background: #252528;
+			color: #fff;
+			border: 1px solid #333;
+			padding: 8px 16px;
+			border-radius: 8px;
+			cursor: pointer;
+			font-size: 14px;
+		}
+		.gym-logout:hover {
+			background: #333;
+		}
+		.stats-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+			gap: 16px;
+			margin-bottom: 30px;
+		}
+		.stat-card {
+			background: #252528;
+			border-radius: 12px;
+			padding: 20px;
+			text-align: center;
+		}
+		.stat-value {
+			font-size: 32px;
+			font-weight: 700;
+			color: #8b5cf6;
+			margin-bottom: 8px;
+		}
+		.stat-label {
+			font-size: 14px;
+			color: #888;
+		}
+		.recent-users {
+			background: #252528;
+			border-radius: 12px;
+			padding: 20px;
+			margin-top: 20px;
+		}
+		.recent-users h3 {
+			font-size: 18px;
+			font-weight: 600;
+			margin-bottom: 16px;
+		}
+		.user-item {
+			padding: 12px;
+			border-bottom: 1px solid #333;
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+		}
+		.user-item:last-child {
+			border-bottom: none;
+		}
+		.user-date {
+			font-size: 12px;
+			color: #888;
+		}
+		.loading {
+			text-align: center;
+			padding: 40px;
+			color: #888;
+		}
+		.error {
+			background: #ef4444;
+			color: #fff;
+			padding: 12px;
+			border-radius: 8px;
+			margin-bottom: 20px;
+		}
+	</style>
+</head>
+<body>
+	<div class="gym-dashboard">
+		<div class="gym-header">
+			<h1 class="gym-title" id="gym-name">Gym Dashboard</h1>
+			<button class="gym-logout" onclick="logout()">Logout</button>
+		</div>
+		
+		<div id="error-message" class="error" style="display: none;"></div>
+		<div id="loading" class="loading">Loading dashboard...</div>
+		
+		<div id="dashboard-content" style="display: none;">
+			<div class="stats-grid">
+				<div class="stat-card">
+					<div class="stat-value" id="total-users">0</div>
+					<div class="stat-label">Total Users</div>
+				</div>
+				<div class="stat-card">
+					<div class="stat-value" id="users-consent">0</div>
+					<div class="stat-label">With Consent</div>
+				</div>
+			</div>
+			
+			<div class="recent-users">
+				<h3>Recent Users</h3>
+				<div id="recent-users-list">
+					<p style="color: #888; text-align: center; padding: 20px;">No users yet</p>
+				</div>
+			</div>
+		</div>
+	</div>
+	
+	<script>
+		function getApiUrl(path) {
+			if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+				return `https://gymvision-ai.onrender.com${path}`;
+			}
+			return path;
+		}
+		
+		const supabase = window.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+		
+		async function loadDashboard() {
+			const loadingEl = document.getElementById('loading');
+			const contentEl = document.getElementById('dashboard-content');
+			const errorEl = document.getElementById('error-message');
+			
+			try {
+				const { data: { session } } = await supabase.auth.getSession();
+				if (!session) {
+					window.location.href = '/gym-login';
+					return;
+				}
+				
+				// Check if this is a gym account
+				const userMetadata = session.user?.user_metadata || {};
+				if (userMetadata.is_gym_account !== true) {
+					window.location.href = '/gym-login';
+					return;
+				}
+				
+				// Set gym name
+				document.getElementById('gym-name').textContent = userMetadata.gym_name || 'Gym Dashboard';
+				
+				// Fetch dashboard data
+				const response = await fetch(getApiUrl('/api/gym/dashboard'), {
+					headers: {
+						'Authorization': `Bearer ${session.access_token}`
+					}
+				});
+				
+				const data = await response.json();
+				
+				if (!response.ok) {
+					throw new Error(data.error || 'Failed to load dashboard');
+				}
+				
+				// Update stats
+				document.getElementById('total-users').textContent = data.statistics.total_users || 0;
+				document.getElementById('users-consent').textContent = data.statistics.users_with_consent || 0;
+				
+				// Update recent users
+				const recentUsersList = document.getElementById('recent-users-list');
+				if (data.statistics.recent_users && data.statistics.recent_users.length > 0) {
+					recentUsersList.innerHTML = data.statistics.recent_users.map(user => {
+						const date = new Date(user.created_at || user.consent_given_at);
+						return `
+							<div class="user-item">
+								<span>User ${user.user_id.substring(0, 8)}...</span>
+								<span class="user-date">${date.toLocaleDateString()}</span>
+							</div>
+						`;
+					}).join('');
+				} else {
+					recentUsersList.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No users yet</p>';
+				}
+				
+				loadingEl.style.display = 'none';
+				contentEl.style.display = 'block';
+			} catch (error) {
+				loadingEl.style.display = 'none';
+				errorEl.textContent = error.message || 'Failed to load dashboard';
+				errorEl.style.display = 'block';
+			}
+		}
+		
+		async function logout() {
+			await supabase.auth.signOut();
+			window.location.href = '/gym-login';
+		}
+		
+		// Load dashboard on page load
+		loadDashboard();
+		
+		// Refresh every 30 seconds
+		setInterval(loadDashboard, 30000);
+	</script>
+</body>
+</html>

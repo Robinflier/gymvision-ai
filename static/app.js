@@ -1306,6 +1306,41 @@ function showProgressAccessBlockedModal({ missingGym, missingConsent }) {
 	document.body.classList.add('modal-open');
 }
 
+function showSettingsInfoModal({ title, text }) {
+	let modal = document.getElementById('settings-info-modal');
+	if (!modal) {
+		modal = document.createElement('div');
+		modal.id = 'settings-info-modal';
+		modal.className = 'progress-access-modal hidden';
+		modal.innerHTML = `
+			<div class="progress-access-backdrop" data-close="true"></div>
+			<div class="progress-access-panel" role="dialog" aria-modal="true">
+				<div class="progress-access-title" id="settings-info-title"></div>
+				<div class="progress-access-text" id="settings-info-text"></div>
+				<div class="progress-access-actions">
+					<button type="button" class="btn primary" id="settings-info-ok">OK</button>
+				</div>
+			</div>
+		`;
+		document.body.appendChild(modal);
+		const close = () => {
+			modal.classList.add('hidden');
+			document.body.classList.remove('modal-open');
+		};
+		modal.querySelectorAll('[data-close="true"]').forEach(el => el.addEventListener('click', close));
+		const okBtn = modal.querySelector('#settings-info-ok');
+		if (okBtn) okBtn.addEventListener('click', close);
+	}
+
+	const titleEl = modal.querySelector('#settings-info-title');
+	const textEl = modal.querySelector('#settings-info-text');
+	if (titleEl) titleEl.textContent = title || 'Info';
+	if (textEl) textEl.textContent = text || '';
+
+	modal.classList.remove('hidden');
+	document.body.classList.add('modal-open');
+}
+
 // Make switchTab globally available
 window.switchTab = async function(tab) {
 	// If already on login screen, ignore
@@ -1343,8 +1378,10 @@ window.switchTab = async function(tab) {
 		const gymInputEl = document.getElementById('settings-gym-input');
 		const consentEl = document.getElementById('settings-data-consent-toggle');
 		const gymNameUI = (gymInputEl && typeof gymInputEl.value === 'string') ? gymInputEl.value.trim() : '';
-		const gymNameStored = (localStorage.getItem('user-gym-name') || '').trim();
-		const gymName = gymNameUI || gymNameStored || (await loadGymName()).trim();
+		// IMPORTANT: if the localStorage key exists (even if empty), treat it as authoritative so a cleared gym doesn't "come back"
+		const gymNameStoredRaw = localStorage.getItem('user-gym-name');
+		const gymNameStored = (gymNameStoredRaw !== null) ? (gymNameStoredRaw || '').trim() : '';
+		const gymName = gymNameUI || gymNameStored || ((gymNameStoredRaw === null) ? (await loadGymName()).trim() : '');
 
 		const consentUI = (consentEl && typeof consentEl.checked === 'boolean') ? consentEl.checked : null;
 		const consentStored = localStorage.getItem('user-data-consent');
@@ -1392,6 +1429,9 @@ window.switchTab = async function(tab) {
 		} else if (tab === 'settings') {
 			// Settings can be shown even if user data fails to load
 			await loadSettings();
+		} else if (tab === 'workout-builder') {
+			// Ensure per-workout gym shows up correctly (Settings/localStorage may be fresher than workout object)
+			updateWorkoutGymHeader();
 		}
 	}
 }
@@ -2392,6 +2432,7 @@ function initWorkoutBuilder() {
 	const saveWorkoutBtn = document.getElementById('save-workout');
 	const backWorkoutBtn = document.getElementById('back-to-workouts');
 	const workoutNameInput = document.getElementById('workout-name');
+	const workoutGymNameEl = document.getElementById('workout-gym-name');
 	
 	if (continueWorkoutBtn) {
 		continueWorkoutBtn.addEventListener('click', () => {
@@ -2464,7 +2505,39 @@ function initWorkoutBuilder() {
 		});
 	}
 
+	// Initial render
+	updateWorkoutGymHeader();
+
 	updateWorkoutStartButton();
+}
+
+function getSettingsGymSnapshot() {
+	// Prefer live Settings input (it reflects latest selection), then localStorage.
+	const gymInputEl = document.getElementById('settings-gym-input');
+	const gymUI = (gymInputEl && typeof gymInputEl.value === 'string') ? gymInputEl.value.trim() : '';
+	const gym = (gymUI || localStorage.getItem('user-gym-name') || '').trim();
+
+	const placeId = (localStorage.getItem('user-gym-place-id') || '').trim();
+	return { gym_name: gym || '', gym_place_id: placeId || '' };
+}
+
+function ensureCurrentWorkoutGymSnapshot() {
+	// If we're in a NEW workout and gym is empty, pull from Settings snapshot.
+	if (!currentWorkout) return;
+	if (editingWorkoutId) return;
+	const current = (currentWorkout.gym_name || '').toString().trim();
+	if (current) return;
+	const snap = getSettingsGymSnapshot();
+	currentWorkout.gym_name = snap.gym_name || '';
+	currentWorkout.gym_place_id = snap.gym_place_id || '';
+}
+
+function updateWorkoutGymHeader() {
+	const nameEl = document.getElementById('workout-gym-name');
+	if (!nameEl) return;
+	ensureCurrentWorkoutGymSnapshot();
+	const name = (currentWorkout?.gym_name || '').toString().trim();
+	nameEl.textContent = name || 'Not set';
 }
 
 // Make functions globally available for inline onclick handlers
@@ -2500,9 +2573,12 @@ window.startAIWorkout = function() {
 // Make functions globally available for inline onclick handlers
 window.startNewWorkout = function(workoutData = null) {
 	console.log('[WORKOUT] startNewWorkout called (global)');
+	const snap = getSettingsGymSnapshot();
 	currentWorkout = {
 		name: workoutData?.name || 'Workout',
 		exercises: workoutData?.exercises || [],
+		gym_name: (workoutData?.gym_name || snap.gym_name) || '',
+		gym_place_id: (workoutData?.gym_place_id || snap.gym_place_id) || '',
 		startTime: new Date(),
 		duration: 0
 	};
@@ -2520,6 +2596,7 @@ window.startNewWorkout = function(workoutData = null) {
 	updateWorkoutStartButton();
 	
 	switchTab('workout-builder');
+	updateWorkoutGymHeader();
 }
 
 // Quick workout generator - instant response based on keywords
@@ -3153,6 +3230,13 @@ window.saveWorkout = async function() {
 	
 		// Calculate total volume
 		const volume = calculateWorkoutVolume(currentWorkout);
+
+		// Snapshot gym for this workout (do NOT keep it linked to Settings after save)
+		if (!editingWorkoutId && (!currentWorkout.gym_name || currentWorkout.gym_name.toString().trim() === '')) {
+			const snap = getSettingsGymSnapshot();
+			currentWorkout.gym_name = snap.gym_name;
+			currentWorkout.gym_place_id = snap.gym_place_id;
+		}
 		
 		// Determine workout date - SIMPLE: use originalDate if editing, today if new
 		let workoutDate;
@@ -3168,25 +3252,46 @@ window.saveWorkout = async function() {
 			workoutDate = `${year}-${month}-${day}`;
 		}
 		
-		// Prepare payload for Supabase
+		// Prepare payload for Supabase (gym fields are optional; we retry without them if columns don't exist)
 		const workoutPayload = {
 			user_id: session.user.id,
 			name: currentWorkout.name || 'Workout',
 			date: workoutDate,
 			exercises: currentWorkout.exercises || [],
 			duration: duration,
-			total_volume: volume
+			total_volume: volume,
+			gym_name: (currentWorkout.gym_name || '').toString().trim() || null,
+			gym_place_id: (currentWorkout.gym_place_id || '').toString().trim() || null
+		};
+
+		const stripGymFields = (p) => {
+			const copy = { ...p };
+			delete copy.gym_name;
+			delete copy.gym_place_id;
+			return copy;
 		};
 		
+		let savedWorkoutId = null;
 		if (editingWorkoutId) {
 			// Update existing workout
-			const { data, error } = await supabaseClient
+			let { data, error } = await supabaseClient
 				.from('workouts')
 				.update(workoutPayload)
 				.eq('id', editingWorkoutId)
 				.eq('user_id', session.user.id)
 				.select()
 				.single();
+
+			// Backwards compatible: if columns don't exist yet, retry without gym fields
+			if (error && (String(error.message || '').includes('gym_name') || String(error.message || '').includes('gym_place_id'))) {
+				({ data, error } = await supabaseClient
+					.from('workouts')
+					.update(stripGymFields(workoutPayload))
+					.eq('id', editingWorkoutId)
+					.eq('user_id', session.user.id)
+					.select()
+					.single());
+			}
 			
 			if (error) {
 				console.error('[WORKOUT] Error updating workout:', error);
@@ -3201,13 +3306,23 @@ window.saveWorkout = async function() {
 				return;
 			}
 			console.log('[WORKOUT] Workout updated successfully:', data);
+			savedWorkoutId = data?.id || editingWorkoutId;
 		} else {
 			// Insert new workout
-			const { data, error } = await supabaseClient
+			let { data, error } = await supabaseClient
 				.from('workouts')
 				.insert(workoutPayload)
 				.select()
 				.single();
+
+			// Backwards compatible: if columns don't exist yet, retry without gym fields
+			if (error && (String(error.message || '').includes('gym_name') || String(error.message || '').includes('gym_place_id'))) {
+				({ data, error } = await supabaseClient
+					.from('workouts')
+					.insert(stripGymFields(workoutPayload))
+					.select()
+					.single());
+			}
 			
 			if (error) {
 				console.error('[WORKOUT] Error saving workout:', error);
@@ -3222,13 +3337,17 @@ window.saveWorkout = async function() {
 				return;
 			}
 			console.log('[WORKOUT] Workout saved successfully:', data);
+			savedWorkoutId = data?.id || null;
 		}
 		
 		// Also save to localStorage as backup
 	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
+		// Ensure local backup uses the SAME id as Supabase so we can merge fields later.
+		const finalId = savedWorkoutId || editingWorkoutId || currentWorkout.id || Date.now();
+		currentWorkout.id = finalId;
 	const payload = {
 				...currentWorkout,
-		id: editingWorkoutId || currentWorkout.id || Date.now(),
+			id: finalId,
 			date: workoutDate
 	};
 	
@@ -3399,6 +3518,17 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 		}
 	
 	let workouts = [];
+	// Keep a local backup around so we can merge gym fields if Supabase table doesn't have those columns yet.
+	let localBackupById = {};
+	try {
+		const localBackup = JSON.parse(localStorage.getItem('workouts') || '[]');
+		localBackupById = (Array.isArray(localBackup) ? localBackup : []).reduce((acc, w) => {
+			if (w && w.id != null) acc[String(w.id)] = w;
+			return acc;
+		}, {});
+	} catch (e) {
+		localBackupById = {};
+	}
 	
 	// If prefetched workouts provided, use those (for backward compatibility)
 	if (prefetchedWorkouts) {
@@ -3439,6 +3569,7 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 						workoutDate = `${year}-${month}-${day}`;
 					}
 					
+					const backup = localBackupById[String(workout.id)] || null;
 					return {
 						id: workout.id,
 						name: workout.name || 'Workout',
@@ -3446,7 +3577,10 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 						originalDate: workoutDate, // EXACT original date - NEVER TOUCH THIS
 						exercises: workout.exercises || [],
 						duration: workout.duration || 0,
-						total_volume: workout.total_volume || 0
+						total_volume: workout.total_volume || 0,
+						// If Supabase doesn't have these columns yet (or they're null), fall back to local backup.
+						gym_name: (workout.gym_name || backup?.gym_name || ''),
+						gym_place_id: (workout.gym_place_id || backup?.gym_place_id || '')
 					};
 				});
 				
@@ -3491,6 +3625,7 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 			const durationLabel = formatDurationForCard(workout.duration);
 			const volume = calculateWorkoutVolume(workout);
 			const volumeLabel = formatVolume(volume);
+			const gymLabel = (workout.gym_name || '').toString().trim() || '—';
 			const exercisesMarkup = buildWorkoutExercisesMarkup(workout);
 			
 			const monthName = date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase().slice(0, 3);
@@ -3525,6 +3660,18 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 						<div class="workout-stat">
 							<div class="workout-stat-label">Volume</div>
 							<div class="workout-stat-value">${volumeLabel}</div>
+						</div>
+						<div class="workout-stat workout-stat-location">
+							<div class="workout-stat-label">Gym</div>
+							<div class="workout-stat-value workout-stat-value-location">
+								<span class="location-icon" aria-hidden="true">
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+										<path d="M12 21s7-4.5 7-11a7 7 0 1 0-14 0c0 6.5 7 11 7 11Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+										<path d="M12 13.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" stroke="currentColor" stroke-width="1.8"/>
+									</svg>
+								</span>
+								<span class="workout-gym-text">${gymLabel}</span>
+							</div>
 						</div>
 					</div>
 					${exercisesMarkup}
@@ -3889,6 +4036,7 @@ function resumeWorkoutDraft() {
 	if (workoutName) workoutName.value = currentWorkout.name || 'Workout';
 	renderWorkoutList();
 	switchTab('workout-builder');
+	updateWorkoutGymHeader();
 }
 
 function formatWorkoutDate(date) {
@@ -4044,6 +4192,7 @@ function editWorkout(workout) {
 	
 	renderWorkoutList();
 	switchTab('workout-builder');
+	updateWorkoutGymHeader();
 }
 
 function reuseWorkout(workout) {
@@ -4053,6 +4202,8 @@ function reuseWorkout(workout) {
 	const reused = {
 		name: source.name || 'Workout',
 		exercises: [],
+		gym_name: getSettingsGymSnapshot().gym_name,
+		gym_place_id: getSettingsGymSnapshot().gym_place_id,
 		startTime: new Date(),
 		duration: 0
 	};
@@ -4081,6 +4232,7 @@ function reuseWorkout(workout) {
 	
 	renderWorkoutList();
 	switchTab('workout-builder');
+	updateWorkoutGymHeader();
 }
 
 // ========== PROGRESS ==========
@@ -5158,12 +5310,32 @@ function initSettingsToggles() {
 	
 	// Data collection consent toggle
 	initDataConsentToggle();
+
+	// Data collection info button
+	const infoBtn = document.getElementById('settings-data-consent-info');
+	if (infoBtn && !infoBtn.dataset.bound) {
+		infoBtn.dataset.bound = 'true';
+		infoBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			showSettingsInfoModal({
+				title: 'Data collection',
+				text: [
+					'We only use your workout data (exercises, sets, volume, frequency) and your selected gym.',
+					'We do NOT use or share your email, password, or login details.',
+					'This data is aggregated to help improve your gym experience.',
+					'You can turn this off anytime in Settings.'
+				].join('\n\n')
+			});
+		});
+	}
 }
 
 // Initialize gym/sportschool input with backend-proxied Google Places suggestions
 async function initGymInput() {
 	const gymInput = document.getElementById('settings-gym-input');
 	const dropdown = document.getElementById('gym-autocomplete-dropdown');
+	const clearBtn = document.getElementById('settings-gym-clear');
 	
 	if (!gymInput) {
 		console.warn('[GYM INPUT] Input field not found!');
@@ -5178,10 +5350,27 @@ async function initGymInput() {
 			gymInput.value = gymName;
 			console.log('[GYM INPUT] Loaded gym name:', gymName);
 		}
+		if (clearBtn) {
+			clearBtn.style.display = (gymInput.value || '').trim() ? 'flex' : 'none';
+		}
 	});
 	
 	// Always use backend-proxied suggestions (API key stays server-side)
 	setupBackendGymAutocomplete(gymInput, dropdown);
+
+	// Clear button: reliably clear gym on iOS (blur can be flaky)
+	if (clearBtn) {
+		clearBtn.addEventListener('click', async (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			try { if (dropdown) dropdown.style.display = 'none'; } catch (err) {}
+			gymInput.value = '';
+			gymInput.dataset.placeId = '';
+			clearBtn.style.display = 'none';
+			await saveGymName(null, null);
+			try { gymInput.focus(); } catch (err) {}
+		});
+	}
 }
 
 function setupBackendGymAutocomplete(gymInput, dropdown) {
@@ -5192,6 +5381,7 @@ function setupBackendGymAutocomplete(gymInput, dropdown) {
 	let lastErrorMessage = null;
 	let lastSentQuery = '';
 	let inFlightController = null;
+	const clearBtn = document.getElementById('settings-gym-clear');
 
 	async function fetchSuggestions(query) {
 		if (query === lastSentQuery) return lastResults || [];
@@ -5246,6 +5436,7 @@ function setupBackendGymAutocomplete(gymInput, dropdown) {
 	gymInput.addEventListener('input', (e) => {
 		const query = (e.target.value || '').trim();
 		gymInput.dataset.placeId = ''; // reset unless user selects again
+		if (clearBtn) clearBtn.style.display = query ? 'flex' : 'none';
 		// Persist immediately so switching tabs doesn't revert the field (blur is unreliable on iOS)
 		if (query) {
 			localStorage.setItem('user-gym-name', query);
@@ -5345,11 +5536,8 @@ async function saveGymName(gymName, placeId = null) {
 	// Normalize and update localStorage immediately (so switching tabs doesn't revert)
 	const normalizedGym = (typeof gymName === 'string') ? gymName.trim() : '';
 	const normalizedPlaceId = (typeof placeId === 'string') ? placeId.trim() : '';
-	if (normalizedGym) {
-		localStorage.setItem('user-gym-name', normalizedGym);
-	} else {
-		localStorage.removeItem('user-gym-name');
-	}
+	// IMPORTANT: keep the key present even when cleared (empty string) so we don't fall back to stale Supabase metadata
+	localStorage.setItem('user-gym-name', normalizedGym);
 	if (normalizedPlaceId && normalizedGym) {
 		localStorage.setItem('user-gym-place-id', normalizedPlaceId);
 	} else {
@@ -5411,9 +5599,10 @@ async function loadGymName() {
 			return localStorage.getItem('user-gym-name') || '';
 		}
 		
-		// Prefer localStorage for UI (session metadata can lag behind admin updates)
-		const localGym = (localStorage.getItem('user-gym-name') || '').trim();
-		if (localGym) return localGym;
+		// Prefer localStorage for UI (session metadata can lag behind admin updates).
+		// If the key exists (even empty), treat it as authoritative (prevents cleared gym from "coming back").
+		const localGymRaw = localStorage.getItem('user-gym-name');
+		if (localGymRaw !== null) return (localGymRaw || '').trim();
 
 		const gymName = (session.user.user_metadata?.gym_name || '').trim();
 		if (gymName) {
@@ -6251,7 +6440,8 @@ async function loadSettings() {
 			if (gymInput) {
 				// Prefer localStorage: it's updated immediately when user types/selects.
 				// Supabase user_metadata can lag behind (admin updates don't refresh session immediately).
-				const gymName = localStorage.getItem('user-gym-name') || user.user_metadata?.gym_name || '';
+				const localGymRaw = localStorage.getItem('user-gym-name');
+				const gymName = (localGymRaw !== null) ? (localGymRaw || '') : (user.user_metadata?.gym_name || '');
 				gymInput.value = gymName;
 			}
 			

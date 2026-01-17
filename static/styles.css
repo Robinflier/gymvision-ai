@@ -349,12 +349,18 @@ body{
 .workout-builder-wrapper .card.workout{margin:0 0 14px;padding:16px}
 .workout-add-exercise-btn{width:100%;margin-top:12px;background:var(--accent);border-radius:12px;border:1px solid transparent;color:#fff;font-weight:700;font-size:15px;padding:12px}
 .workout-cancel-btn{width:100%;margin-top:12px;background:#2a2a33;border:1px solid #3a3a45;border-radius:12px;color:#fff;font-weight:700;font-size:15px;padding:12px}
-.workout-header{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.workout-header{display:flex;flex-direction:column;gap:14px;margin-bottom:10px}
 .workout-header-top{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%}
 .workout-timer-value{font-weight:700;font-size:13px;color:#a3a5b7;font-variant-numeric:tabular-nums;letter-spacing:.04em;flex-shrink:0}
 .workout-label{color:var(--sub);font-size:14px;font-weight:600}
 .workout-name-container{width:100%;margin-top:0}
+.workout-name-container .workout-label{display:block;margin-bottom:7px}
 .workout-name{width:100%;background:#0f0f12;color:#fff;border:1px solid #2b2b34;border-radius:10px;padding:10px 12px;font-weight:700;display:block;box-sizing:border-box}
+
+/* Workout gym header (per-workout) */
+.workout-gym-header{display:flex;align-items:center;gap:6px;min-width:0;color:#fff}
+.workout-gym-pin{display:inline-flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.75);flex:0 0 auto}
+.workout-gym-name{color:#fff;font-weight:800;font-size:13px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .workout-buttons-container{display:flex;gap:10px;margin-bottom:12px}
 .workout-buttons-container .btn{flex:1;margin:0;padding:8px 12px;font-size:13px;min-width:0;width:100%}
 .workout-add-btn,.workout-save-btn{padding:8px 12px !important;font-size:13px !important;font-weight:700 !important}
@@ -509,6 +515,10 @@ body{
 .workout-stat{display:flex;flex-direction:column;gap:2px;min-width:80px}
 .workout-stat-label{color:var(--sub);font-size:12px;font-weight:600}
 .workout-stat-value{color:#fff;font-size:12px;font-weight:800;line-height:1.2}
+.workout-stat-location{min-width:120px}
+.workout-stat-value-location{display:flex;align-items:center;gap:6px;min-width:0}
+.workout-stat-value-location .location-icon{display:inline-flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.75);flex:0 0 auto}
+.workout-gym-text{display:inline-block;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .workout-avatar{width:48px;height:48px;border-radius:50%;overflow:hidden;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:#fff;text-transform:uppercase}
 .workout-avatar img{width:100%;height:100%;object-fit:cover}
 .workout-avatar.placeholder{background:rgba(124,92,255,0.15);border-color:rgba(124,92,255,0.35)}
@@ -853,25 +863,44 @@ body{
 
 .settings-content{padding:24px;display:flex;flex-direction:column;gap:22px}
 .settings-title{margin:0;font-size:24px;font-weight:800;color:#fff;font-family:'Inter',sans-serif}
-.settings-profile-card{background:var(--accent);border:1px solid rgba(255,255,255,0.1);border-radius:18px;padding:20px 22px;display:flex;flex-direction:column;gap:16px;box-shadow:0 12px 24px rgba(124,92,255,0.25);font-family:'Inter',sans-serif;margin-bottom:20px}
+.settings-profile-card{background:var(--accent);border:1px solid rgba(255,255,255,0.1);border-radius:18px;padding:20px 22px 16px;display:flex;flex-direction:column;gap:14px;box-shadow:0 12px 24px rgba(124,92,255,0.25);font-family:'Inter',sans-serif;margin-bottom:20px}
 .settings-profile-header{display:flex;align-items:center;gap:16px}
 .settings-avatar{flex-shrink:0}
 .settings-profile-info{flex:1;display:flex;flex-direction:column;gap:4px}
 .settings-username{color:#fff;font-size:18px;font-weight:700;font-family:'Inter',sans-serif}
 .settings-email{color:rgba(255,255,255,0.8);font-size:14px;font-family:'Inter',sans-serif}
-.settings-stats-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:8px}
+.settings-stats-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:8px;margin-bottom:6px}
 .settings-stat-box{text-align:center;padding:12px 8px;background:rgba(255,255,255,0.15);border-radius:12px;border:1px solid rgba(255,255,255,0.2)}
+.settings-profile-gym{display:flex;flex-direction:column;gap:6px;margin-top:2px}
+.settings-profile-gym-header{display:flex;align-items:center;gap:10px;justify-content:center;text-align:center}
+.settings-profile-gym-icon{width:18px;height:18px;object-fit:contain;filter:brightness(0) invert(1);opacity:.95}
+.settings-profile-gym-label{color:rgba(255,255,255,0.95);font-size:14px;font-weight:700}
+.settings-profile-gym-field{position:relative;width:70%;margin:0 auto}
+.settings-profile-card .settings-gym-input{width:100%;min-width:0;border-color:rgba(255,255,255,0.22);background:rgba(15,15,18,0.25)}
+.settings-profile-card .settings-profile-gym-field .settings-gym-input{text-align:center}
+.settings-profile-card .settings-gym-input:focus{border-color:rgba(255,255,255,0.55);background:rgba(15,15,18,0.32)}
+.settings-profile-card .settings-gym-clear{border-color:rgba(255,255,255,0.22);background:rgba(15,15,18,0.35)}
+.settings-profile-card .gym-autocomplete-dropdown{left:0;right:0}
 .settings-stat-value{color:#fff;font-size:20px;font-weight:800;font-family:'Inter',sans-serif;margin-bottom:4px}
 .settings-stat-label{color:rgba(255,255,255,0.9);font-size:12px;font-family:'Inter',sans-serif;text-transform:uppercase;letter-spacing:0.5px}
 .settings-options{display:flex;flex-direction:column;gap:12px;margin-bottom:20px}
 .settings-option-item{display:flex;align-items:center;justify-content:space-between;padding:16px;background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);border-radius:14px;box-shadow:0 4px 12px rgba(0,0,0,0.15)}
 .settings-option-left{display:flex;align-items:center;gap:12px;flex:1}
+.settings-option-icon{width:20px;height:20px;display:block;object-fit:contain;filter:brightness(0) invert(1)}
 .settings-option-left svg{width:20px;height:20px;color:#dfe0e6;flex-shrink:0}
 .settings-icon{width:20px;height:20px;flex-shrink:0;object-fit:contain;opacity:0.9;filter:brightness(0) invert(1)}
 .settings-option-label{color:#fff;font-size:15px;font-weight:600;font-family:'Inter',sans-serif}
 .settings-option-label-wrapper{display:flex;flex-direction:column;gap:4px}
+.settings-option-label-row{display:flex;align-items:center;gap:8px}
+.settings-info-btn{width:18px;height:18px;border-radius:999px;border:1px solid rgba(255,255,255,0.28);background:rgba(0,0,0,0.18);color:rgba(255,255,255,0.92);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;line-height:0;padding:0;cursor:pointer}
+.settings-info-btn:hover{background:rgba(0,0,0,0.28)}
+.settings-info-btn:active{transform:scale(0.98)}
+.settings-info-btn:focus-visible{outline:2px solid rgba(255,255,255,0.55);outline-offset:2px}
 .settings-option-sublabel{color:rgba(255,255,255,0.6);font-size:12px;font-weight:400;font-family:'Inter',sans-serif;line-height:1.4}
-.settings-gym-input{background:#0f0f12;color:#fff;border:1px solid #2b2b34;border-radius:8px;padding:8px 12px;font-size:14px;font-weight:500;font-family:'Inter',sans-serif;width:180px;max-width:100%;min-width:120px;display:block;box-sizing:border-box}
+.settings-gym-input{background:#0f0f12;color:#fff;border:1px solid #2b2b34;border-radius:8px;padding:8px 34px 8px 12px;font-size:14px;font-weight:500;font-family:'Inter',sans-serif;width:180px;max-width:100%;min-width:120px;display:block;box-sizing:border-box}
+.settings-gym-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:22px;height:22px;border-radius:999px;border:1px solid #2b2b34;background:#0f0f12;color:rgba(255,255,255,0.85);display:none;align-items:center;justify-content:center;padding:0 0 2px 0;line-height:0;font-size:16px;font-weight:700;cursor:pointer}
+.settings-gym-clear:active{transform:translateY(-50%) scale(0.98)}
+.settings-gym-clear:hover{background:#141418}
 .settings-gym-input:focus{outline:none;border-color:var(--accent);background:#141418}
 .settings-gym-input::placeholder{color:rgba(255,255,255,0.4)}
 .gym-autocomplete-dropdown{position:absolute;top:100%;left:0;right:0;background:#252528;border:1px solid #333;border-radius:8px;max-height:200px;overflow-y:auto;z-index:1000;margin-top:4px;box-shadow:0 4px 12px rgba(0,0,0,0.3)}
