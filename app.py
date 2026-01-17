@@ -1697,9 +1697,12 @@ def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = Non
 		if gym_name:
 			# Search for gym account with matching gym_name
 			all_users = admin_client.auth.admin.list_users()
-			users_list = getattr(all_users, "users", None)
+			# supabase-py v2 returns `.data`; older variants may return `.users`
+			users_list = getattr(all_users, "data", None)
+			if users_list is None:
+				users_list = getattr(all_users, "users", None)
 			if users_list is None and isinstance(all_users, dict):
-				users_list = all_users.get("users")
+				users_list = all_users.get("data") or all_users.get("users")
 			if users_list is None and isinstance(all_users, list):
 				users_list = all_users
 			if users_list is None:
@@ -2071,9 +2074,12 @@ def register_gym_account():
 		
 		# Check if gym name already exists
 		all_users = admin_client.auth.admin.list_users()
-		users_list = getattr(all_users, "users", None)
+		# supabase-py v2 returns `.data`; older variants may return `.users`
+		users_list = getattr(all_users, "data", None)
+		if users_list is None:
+			users_list = getattr(all_users, "users", None)
 		if users_list is None and isinstance(all_users, dict):
-			users_list = all_users.get("users")
+			users_list = all_users.get("data") or all_users.get("users")
 		if users_list is None and isinstance(all_users, list):
 			users_list = all_users
 		if users_list is None:
@@ -2160,6 +2166,24 @@ def get_gym_dashboard():
 		
 		# Get analytics data for this gym
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+		# Backfill: if users already have consent + matching gym_name but weren't linked (e.g., older sync bug),
+		# link them now so the dashboard isn't empty.
+		try:
+			unlinked = admin_client.table("gym_analytics").select("user_id,gym_name,gym_id,data_collection_consent").eq("data_collection_consent", True).execute()
+			target = (gym_name or "").lower().strip()
+			if unlinked.data and target:
+				for row in unlinked.data:
+					if row.get("gym_id"):
+						continue
+					row_gym = (row.get("gym_name") or "").lower().strip()
+					if row_gym and row_gym == target:
+						try:
+							admin_client.table("gym_analytics").update({"gym_id": gym_id}).eq("user_id", row.get("user_id")).execute()
+						except Exception:
+							pass
+		except Exception:
+			pass
 		
 		# Get all users linked to this gym
 		analytics_data = admin_client.table("gym_analytics").select("*").eq("gym_id", gym_id).eq("data_collection_consent", True).execute()
