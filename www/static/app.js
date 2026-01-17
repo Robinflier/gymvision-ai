@@ -6017,6 +6017,10 @@ async function saveDataConsent(hasConsent) {
 		
 		// Call backend endpoint to update user_metadata and sync to analytics table
 		const apiUrl = getApiUrl('/api/collect-gym-data');
+		// Include current gym snapshot too, so gym_analytics stays in sync with the toggle.
+		const gymNameRaw = localStorage.getItem('user-gym-name');
+		const gymName = (gymNameRaw !== null) ? (gymNameRaw || '').trim() : '';
+		const placeId = (localStorage.getItem('user-gym-place-id') || '').trim();
 		const response = await fetch(apiUrl, {
 			method: 'POST',
 			headers: {
@@ -6024,7 +6028,10 @@ async function saveDataConsent(hasConsent) {
 				'Authorization': `Bearer ${session.access_token}`
 			},
 			body: JSON.stringify({
-				data_consent: hasConsent
+				data_consent: hasConsent,
+				// send gym too (null clears)
+				gym_name: gymName ? gymName : null,
+				gym_place_id: gymName ? (placeId || null) : null
 			})
 		});
 		
