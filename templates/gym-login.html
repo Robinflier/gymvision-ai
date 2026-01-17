@@ -14,8 +14,7 @@
 	<!-- Supabase library - MUST load before app.js -->
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 	<script>
-		const { createClient } = supabase;
-		window.createClient = createClient;
+		// Public Supabase config (anon key)
 		window.SUPABASE_URL = "https://jugdkqzhcbqbjbvktqlz.supabase.co";
 		window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp1Z2RrcXpoY2JxYmpidmt0cWx6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODI2NzIsImV4cCI6MjA4MDI1ODY3Mn0.rqCqBK14sOZvsxNUhIHIxaOnVMvdnNOjx_0YIXy1VIY";
 	</script>
@@ -173,8 +172,10 @@
 	</div>
 	
 	<script>
-		// Initialize Supabase
-		const supabase = window.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+		// Initialize Supabase (guard against CDN being blocked)
+		const sb = (window.supabase && window.supabase.createClient)
+			? window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY)
+			: null;
 		
 		// Handle login form
 		document.getElementById('gym-login-form').addEventListener('submit', async (e) => {
@@ -189,7 +190,8 @@
 			errorMsg.classList.remove('show');
 			
 			try {
-				const { data, error } = await supabase.auth.signInWithPassword({
+				if (!sb) throw new Error('Failed to load Supabase. Please disable ad blockers and refresh.');
+				const { data, error } = await sb.auth.signInWithPassword({
 					email,
 					password
 				});
@@ -199,7 +201,7 @@
 				// Check if this is a gym account
 				const userMetadata = data.user?.user_metadata || {};
 				if (userMetadata.is_gym_account !== true) {
-					await supabase.auth.signOut();
+					await sb.auth.signOut();
 					throw new Error('This account is not a gym account. Please use the regular login page.');
 				}
 				

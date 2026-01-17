@@ -14,8 +14,7 @@
 	<!-- Supabase library - MUST load before app.js -->
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 	<script>
-		const { createClient } = supabase;
-		window.createClient = createClient;
+		// Public Supabase config (anon key)
 		window.SUPABASE_URL = "https://jugdkqzhcbqbjbvktqlz.supabase.co";
 		window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp1Z2RrcXpoY2JxYmpidmt0cWx6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODI2NzIsImV4cCI6MjA4MDI1ODY3Mn0.rqCqBK14sOZvsxNUhIHIxaOnVMvdnNOjx_0YIXy1VIY";
 	</script>
@@ -150,7 +149,9 @@
 			return path;
 		}
 		
-		const supabase = window.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+		const sb = (window.supabase && window.supabase.createClient)
+			? window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY)
+			: null;
 		
 		async function loadDashboard() {
 			const loadingEl = document.getElementById('loading');
@@ -158,7 +159,10 @@
 			const errorEl = document.getElementById('error-message');
 			
 			try {
-				const { data: { session } } = await supabase.auth.getSession();
+				if (!sb) {
+					throw new Error('Failed to load Supabase. Please disable ad blockers and refresh.');
+				}
+				const { data: { session } } = await sb.auth.getSession();
 				if (!session) {
 					window.location.href = '/gym-login';
 					return;
@@ -217,7 +221,7 @@
 		}
 		
 		async function logout() {
-			await supabase.auth.signOut();
+			if (sb) await sb.auth.signOut();
 			window.location.href = '/gym-login';
 		}
 		
