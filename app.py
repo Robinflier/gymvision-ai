@@ -1790,6 +1790,9 @@ def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = Non
 		return True
 	except Exception as e:
 		print(f"[GYM SYNC] Error syncing gym data: {e}")
+		if "permission denied for table users" in str(e).lower():
+			print("[GYM SYNC] Likely cause: the gym_analytics trigger reads auth.users without SECURITY DEFINER. "
+			      "Re-run gym_accounts_schema.sql with SECURITY DEFINER (see repo) to fix.")
 		import traceback
 		traceback.print_exc()
 		return False
@@ -1974,7 +1977,9 @@ def collect_gym_data():
 		admin_client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
 
 		# Automatically sync to gym_analytics table
-		sync_gym_data_to_analytics_table(user_id, gym_name, data_consent)
+		ok = sync_gym_data_to_analytics_table(user_id, gym_name, data_consent)
+		if not ok:
+			return jsonify({"error": "Failed to sync gym data to analytics table"}), 500
 
 		return jsonify({"success": True, "message": "Gym data updated successfully"}), 200
 
