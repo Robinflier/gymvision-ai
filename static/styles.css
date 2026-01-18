@@ -922,7 +922,7 @@ body{
 .gym-podium-item.rank-2{background:linear-gradient(135deg,rgba(0,212,255,0.25),rgba(0,0,0,0.0));border-color:rgba(0,212,255,0.18)}
 .gym-podium-item.rank-3{background:linear-gradient(135deg,rgba(255,105,180,0.22),rgba(0,0,0,0.0));border-color:rgba(255,105,180,0.16)}
 .gym-podium-rank{width:28px;height:28px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;color:#fff;background:#1c1c22;border:1px solid rgba(255,255,255,0.12)}
-.gym-podium-name{color:#fff;font-size:13px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;text-align:center}
+.gym-podium-name{color:#fff;font-size:13px;font-weight:900;max-width:100%;text-align:center;white-space:normal;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;line-height:1.15}
 
 .gym-ranked{display:flex;flex-direction:column;gap:10px}
 .gym-ranked-row{display:flex;align-items:center;gap:10px}
