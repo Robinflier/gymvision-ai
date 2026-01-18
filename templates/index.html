@@ -875,27 +875,13 @@
 				<div id="gym-dashboard-loading" class="progress-empty" style="padding:18px 0;">Loading dashboard...</div>
 
 				<div id="gym-dashboard-panels" class="hidden">
-					<div class="gym-kpi-filters">
-						<div class="gym-kpi-filter">
-							<div class="gym-kpi-filter-label">Year</div>
-							<select id="gym-kpi-year" class="gym-kpi-select" disabled>
-								<option value="2026">2026</option>
-							</select>
-						</div>
-						<div class="gym-kpi-filter">
-							<div class="gym-kpi-filter-label">Period</div>
-							<select id="gym-kpi-period" class="gym-kpi-select">
-								<option value="day">Day</option>
-								<option value="week" selected>Week</option>
-								<option value="month">Month</option>
-							</select>
-						</div>
-						<div class="gym-kpi-filter">
-							<div class="gym-kpi-filter-label">Select</div>
-							<select id="gym-kpi-bucket" class="gym-kpi-select"></select>
+					<div class="gym-dashboard-controls" style="margin-bottom: 12px;">
+						<div class="gym-period-toggle" role="tablist" aria-label="Dashboard period">
+							<button type="button" class="gym-period-btn" data-period="week" aria-selected="false">Week</button>
+							<button type="button" class="gym-period-btn" data-period="month" aria-selected="false">Month</button>
+							<button type="button" class="gym-period-btn" data-period="all" aria-selected="false">All</button>
 						</div>
 					</div>
-
 					<div class="settings-stats-grid" style="margin-bottom: 14px;">
 						<div class="settings-stat-box" style="background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);">
 							<div class="settings-stat-value" id="gym-dashboard-total-users">0</div>
@@ -903,11 +889,11 @@
 						</div>
 						<div class="settings-stat-box" style="background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);">
 							<div class="settings-stat-value" id="gym-dashboard-total-workouts">0</div>
-							<div class="settings-stat-label">Workouts</div>
+							<div class="settings-stat-label">Total Workouts</div>
 						</div>
 						<div class="settings-stat-box" style="background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);">
 							<div class="settings-stat-value" id="gym-dashboard-total-exercises">0</div>
-							<div class="settings-stat-label">Exercises</div>
+							<div class="settings-stat-label">Total Exercises</div>
 						</div>
 					</div>
 

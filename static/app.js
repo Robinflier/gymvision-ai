@@ -1324,7 +1324,46 @@ async function showGymDashboardScreen() {
 		});
 	}
 
+	initGymDashboardPeriodToggle();
 	await loadGymDashboardData();
+}
+
+const GYM_DASHBOARD_PERIOD_KEY = 'gym-dashboard-period';
+
+function getGymDashboardPeriod() {
+	const v = (localStorage.getItem(GYM_DASHBOARD_PERIOD_KEY) || '').toString().toLowerCase().trim();
+	return (v === 'week' || v === 'month' || v === 'all') ? v : 'week';
+}
+
+function setGymDashboardPeriod(period) {
+	const p = (period || '').toString().toLowerCase().trim();
+	localStorage.setItem(GYM_DASHBOARD_PERIOD_KEY, (p === 'month' || p === 'all') ? p : 'week');
+	updateGymDashboardPeriodUI();
+}
+
+function updateGymDashboardPeriodUI() {
+	const period = getGymDashboardPeriod();
+	document.querySelectorAll('.gym-period-btn').forEach(btn => {
+		const isActive = (btn.dataset.period === period);
+		btn.classList.toggle('active', isActive);
+		btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+	});
+}
+
+function initGymDashboardPeriodToggle() {
+	const buttons = document.querySelectorAll('.gym-period-btn');
+	if (!buttons || !buttons.length) return;
+	buttons.forEach(btn => {
+		if (btn.dataset.bound === 'true') return;
+		btn.dataset.bound = 'true';
+		btn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			setGymDashboardPeriod(btn.dataset.period || 'week');
+			loadGymDashboardData();
+		});
+	});
+	updateGymDashboardPeriodUI();
 }
 
 async function loadGymDashboardData() {
@@ -1358,22 +1397,9 @@ async function loadGymDashboardData() {
 		}
 		if (titleEl) titleEl.textContent = meta.gym_name || 'Gym Dashboard';
 
-		// KPI controls (only affects top 3 cards)
-		const kpiYearEl = document.getElementById('gym-kpi-year');
-		const kpiPeriodEl = document.getElementById('gym-kpi-period');
-		const kpiBucketEl = document.getElementById('gym-kpi-bucket');
-		const defaultYear = new Date().getFullYear();
-		const savedPeriod = (localStorage.getItem('gym-kpi-period') || '').toString().trim();
-		const period = (kpiPeriodEl?.value || savedPeriod || 'week').toString().toLowerCase();
-		const year = Number((kpiYearEl?.value || localStorage.getItem('gym-kpi-year') || defaultYear).toString());
-		const savedBucketKey = `gym-kpi-bucket-${period}`;
-		const bucket = (kpiBucketEl?.value || localStorage.getItem(savedBucketKey) || '').toString();
-
 		const qs = new URLSearchParams();
-		if (year) qs.set('year', String(year));
-		if (period) qs.set('period', period);
-		if (bucket) qs.set('bucket', bucket);
-		const apiUrl = getApiUrl('/api/gym/dashboard') + (qs.toString() ? `?${qs.toString()}` : '');
+		qs.set('period', getGymDashboardPeriod());
+		const apiUrl = getApiUrl('/api/gym/dashboard') + `?${qs.toString()}`;
 		const res = await fetch(apiUrl, {
 			headers: { 'Authorization': `Bearer ${session.access_token}` }
 		});
@@ -1381,22 +1407,16 @@ async function loadGymDashboardData() {
 		if (!res.ok) throw new Error(data?.error || 'Failed to load dashboard');
 
 		const stats = data.statistics || {};
+		const totalUsers = stats.total_users || 0;
+		const totalWorkouts = stats.total_workouts || 0;
+		const totalExercises = stats.total_exercises || 0;
 
-		// KPI cards (period-specific)
-		const kpi = stats.kpi || {};
-		const kpiUsers = Number(kpi.total_users || 0);
-		const kpiWorkouts = Number(kpi.total_workouts || 0);
-		const kpiExercises = Number(kpi.total_exercises || 0);
 		const totalEl = document.getElementById('gym-dashboard-total-users');
 		const workoutsEl = document.getElementById('gym-dashboard-total-workouts');
 		const exercisesEl = document.getElementById('gym-dashboard-total-exercises');
-		if (totalEl) totalEl.textContent = kpiUsers;
-		if (workoutsEl) workoutsEl.textContent = kpiWorkouts;
-		if (exercisesEl) exercisesEl.textContent = kpiExercises;
-
-		// KPI options + bindings
-		const kpiOpts = stats.kpi_options || {};
-		initGymKpiControls(kpiOpts, kpi);
+		if (totalEl) totalEl.textContent = totalUsers;
+		if (workoutsEl) workoutsEl.textContent = totalWorkouts;
+		if (exercisesEl) exercisesEl.textContent = totalExercises;
 
 		const recent = Array.isArray(stats.recent_users) ? stats.recent_users : [];
 		if (recentEl) {
@@ -1417,7 +1437,7 @@ async function loadGymDashboardData() {
 
 		// Charts
 		const charts = stats.charts || {};
-		renderGymHistogram('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
+		renderGymBars('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
 		renderGymDonut('gym-dashboard-chart-muscles', charts.top_muscles_by_sets, 'sets');
 		renderGymBars('gym-dashboard-chart-weeks', charts.workouts_last_weeks, 'workouts');
 
@@ -1429,70 +1449,6 @@ async function loadGymDashboardData() {
 			errorEl.textContent = e?.message || 'Failed to load dashboard';
 			errorEl.classList.add('show');
 		}
-	}
-}
-
-function initGymKpiControls(kpiOptions, kpi) {
-	const yearEl = document.getElementById('gym-kpi-year');
-	const periodEl = document.getElementById('gym-kpi-period');
-	const bucketEl = document.getElementById('gym-kpi-bucket');
-	if (!yearEl || !periodEl || !bucketEl) return;
-
-	const year = Number(kpi?.year || kpiOptions?.year || new Date().getFullYear());
-	const period = (kpi?.period || localStorage.getItem('gym-kpi-period') || 'week').toString();
-
-	// Set year (fixed, but keep accurate)
-	yearEl.innerHTML = `<option value="${year}">${year}</option>`;
-	localStorage.setItem('gym-kpi-year', String(year));
-
-	// Set period
-	if (!periodEl.dataset.bound) {
-		periodEl.dataset.bound = 'true';
-		periodEl.addEventListener('change', () => {
-			const p = (periodEl.value || 'week').toString();
-			localStorage.setItem('gym-kpi-period', p);
-			// Clear bucket selection for this new period so we pick latest by default
-			const key = `gym-kpi-bucket-${p}`;
-			if (!localStorage.getItem(key)) localStorage.setItem(key, '');
-			loadGymDashboardData();
-		});
-	}
-	periodEl.value = ['day', 'week', 'month'].includes(period) ? period : 'week';
-	localStorage.setItem('gym-kpi-period', periodEl.value);
-
-	const days = Array.isArray(kpiOptions?.available_days) ? kpiOptions.available_days : [];
-	const weeks = Array.isArray(kpiOptions?.available_weeks) ? kpiOptions.available_weeks : [];
-	const months = Array.isArray(kpiOptions?.available_months) ? kpiOptions.available_months : [];
-	const list = (periodEl.value === 'day') ? days : (periodEl.value === 'month') ? months : weeks;
-
-	// Populate bucket select
-	const savedBucketKey = `gym-kpi-bucket-${periodEl.value}`;
-	const desired = (kpi?.bucket || bucketEl.value || localStorage.getItem(savedBucketKey) || '').toString();
-	bucketEl.innerHTML = '';
-	if (!list.length) {
-		bucketEl.innerHTML = `<option value="">No data</option>`;
-		bucketEl.value = '';
-		bucketEl.disabled = true;
-		return;
-	}
-	bucketEl.disabled = false;
-	list.forEach(v => {
-		const opt = document.createElement('option');
-		opt.value = v;
-		opt.textContent = v;
-		bucketEl.appendChild(opt);
-	});
-	const fallback = list[0];
-	bucketEl.value = list.includes(desired) ? desired : fallback;
-	localStorage.setItem(savedBucketKey, bucketEl.value);
-
-	if (!bucketEl.dataset.bound) {
-		bucketEl.dataset.bound = 'true';
-		bucketEl.addEventListener('change', () => {
-			const key = `gym-kpi-bucket-${periodEl.value}`;
-			localStorage.setItem(key, bucketEl.value || '');
-			loadGymDashboardData();
-		});
 	}
 }
 
@@ -1521,38 +1477,6 @@ function renderGymBars(containerId, items, unitLabel) {
 	});
 }
 
-function renderGymHistogram(containerId, items, unitLabel) {
-	const el = document.getElementById(containerId);
-	if (!el) return;
-	const list = Array.isArray(items) ? items : [];
-	el.innerHTML = '';
-	if (!list.length) {
-		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
-		return;
-	}
-	const max = Math.max(...list.map(x => Number(x?.value || 0)), 1);
-	const wrap = document.createElement('div');
-	wrap.className = 'gym-hist';
-	const bars = document.createElement('div');
-	bars.className = 'gym-hist-bars';
-	list.forEach(x => {
-		const label = (x?.label || '').toString();
-		const value = Number(x?.value || 0);
-		const hPct = Math.max(6, Math.min(100, Math.round((value / max) * 100)));
-		const item = document.createElement('div');
-		item.className = 'gym-hist-item';
-		item.title = `${label}: ${value} ${unitLabel}`;
-		item.innerHTML = `
-			<div class="gym-hist-bar" style="height:${hPct}%"></div>
-			<div class="gym-hist-label">${escapeHtml(label)}</div>
-			<div class="gym-hist-value">${value}</div>
-		`;
-		bars.appendChild(item);
-	});
-	wrap.appendChild(bars);
-	el.appendChild(wrap);
-}
-
 function renderGymDonut(containerId, items, unitLabel) {
 	const el = document.getElementById(containerId);
 	if (!el) return;
@@ -1567,7 +1491,7 @@ function renderGymDonut(containerId, items, unitLabel) {
 		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
 		return;
 	}
-	const palette = ['#7c5cff', '#4f46e5', '#a855f7', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#e879f9', '#94a3b8'];
+	const palette = ['#7c5cff', '#5b42ff', '#a855f7', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#e879f9', '#94a3b8'];
 	let cursor = 0;
 	const stops = list.map((x, idx) => {
 		const value = Number(x?.value || 0);
@@ -1586,7 +1510,7 @@ function renderGymDonut(containerId, items, unitLabel) {
 			<div class="gym-donut-hole">
 				<div class="gym-donut-center">
 					<div class="gym-donut-center-value">${total}</div>
-					<div class="gym-donut-center-label">${unitLabel}</div>
+					<div class="gym-donut-center-label">${escapeHtml(unitLabel)}</div>
 				</div>
 			</div>
 		</div>
