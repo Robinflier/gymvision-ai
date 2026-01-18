@@ -2286,8 +2286,25 @@ def get_gym_dashboard():
 				# Supabase has an IN limit; chunk
 				for i in range(0, len(consent_user_ids), 50):
 					chunk = consent_user_ids[i:i+50]
-					q = admin_client.table("workouts").select("user_id,date,exercises").in_("user_id", chunk).gte("date", start_date)
-					res = q.execute()
+					# We want ONLY workouts saved with this gym. Prefer filtering by workouts.gym_name,
+					# but keep backwards compatibility if the column doesn't exist yet.
+					try:
+						q = admin_client.table("workouts") \
+							.select("user_id,date,exercises,gym_name,gym_place_id") \
+							.in_("user_id", chunk) \
+							.gte("date", start_date)
+						res = q.execute()
+					except Exception as e:
+						# If gym_name column doesn't exist, we can't do per-workout gym analytics reliably.
+						msg = str(e)
+						if "gym_name" in msg or "gym_place_id" in msg:
+							res = admin_client.table("workouts") \
+								.select("user_id,date,exercises") \
+								.in_("user_id", chunk) \
+								.gte("date", start_date) \
+								.execute()
+						else:
+							raise
 					if res.data:
 						all_workouts.extend(res.data)
 
@@ -2296,7 +2313,16 @@ def get_gym_dashboard():
 				weekday_counts = {k: 0 for k in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]}
 				week_counts = {}
 
+				target_gym = (gym_name or "").lower().strip()
 				for w in all_workouts:
+					# Filter to workouts that were actually saved with this gym (snapshot on the workout).
+					w_gym = (w.get("gym_name") or "").lower().strip()
+					# If the gym_name column isn't present / wasn't saved, skip (otherwise we'd be mixing gyms).
+					if not w_gym:
+						continue
+					if target_gym and w_gym != target_gym:
+						continue
+
 					date_str = w.get("date")
 					try:
 						# date is stored as YYYY-MM-DD
