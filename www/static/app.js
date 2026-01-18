@@ -1477,7 +1477,7 @@ async function loadGymDashboardData() {
 
 		// Charts
 		const charts = stats.charts || {};
-		renderGymBars('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
+		renderGymMachinesChart('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
 		renderGymMuscleFocus(charts.top_muscles_by_sets);
 		renderGymBars('gym-dashboard-chart-weeks', charts.workouts_last_weeks, 'workouts');
 
@@ -1515,6 +1515,70 @@ function renderGymBars(containerId, items, unitLabel) {
 		`;
 		el.appendChild(row);
 	});
+}
+
+function renderGymMachinesChart(containerId, items, unitLabel) {
+	const el = document.getElementById(containerId);
+	if (!el) return;
+	const list = Array.isArray(items) ? items : [];
+	el.innerHTML = '';
+	if (!list.length) {
+		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
+		return;
+	}
+
+	const total = list.reduce((acc, x) => acc + Number(x?.value || 0), 0) || 1;
+	const max = Math.max(...list.map(x => Number(x?.value || 0)), 1);
+	const top3 = list.slice(0, 3).map(x => ({ label: (x?.label || '').toString(), value: Number(x?.value || 0) }));
+	const order = [1, 0, 2]; // show #1 in the middle
+
+	const wrap = document.createElement('div');
+	wrap.className = 'gym-machines-wrap';
+
+	// Podium (top 3)
+	const podium = document.createElement('div');
+	podium.className = 'gym-podium';
+	order.forEach((idx, pos) => {
+		const item = top3[idx] || { label: '—', value: 0 };
+		const rank = idx + 1;
+		const height = rank === 1 ? 92 : rank === 2 ? 72 : 60;
+		const pct = Math.round((item.value / total) * 100);
+		const card = document.createElement('div');
+		card.className = `gym-podium-item rank-${rank}`;
+		card.style.height = `${height}px`;
+		card.innerHTML = `
+			<div class="gym-podium-rank">${rank}</div>
+			<div class="gym-podium-name" title="${item.label}">${item.label}</div>
+			<div class="gym-podium-meta">${item.value} ${unitLabel} • ${pct}%</div>
+		`;
+		podium.appendChild(card);
+	});
+	wrap.appendChild(podium);
+
+	// Ranked list (all)
+	const ranked = document.createElement('div');
+	ranked.className = 'gym-ranked';
+	list.forEach((x, idx) => {
+		const label = (x?.label || '').toString();
+		const value = Number(x?.value || 0);
+		const pctWidth = Math.max(0, Math.min(100, Math.round((value / max) * 100)));
+		const pct = Math.round((value / total) * 100);
+		const row = document.createElement('div');
+		row.className = 'gym-ranked-row';
+		row.innerHTML = `
+			<div class="gym-ranked-rank">${idx + 1}</div>
+			<div class="gym-ranked-label" title="${label}">${label}</div>
+			<div class="gym-ranked-barwrap">
+				<div class="gym-ranked-bar" style="width:${pctWidth}%"></div>
+			</div>
+			<div class="gym-ranked-value">${value}</div>
+			<div class="gym-ranked-pct">${pct}%</div>
+		`;
+		ranked.appendChild(row);
+	});
+	wrap.appendChild(ranked);
+
+	el.appendChild(wrap);
 }
 
 function renderGymMuscleFocus(items) {

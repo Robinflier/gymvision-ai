@@ -938,6 +938,26 @@ body{
 .gym-period-btn.active{background:linear-gradient(135deg,#7c5cff,#5b42ff);color:#fff;box-shadow:0 6px 18px rgba(124,92,255,0.25)}
 
 /* Gym dashboard muscle chart reuses Progress tab "Muscle Focus" styles */
+
+/* Gym dashboard: most used machines (podium + ranked bars) */
+.gym-machines-wrap{display:flex;flex-direction:column;gap:12px}
+.gym-podium{display:flex;align-items:flex-end;gap:10px}
+.gym-podium-item{flex:1;min-width:0;border-radius:16px;border:1px solid rgba(255,255,255,0.08);background:linear-gradient(135deg,#15151a,#101014);padding:10px 10px 8px;display:flex;flex-direction:column;justify-content:flex-end;gap:6px}
+.gym-podium-item.rank-1{background:linear-gradient(135deg,rgba(124,92,255,0.35),rgba(0,0,0,0.0));border-color:rgba(124,92,255,0.25)}
+.gym-podium-item.rank-2{background:linear-gradient(135deg,rgba(0,212,255,0.25),rgba(0,0,0,0.0));border-color:rgba(0,212,255,0.18)}
+.gym-podium-item.rank-3{background:linear-gradient(135deg,rgba(255,105,180,0.22),rgba(0,0,0,0.0));border-color:rgba(255,105,180,0.16)}
+.gym-podium-rank{width:26px;height:26px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;color:#fff;background:#1c1c22;border:1px solid rgba(255,255,255,0.08)}
+.gym-podium-name{color:#fff;font-size:13px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gym-podium-meta{color:var(--sub);font-size:11px;font-weight:800}
+
+.gym-ranked{display:flex;flex-direction:column;gap:10px}
+.gym-ranked-row{display:flex;align-items:center;gap:10px}
+.gym-ranked-rank{flex:0 0 22px;height:22px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:#15151a;border:1px solid rgba(255,255,255,0.08);color:#c9cad6;font-weight:900;font-size:12px}
+.gym-ranked-label{flex:0 0 38%;min-width:0;color:#dfe0e6;font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gym-ranked-barwrap{flex:1;height:12px;background:#1a1a1f;border:1px solid #242429;border-radius:999px;overflow:hidden}
+.gym-ranked-bar{height:100%;background:linear-gradient(90deg,#7c5cff,#00d4ff);border-radius:999px}
+.gym-ranked-value{flex:0 0 32px;text-align:right;color:#dfe0e6;font-size:12px;font-weight:900}
+.gym-ranked-pct{flex:0 0 36px;text-align:right;color:#8b8da0;font-size:12px;font-weight:800}
 .settings-option-sublabel{color:rgba(255,255,255,0.6);font-size:12px;font-weight:400;font-family:'Inter',sans-serif;line-height:1.4}
 .settings-gym-input{background:#0f0f12;color:#fff;border:1px solid #2b2b34;border-radius:8px;padding:8px 34px 8px 12px;font-size:14px;font-weight:500;font-family:'Inter',sans-serif;width:180px;max-width:100%;min-width:120px;display:block;box-sizing:border-box}
 .settings-gym-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:22px;height:22px;border-radius:999px;border:1px solid #2b2b34;background:#0f0f12;color:rgba(255,255,255,0.85);display:none;align-items:center;justify-content:center;padding:0 0 2px 0;line-height:0;font-size:16px;font-weight:700;cursor:pointer}
