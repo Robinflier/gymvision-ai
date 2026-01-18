@@ -3933,13 +3933,15 @@ window.saveWorkout = async function() {
 						alert('Gym is not being saved with workouts yet.\n\nTo persist gym on workouts (and enable gym charts), add columns gym_name and gym_place_id to the Supabase workouts table. Run the SQL in ADD_WORKOUT_GYM_COLUMNS.sql.');
 					}
 				} catch (e) {}
-				({ data, error } = await supabaseClient
-					.from('workouts')
-					.update(stripGymFields(workoutPayload))
-					.eq('id', editingWorkoutId)
-					.eq('user_id', session.user.id)
-					.select()
-					.single());
+				// Do NOT silently save a workout without gym — this causes gym to disappear after logout/login.
+				isSavingWorkout = false;
+				const saveWorkoutBtn = document.getElementById('save-workout');
+				if (saveWorkoutBtn) {
+					saveWorkoutBtn.disabled = false;
+					saveWorkoutBtn.style.opacity = '1';
+					saveWorkoutBtn.style.pointerEvents = 'auto';
+				}
+				return;
 			}
 			
 			if (error) {
@@ -3973,11 +3975,15 @@ window.saveWorkout = async function() {
 						alert('Gym is not being saved with workouts yet.\n\nTo persist gym on workouts (and enable gym charts), add columns gym_name and gym_place_id to the Supabase workouts table. Run the SQL in ADD_WORKOUT_GYM_COLUMNS.sql.');
 					}
 				} catch (e) {}
-				({ data, error } = await supabaseClient
-					.from('workouts')
-					.insert(stripGymFields(workoutPayload))
-					.select()
-					.single());
+				// Do NOT silently save a workout without gym — this causes gym to disappear after logout/login.
+				isSavingWorkout = false;
+				const saveWorkoutBtn = document.getElementById('save-workout');
+				if (saveWorkoutBtn) {
+					saveWorkoutBtn.disabled = false;
+					saveWorkoutBtn.style.opacity = '1';
+					saveWorkoutBtn.style.pointerEvents = 'auto';
+				}
+				return;
 			}
 			
 			if (error) {
