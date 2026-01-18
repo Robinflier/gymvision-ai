@@ -942,13 +942,12 @@ body{
 /* Gym dashboard: most used machines (podium + ranked bars) */
 .gym-machines-wrap{display:flex;flex-direction:column;gap:12px}
 .gym-podium{display:flex;align-items:flex-end;gap:10px}
-.gym-podium-item{flex:1;min-width:0;border-radius:16px;border:1px solid rgba(255,255,255,0.08);background:linear-gradient(135deg,#15151a,#101014);padding:10px 10px 8px;display:flex;flex-direction:column;justify-content:flex-end;gap:6px}
+.gym-podium-item{flex:1;min-width:0;border-radius:16px;border:1px solid rgba(255,255,255,0.08);background:linear-gradient(135deg,#15151a,#101014);padding:10px 10px 8px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;position:relative}
 .gym-podium-item.rank-1{background:linear-gradient(135deg,rgba(124,92,255,0.35),rgba(0,0,0,0.0));border-color:rgba(124,92,255,0.25)}
 .gym-podium-item.rank-2{background:linear-gradient(135deg,rgba(0,212,255,0.25),rgba(0,0,0,0.0));border-color:rgba(0,212,255,0.18)}
 .gym-podium-item.rank-3{background:linear-gradient(135deg,rgba(255,105,180,0.22),rgba(0,0,0,0.0));border-color:rgba(255,105,180,0.16)}
-.gym-podium-rank{width:26px;height:26px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;color:#fff;background:#1c1c22;border:1px solid rgba(255,255,255,0.08)}
-.gym-podium-name{color:#fff;font-size:13px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gym-podium-meta{color:var(--sub);font-size:11px;font-weight:800}
+.gym-podium-rank{width:28px;height:28px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;color:#fff;background:#1c1c22;border:1px solid rgba(255,255,255,0.12)}
+.gym-podium-name{color:#fff;font-size:13px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;text-align:center}
 
 .gym-ranked{display:flex;flex-direction:column;gap:10px}
 .gym-ranked-row{display:flex;align-items:center;gap:10px}

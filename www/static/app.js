@@ -1549,7 +1549,6 @@ function renderGymMachinesChart(containerId, items, unitLabel) {
 		card.innerHTML = `
 			<div class="gym-podium-rank">${rank}</div>
 			<div class="gym-podium-name" title="${item.label}">${item.label}</div>
-			<div class="gym-podium-meta">${item.value} ${unitLabel} • ${pct}%</div>
 		`;
 		podium.appendChild(card);
 	});
