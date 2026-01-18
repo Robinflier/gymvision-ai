@@ -108,6 +108,62 @@
 			border-radius: 8px;
 			margin-bottom: 20px;
 		}
+		.chart-card {
+			background: #252528;
+			border-radius: 12px;
+			padding: 20px;
+			margin-top: 16px;
+		}
+		.chart-card h3 {
+			font-size: 18px;
+			font-weight: 600;
+			margin: 0 0 14px;
+		}
+		.gym-chart {
+			display: flex;
+			flex-direction: column;
+			gap: 10px;
+		}
+		.gym-chart-empty {
+			color: #888;
+			text-align: center;
+			padding: 14px 0;
+		}
+		.gym-chart-row {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+		}
+		.gym-chart-label {
+			flex: 0 0 44%;
+			min-width: 0;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			font-size: 13px;
+			font-weight: 600;
+			color: #dfe0e6;
+		}
+		.gym-chart-barwrap {
+			flex: 1;
+			height: 10px;
+			background: #1a1a1d;
+			border: 1px solid #333;
+			border-radius: 999px;
+			overflow: hidden;
+		}
+		.gym-chart-bar {
+			height: 100%;
+			background: linear-gradient(90deg, #8b5cf6, #7c3aed);
+			border-radius: 999px;
+		}
+		.gym-chart-value {
+			flex: 0 0 44px;
+			text-align: right;
+			font-size: 12px;
+			font-weight: 700;
+			color: #888;
+		}
 	</style>
 </head>
 <body>
@@ -130,6 +186,10 @@
 					<div class="stat-value" id="users-consent">0</div>
 					<div class="stat-label">With Consent</div>
 				</div>
+				<div class="stat-card">
+					<div class="stat-value" id="users-linked">0</div>
+					<div class="stat-label">Linked</div>
+				</div>
 			</div>
 			
 			<div class="recent-users">
@@ -137,6 +197,19 @@
 				<div id="recent-users-list">
 					<p style="color: #888; text-align: center; padding: 20px;">No users yet</p>
 				</div>
+			</div>
+
+			<div class="chart-card">
+				<h3>Most used machines (sets)</h3>
+				<div id="chart-machines" class="gym-chart"></div>
+			</div>
+			<div class="chart-card">
+				<h3>Top muscles (sets)</h3>
+				<div id="chart-muscles" class="gym-chart"></div>
+			</div>
+			<div class="chart-card">
+				<h3>Workouts (last weeks)</h3>
+				<div id="chart-weeks" class="gym-chart"></div>
 			</div>
 		</div>
 	</div>
@@ -194,6 +267,7 @@
 				// Update stats
 				document.getElementById('total-users').textContent = data.statistics.total_users || 0;
 				document.getElementById('users-consent').textContent = data.statistics.users_with_consent || 0;
+				document.getElementById('users-linked').textContent = data.statistics.users_linked || 0;
 				
 				// Update recent users
 				const recentUsersList = document.getElementById('recent-users-list');
@@ -210,6 +284,12 @@
 				} else {
 					recentUsersList.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No users yet</p>';
 				}
+
+				// Charts
+				const charts = data.statistics?.charts || {};
+				renderBars('chart-machines', charts.top_machines_by_sets);
+				renderBars('chart-muscles', charts.top_muscles_by_sets);
+				renderBars('chart-weeks', charts.workouts_last_weeks);
 				
 				loadingEl.style.display = 'none';
 				contentEl.style.display = 'block';
@@ -218,6 +298,31 @@
 				errorEl.textContent = error.message || 'Failed to load dashboard';
 				errorEl.style.display = 'block';
 			}
+		}
+
+		function renderBars(containerId, items) {
+			const el = document.getElementById(containerId);
+			if (!el) return;
+			const list = Array.isArray(items) ? items : [];
+			el.innerHTML = '';
+			if (!list.length) {
+				el.innerHTML = '<div class="gym-chart-empty">No data yet</div>';
+				return;
+			}
+			const max = Math.max(...list.map(x => Number(x?.value || 0)), 1);
+			list.forEach(x => {
+				const label = String(x?.label || '');
+				const value = Number(x?.value || 0);
+				const pct = Math.max(0, Math.min(100, Math.round((value / max) * 100)));
+				const row = document.createElement('div');
+				row.className = 'gym-chart-row';
+				row.innerHTML = `
+					<div class="gym-chart-label" title="${label}">${label}</div>
+					<div class="gym-chart-barwrap"><div class="gym-chart-bar" style="width:${pct}%"></div></div>
+					<div class="gym-chart-value">${value}</div>
+				`;
+				el.appendChild(row);
+			});
 		}
 		
 		async function logout() {
