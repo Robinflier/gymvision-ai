@@ -1403,7 +1403,22 @@ async function loadGymDashboardData() {
 		}
 		if (titleEl) titleEl.textContent = meta.gym_name || 'Gym Dashboard';
 
-		const apiUrl = getApiUrl('/api/gym/dashboard');
+		// KPI controls (only affects top 3 cards)
+		const kpiYearEl = document.getElementById('gym-kpi-year');
+		const kpiPeriodEl = document.getElementById('gym-kpi-period');
+		const kpiBucketEl = document.getElementById('gym-kpi-bucket');
+		const defaultYear = new Date().getFullYear();
+		const savedPeriod = (localStorage.getItem('gym-kpi-period') || '').toString().trim();
+		const period = (kpiPeriodEl?.value || savedPeriod || 'week').toString().toLowerCase();
+		const year = Number((kpiYearEl?.value || localStorage.getItem('gym-kpi-year') || defaultYear).toString());
+		const savedBucketKey = `gym-kpi-bucket-${period}`;
+		const bucket = (kpiBucketEl?.value || localStorage.getItem(savedBucketKey) || '').toString();
+
+		const qs = new URLSearchParams();
+		if (year) qs.set('year', String(year));
+		if (period) qs.set('period', period);
+		if (bucket) qs.set('bucket', bucket);
+		const apiUrl = getApiUrl('/api/gym/dashboard') + (qs.toString() ? `?${qs.toString()}` : '');
 		const res = await fetch(apiUrl, {
 			headers: { 'Authorization': `Bearer ${session.access_token}` }
 		});
@@ -1411,16 +1426,22 @@ async function loadGymDashboardData() {
 		if (!res.ok) throw new Error(data?.error || 'Failed to load dashboard');
 
 		const stats = data.statistics || {};
-		const totalUsers = stats.total_users || 0;
-		const withConsent = stats.users_with_consent || 0;
-		const linked = stats.users_linked || 0;
 
+		// KPI cards (period-specific)
+		const kpi = stats.kpi || {};
+		const kpiUsers = Number(kpi.total_users || 0);
+		const kpiWorkouts = Number(kpi.total_workouts || 0);
+		const kpiExercises = Number(kpi.total_exercises || 0);
 		const totalEl = document.getElementById('gym-dashboard-total-users');
-		const consentEl = document.getElementById('gym-dashboard-users-consent');
-		const linkedEl = document.getElementById('gym-dashboard-users-linked');
-		if (totalEl) totalEl.textContent = totalUsers;
-		if (consentEl) consentEl.textContent = withConsent;
-		if (linkedEl) linkedEl.textContent = linked;
+		const workoutsEl = document.getElementById('gym-dashboard-total-workouts');
+		const exercisesEl = document.getElementById('gym-dashboard-total-exercises');
+		if (totalEl) totalEl.textContent = kpiUsers;
+		if (workoutsEl) workoutsEl.textContent = kpiWorkouts;
+		if (exercisesEl) exercisesEl.textContent = kpiExercises;
+
+		// KPI options + bindings
+		const kpiOpts = stats.kpi_options || {};
+		initGymKpiControls(kpiOpts, kpi);
 
 		const recent = Array.isArray(stats.recent_users) ? stats.recent_users : [];
 		if (recentEl) {
@@ -1441,8 +1462,8 @@ async function loadGymDashboardData() {
 
 		// Charts
 		const charts = stats.charts || {};
-		renderGymBars('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
-		renderGymBars('gym-dashboard-chart-muscles', charts.top_muscles_by_sets, 'sets');
+		renderGymHistogram('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
+		renderGymDonut('gym-dashboard-chart-muscles', charts.top_muscles_by_sets, 'sets');
 		renderGymBars('gym-dashboard-chart-weeks', charts.workouts_last_weeks, 'workouts');
 
 		if (loadingEl) loadingEl.style.display = 'none';
@@ -1453,6 +1474,70 @@ async function loadGymDashboardData() {
 			errorEl.textContent = e?.message || 'Failed to load dashboard';
 			errorEl.classList.add('show');
 		}
+	}
+}
+
+function initGymKpiControls(kpiOptions, kpi) {
+	const yearEl = document.getElementById('gym-kpi-year');
+	const periodEl = document.getElementById('gym-kpi-period');
+	const bucketEl = document.getElementById('gym-kpi-bucket');
+	if (!yearEl || !periodEl || !bucketEl) return;
+
+	const year = Number(kpi?.year || kpiOptions?.year || new Date().getFullYear());
+	const period = (kpi?.period || localStorage.getItem('gym-kpi-period') || 'week').toString();
+
+	// Set year (fixed, but keep accurate)
+	yearEl.innerHTML = `<option value="${year}">${year}</option>`;
+	localStorage.setItem('gym-kpi-year', String(year));
+
+	// Set period
+	if (!periodEl.dataset.bound) {
+		periodEl.dataset.bound = 'true';
+		periodEl.addEventListener('change', () => {
+			const p = (periodEl.value || 'week').toString();
+			localStorage.setItem('gym-kpi-period', p);
+			// Clear bucket selection for this new period so we pick latest by default
+			const key = `gym-kpi-bucket-${p}`;
+			if (!localStorage.getItem(key)) localStorage.setItem(key, '');
+			loadGymDashboardData();
+		});
+	}
+	periodEl.value = ['day', 'week', 'month'].includes(period) ? period : 'week';
+	localStorage.setItem('gym-kpi-period', periodEl.value);
+
+	const days = Array.isArray(kpiOptions?.available_days) ? kpiOptions.available_days : [];
+	const weeks = Array.isArray(kpiOptions?.available_weeks) ? kpiOptions.available_weeks : [];
+	const months = Array.isArray(kpiOptions?.available_months) ? kpiOptions.available_months : [];
+	const list = (periodEl.value === 'day') ? days : (periodEl.value === 'month') ? months : weeks;
+
+	// Populate bucket select
+	const savedBucketKey = `gym-kpi-bucket-${periodEl.value}`;
+	const desired = (kpi?.bucket || bucketEl.value || localStorage.getItem(savedBucketKey) || '').toString();
+	bucketEl.innerHTML = '';
+	if (!list.length) {
+		bucketEl.innerHTML = `<option value="">No data</option>`;
+		bucketEl.value = '';
+		bucketEl.disabled = true;
+		return;
+	}
+	bucketEl.disabled = false;
+	list.forEach(v => {
+		const opt = document.createElement('option');
+		opt.value = v;
+		opt.textContent = v;
+		bucketEl.appendChild(opt);
+	});
+	const fallback = list[0];
+	bucketEl.value = list.includes(desired) ? desired : fallback;
+	localStorage.setItem(savedBucketKey, bucketEl.value);
+
+	if (!bucketEl.dataset.bound) {
+		bucketEl.dataset.bound = 'true';
+		bucketEl.addEventListener('change', () => {
+			const key = `gym-kpi-bucket-${periodEl.value}`;
+			localStorage.setItem(key, bucketEl.value || '');
+			loadGymDashboardData();
+		});
 	}
 }
 
@@ -1479,6 +1564,101 @@ function renderGymBars(containerId, items, unitLabel) {
 		`;
 		el.appendChild(row);
 	});
+}
+
+function renderGymHistogram(containerId, items, unitLabel) {
+	const el = document.getElementById(containerId);
+	if (!el) return;
+	const list = Array.isArray(items) ? items : [];
+	el.innerHTML = '';
+	if (!list.length) {
+		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
+		return;
+	}
+	const max = Math.max(...list.map(x => Number(x?.value || 0)), 1);
+	const wrap = document.createElement('div');
+	wrap.className = 'gym-hist';
+	const bars = document.createElement('div');
+	bars.className = 'gym-hist-bars';
+	list.forEach(x => {
+		const label = (x?.label || '').toString();
+		const value = Number(x?.value || 0);
+		const hPct = Math.max(6, Math.min(100, Math.round((value / max) * 100)));
+		const item = document.createElement('div');
+		item.className = 'gym-hist-item';
+		item.title = `${label}: ${value} ${unitLabel}`;
+		item.innerHTML = `
+			<div class="gym-hist-bar" style="height:${hPct}%"></div>
+			<div class="gym-hist-label">${escapeHtml(label)}</div>
+			<div class="gym-hist-value">${value}</div>
+		`;
+		bars.appendChild(item);
+	});
+	wrap.appendChild(bars);
+	el.appendChild(wrap);
+}
+
+function renderGymDonut(containerId, items, unitLabel) {
+	const el = document.getElementById(containerId);
+	if (!el) return;
+	const list = Array.isArray(items) ? items : [];
+	el.innerHTML = '';
+	if (!list.length) {
+		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
+		return;
+	}
+	const total = list.reduce((acc, x) => acc + Number(x?.value || 0), 0);
+	if (!total) {
+		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
+		return;
+	}
+	const palette = ['#7c5cff', '#4f46e5', '#a855f7', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#e879f9', '#94a3b8'];
+	let cursor = 0;
+	const stops = list.map((x, idx) => {
+		const value = Number(x?.value || 0);
+		const deg = (value / total) * 360;
+		const start = cursor;
+		const end = cursor + deg;
+		cursor = end;
+		const color = palette[idx % palette.length];
+		return { color, start, end, label: (x?.label || '').toString(), value };
+	});
+	const gradient = stops.map(s => `${s.color} ${s.start.toFixed(2)}deg ${s.end.toFixed(2)}deg`).join(', ');
+	const wrap = document.createElement('div');
+	wrap.className = 'gym-donut-wrap';
+	wrap.innerHTML = `
+		<div class="gym-donut" style="background: conic-gradient(${gradient});">
+			<div class="gym-donut-hole">
+				<div class="gym-donut-center">
+					<div class="gym-donut-center-value">${total}</div>
+					<div class="gym-donut-center-label">${unitLabel}</div>
+				</div>
+			</div>
+		</div>
+		<div class="gym-donut-legend"></div>
+	`;
+	const legend = wrap.querySelector('.gym-donut-legend');
+	if (legend) {
+		legend.innerHTML = stops.map(s => `
+			<div class="gym-donut-legend-row">
+				<div class="gym-donut-legend-left">
+					<span class="gym-donut-dot" style="background:${s.color}"></span>
+					<span class="gym-donut-name" title="${escapeHtml(s.label)}">${escapeHtml(s.label)}</span>
+				</div>
+				<div class="gym-donut-val">${s.value}</div>
+			</div>
+		`).join('');
+	}
+	el.appendChild(wrap);
+}
+
+function escapeHtml(value) {
+	return (value || '').toString()
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#039;');
 }
 
 // Initialize register link

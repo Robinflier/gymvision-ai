@@ -2168,6 +2168,16 @@ def get_gym_dashboard():
 		
 		gym_id = user_response.user.id
 		gym_name = user_metadata.get("gym_name", "Unknown")
+
+		# KPI query params (only affect the top 3 cards; charts remain the same)
+		try:
+			req_year = int(request.args.get("year") or datetime.utcnow().year)
+		except Exception:
+			req_year = datetime.utcnow().year
+		req_period = (request.args.get("period") or "week").lower().strip()
+		if req_period not in ("day", "week", "month"):
+			req_period = "week"
+		req_bucket = (request.args.get("bucket") or "").strip()
 		
 		# Get analytics data for this gym
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
@@ -2279,8 +2289,13 @@ def get_gym_dashboard():
 			consent_user_ids = list(dict.fromkeys(consent_user_ids))  # de-dupe keep order
 
 			if consent_user_ids:
-				# Limit to last 90 days to keep it cheap
-				start_date = (datetime.utcnow().date() - timedelta(days=90)).isoformat()
+				# For KPIs we support "Year" (fixed in UI) + Day/Week/Month buckets.
+				# We query from Jan 1 of the requested year (keeps it fast and enables per-period selection).
+				try:
+					year_start = datetime(req_year, 1, 1).date()
+				except Exception:
+					year_start = datetime.utcnow().date().replace(month=1, day=1)
+				start_date = year_start.isoformat()
 
 				all_workouts = []
 				# Supabase has an IN limit; chunk
@@ -2314,6 +2329,10 @@ def get_gym_dashboard():
 				week_counts = {}
 
 				target_gym = (gym_name or "").lower().strip()
+				filtered_workouts = []  # workouts saved with this gym (and only those)
+				available_days = set()
+				available_weeks = set()
+				available_months = set()
 				for w in all_workouts:
 					# Filter to workouts that were actually saved with this gym (snapshot on the workout).
 					w_gym = (w.get("gym_name") or "").lower().strip()
@@ -2322,17 +2341,27 @@ def get_gym_dashboard():
 						continue
 					if target_gym and w_gym != target_gym:
 						continue
-
+					
+					# Parse date
 					date_str = w.get("date")
+					dt = None
 					try:
-						# date is stored as YYYY-MM-DD
 						dt = datetime.fromisoformat(str(date_str))
 					except Exception:
-						# fallback
 						try:
 							dt = datetime.fromisoformat(str(date_str).split("T")[0])
 						except Exception:
 							dt = None
+
+					# Track available period buckets (within requested year)
+					if dt and dt.year == req_year:
+						available_days.add(dt.date().isoformat())
+						iso_year, iso_week, _ = dt.isocalendar()
+						available_weeks.add(f"{iso_year}-W{iso_week:02d}")
+						available_months.add(f"{dt.year}-{dt.month:02d}")
+
+					filtered_workouts.append(w)
+
 					if dt:
 						weekday = dt.strftime("%a")
 						if weekday in weekday_counts:
@@ -2367,8 +2396,106 @@ def get_gym_dashboard():
 				chart["top_muscles_by_sets"] = [{"label": k, "value": v} for k, v in top_muscles]
 				chart["workouts_by_weekday"] = [{"label": k, "value": weekday_counts[k]} for k in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]]
 				chart["workouts_last_weeks"] = [{"label": k, "value": v} for k, v in last_weeks]
+
+				# ===== KPI cards (period-specific; does not affect the charts above) =====
+				# Choose default bucket based on availability
+				def _sorted_desc(values):
+					return sorted(list(values), reverse=True)
+
+				available_days_list = _sorted_desc(available_days)
+				available_weeks_list = _sorted_desc(available_weeks)
+				available_months_list = _sorted_desc(available_months)
+
+				period_to_list = {
+					"day": available_days_list,
+					"week": available_weeks_list,
+					"month": available_months_list,
+				}
+				default_bucket = (period_to_list.get(req_period) or [""])[0]
+				selected_bucket = req_bucket or default_bucket or ""
+
+				def _workout_matches_bucket(wrow: dict) -> bool:
+					date_str2 = wrow.get("date")
+					try:
+						dt2 = datetime.fromisoformat(str(date_str2))
+					except Exception:
+						try:
+							dt2 = datetime.fromisoformat(str(date_str2).split("T")[0])
+						except Exception:
+							return False
+					if dt2.year != req_year:
+						return False
+					if req_period == "day":
+						return dt2.date().isoformat() == selected_bucket
+					if req_period == "month":
+						return f"{dt2.year}-{dt2.month:02d}" == selected_bucket
+					# week
+					iso_year2, iso_week2, _ = dt2.isocalendar()
+					return f"{iso_year2}-W{iso_week2:02d}" == selected_bucket
+
+				bucket_workouts = [w for w in filtered_workouts if _workout_matches_bucket(w)]
+				kpi_total_workouts = len(bucket_workouts)
+				kpi_users = set()
+				kpi_exercises = 0
+				for w in bucket_workouts:
+					uid = w.get("user_id")
+					if uid:
+						kpi_users.add(uid)
+					exs = w.get("exercises") or []
+					if not isinstance(exs, list):
+						continue
+					# Count exercises that have at least 1 logged set
+					for ex in exs:
+						if not isinstance(ex, dict):
+							continue
+						if _count_sets(ex) > 0:
+							kpi_exercises += 1
+
+				kpi_payload = {
+					"year": req_year,
+					"period": req_period,
+					"bucket": selected_bucket,
+					"total_users": len(kpi_users),
+					"total_workouts": kpi_total_workouts,
+					"total_exercises": kpi_exercises,
+				}
+				kpi_options = {
+					"year": req_year,
+					"available_days": available_days_list,
+					"available_weeks": available_weeks_list,
+					"available_months": available_months_list,
+				}
+			else:
+				kpi_payload = {
+					"year": req_year,
+					"period": req_period,
+					"bucket": req_bucket,
+					"total_users": 0,
+					"total_workouts": 0,
+					"total_exercises": 0,
+				}
+				kpi_options = {
+					"year": req_year,
+					"available_days": [],
+					"available_weeks": [],
+					"available_months": [],
+				}
 		except Exception as e:
 			print(f"[GYM DASHBOARD] Failed to build workout charts: {e}")
+			kpi_payload = {
+				"year": req_year,
+				"period": req_period,
+				"bucket": req_bucket,
+				"total_users": 0,
+				"total_workouts": 0,
+				"total_exercises": 0,
+			}
+			kpi_options = {
+				"year": req_year,
+				"available_days": [],
+				"available_weeks": [],
+				"available_months": [],
+			}
 
 		return jsonify({
 			"success": True,
@@ -2380,6 +2507,8 @@ def get_gym_dashboard():
 				"users_linked": users_linked,
 				"recent_users": recent_users,
 				"monthly_growth": monthly_growth,
+				"kpi": kpi_payload,
+				"kpi_options": kpi_options,
 				"charts": chart
 			}
 		}), 200

@@ -898,6 +898,13 @@ body{
 .settings-info-btn:focus-visible{outline:2px solid rgba(255,255,255,0.55);outline-offset:2px}
 
 /* Gym dashboard charts (simple bars) */
+.gym-kpi-filters{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:0 0 12px}
+.gym-kpi-filter{background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:10px 10px 12px;box-shadow:0 4px 12px rgba(0,0,0,0.15)}
+.gym-kpi-filter-label{color:rgba(255,255,255,0.78);font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px}
+.gym-kpi-select{width:100%;background:#0f0f12;color:#fff;border:1px solid rgba(255,255,255,0.10);border-radius:10px;padding:9px 10px;font-size:13px;font-weight:700;outline:none}
+.gym-kpi-select:focus{border-color:rgba(124,92,255,0.75);box-shadow:0 0 0 3px rgba(124,92,255,0.18)}
+.gym-kpi-select:disabled{opacity:.75}
+
 .gym-chart{padding:0 18px 18px;display:flex;flex-direction:column;gap:10px}
 .gym-chart-empty{color:var(--sub);font-size:13px;font-weight:600;padding:6px 0}
 .gym-chart-row{display:flex;align-items:center;gap:10px}
@@ -905,6 +912,28 @@ body{
 .gym-chart-barwrap{flex:1;height:10px;background:#1a1a1f;border:1px solid #242429;border-radius:999px;overflow:hidden}
 .gym-chart-bar{height:100%;background:linear-gradient(90deg,#7c5cff,#5b42ff);border-radius:999px}
 .gym-chart-value{flex:0 0 40px;text-align:right;color:#8b8da0;font-size:12px;font-weight:700}
+
+/* Gym dashboard: donut */
+.gym-donut-wrap{display:flex;gap:14px;align-items:center}
+.gym-donut{width:130px;height:130px;border-radius:999px;position:relative;flex-shrink:0;box-shadow:0 10px 24px rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.08)}
+.gym-donut-hole{position:absolute;inset:18px;background:#121215;border-radius:999px;border:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;text-align:center;padding:10px}
+.gym-donut-center{display:flex;flex-direction:column;gap:4px}
+.gym-donut-center-value{color:#fff;font-weight:900;font-size:18px}
+.gym-donut-center-label{color:rgba(255,255,255,0.65);font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px}
+.gym-donut-legend{display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
+.gym-donut-legend-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.gym-donut-legend-left{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+.gym-donut-dot{width:10px;height:10px;border-radius:999px;flex-shrink:0}
+.gym-donut-name{color:#dfe0e6;font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gym-donut-val{color:#8b8da0;font-size:12px;font-weight:800;flex-shrink:0}
+
+/* Gym dashboard: vertical histogram */
+.gym-hist{padding-top:6px}
+.gym-hist-bars{height:150px;display:flex;align-items:flex-end;gap:10px}
+.gym-hist-item{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px}
+.gym-hist-bar{width:100%;max-width:34px;border-radius:10px 10px 8px 8px;background:linear-gradient(180deg,#7c5cff,#5b42ff);border:1px solid rgba(255,255,255,0.08);box-shadow:0 10px 22px rgba(124,92,255,0.15)}
+.gym-hist-label{width:100%;text-align:center;color:#dfe0e6;font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.9}
+.gym-hist-value{color:#8b8da0;font-size:11px;font-weight:800}
 .settings-option-sublabel{color:rgba(255,255,255,0.6);font-size:12px;font-weight:400;font-family:'Inter',sans-serif;line-height:1.4}
 .settings-gym-input{background:#0f0f12;color:#fff;border:1px solid #2b2b34;border-radius:8px;padding:8px 34px 8px 12px;font-size:14px;font-weight:500;font-family:'Inter',sans-serif;width:180px;max-width:100%;min-width:120px;display:block;box-sizing:border-box}
 .settings-gym-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:22px;height:22px;border-radius:999px;border:1px solid #2b2b34;background:#0f0f12;color:rgba(255,255,255,0.85);display:none;align-items:center;justify-content:center;padding:0 0 2px 0;line-height:0;font-size:16px;font-weight:700;cursor:pointer}
