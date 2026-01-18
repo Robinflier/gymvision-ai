@@ -496,10 +496,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 	
 		// Check session FIRST - simple and reliable
 		let hasSession = false;
+		let initSession = null;
 		try {
 		if (supabaseClient) {
 				const { data: { session }, error } = await supabaseClient.auth.getSession();
-				hasSession = !!(session && !error);
+				initSession = session || null;
+				hasSession = !!(initSession && !error);
 				console.log('[INIT] Session check result:', hasSession ? 'FOUND' : 'NOT FOUND');
 			} else {
 				console.log('[INIT] No Supabase client available');
@@ -516,6 +518,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 			hideLoadingOverlay();
 		return;
 	}
+
+		// If this is a gym account, ALWAYS route to the in-app gym dashboard (prevents Command+R landing on user UI).
+		try {
+			const meta = initSession?.user?.user_metadata || {};
+			if (meta.is_gym_account === true) {
+				try { localStorage.setItem('auth-role', 'gym'); } catch (e) {}
+				await showGymDashboardScreen();
+				hideLoadingOverlay();
+				return;
+			}
+		} catch (e) {}
 	
 		// Session exists - initialize app
 		console.log('[INIT] Session found - initializing app...');
@@ -1416,7 +1429,6 @@ async function loadGymDashboardData() {
 	const loadingEl = document.getElementById('gym-dashboard-loading');
 	const panelsEl = document.getElementById('gym-dashboard-panels');
 	const titleEl = document.getElementById('gym-dashboard-title');
-	const recentEl = document.getElementById('gym-dashboard-recent-users');
 
 	if (errorEl) {
 		errorEl.classList.remove('show');
@@ -1463,27 +1475,10 @@ async function loadGymDashboardData() {
 		if (workoutsEl) workoutsEl.textContent = totalWorkouts;
 		if (exercisesEl) exercisesEl.textContent = totalExercises;
 
-		const recent = Array.isArray(stats.recent_users) ? stats.recent_users : [];
-		if (recentEl) {
-			if (!recent.length) {
-				recentEl.textContent = 'No users yet';
-			} else {
-				recentEl.innerHTML = recent.map(u => {
-					const dt = new Date(u.created_at || u.consent_given_at || Date.now());
-					const d = isNaN(dt.getTime()) ? '' : dt.toLocaleDateString();
-					const id = (u.user_id || '').toString();
-					return `<div style="display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid #242429;">
-						<span>User ${id.slice(0,8)}...</span>
-						<span style="color:var(--sub);font-size:12px;">${d}</span>
-					</div>`;
-				}).join('');
-			}
-		}
-
 		// Charts
 		const charts = stats.charts || {};
 		renderGymBars('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
-		renderGymDonut('gym-dashboard-chart-muscles', charts.top_muscles_by_sets, 'sets');
+		renderGymMuscleFocus(charts.top_muscles_by_sets);
 		renderGymBars('gym-dashboard-chart-weeks', charts.workouts_last_weeks, 'workouts');
 
 		if (loadingEl) loadingEl.style.display = 'none';
@@ -1522,67 +1517,85 @@ function renderGymBars(containerId, items, unitLabel) {
 	});
 }
 
-function renderGymDonut(containerId, items, unitLabel) {
-	const el = document.getElementById(containerId);
-	if (!el) return;
-	const list = Array.isArray(items) ? items : [];
-	el.innerHTML = '';
-	if (!list.length) {
-		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
-		return;
-	}
-	const total = list.reduce((acc, x) => acc + Number(x?.value || 0), 0);
-	if (!total) {
-		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
-		return;
-	}
-	const palette = ['#7c5cff', '#5b42ff', '#a855f7', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#e879f9', '#94a3b8'];
-	let cursor = 0;
-	const stops = list.map((x, idx) => {
-		const value = Number(x?.value || 0);
-		const deg = (value / total) * 360;
-		const start = cursor;
-		const end = cursor + deg;
-		cursor = end;
-		const color = palette[idx % palette.length];
-		return { color, start, end, label: (x?.label || '').toString(), value };
-	});
-	const gradient = stops.map(s => `${s.color} ${s.start.toFixed(2)}deg ${s.end.toFixed(2)}deg`).join(', ');
-	const wrap = document.createElement('div');
-	wrap.className = 'gym-donut-wrap';
-	wrap.innerHTML = `
-		<div class="gym-donut" style="background: conic-gradient(${gradient});">
-			<div class="gym-donut-hole">
-				<div class="gym-donut-center">
-					<div class="gym-donut-center-value">${total}</div>
-					<div class="gym-donut-center-label">${escapeHtml(unitLabel)}</div>
-				</div>
-			</div>
-		</div>
-		<div class="gym-donut-legend"></div>
-	`;
-	const legend = wrap.querySelector('.gym-donut-legend');
-	if (legend) {
-		legend.innerHTML = stops.map(s => `
-			<div class="gym-donut-legend-row">
-				<div class="gym-donut-legend-left">
-					<span class="gym-donut-dot" style="background:${s.color}"></span>
-					<span class="gym-donut-name" title="${escapeHtml(s.label)}">${escapeHtml(s.label)}</span>
-				</div>
-				<div class="gym-donut-val">${s.value}</div>
-			</div>
-		`).join('');
-	}
-	el.appendChild(wrap);
-}
+function renderGymMuscleFocus(items) {
+	const empty = document.getElementById('gym-muscle-empty');
+	const legend = document.getElementById('gym-muscle-legend');
+	const canvas = document.getElementById('gym-muscle-chart');
+	if (!legend || !canvas) return;
+	const ctx = canvas.getContext('2d');
+	if (!ctx) return;
 
-function escapeHtml(value) {
-	return (value || '').toString()
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#039;');
+	canvas.width = canvas.clientWidth || 260;
+	canvas.height = canvas.clientHeight || 260;
+	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	legend.innerHTML = '';
+
+	const list = Array.isArray(items) ? items : [];
+	if (!list.length) {
+		if (empty) empty.style.display = '';
+		return;
+	}
+
+	const entries = list
+		.map(x => [(x?.label || '').toString(), Number(x?.value || 0)])
+		.filter(([k, v]) => k && v > 0);
+
+	if (!entries.length) {
+		if (empty) empty.style.display = '';
+		return;
+	}
+	if (empty) empty.style.display = 'none';
+
+	const total = entries.reduce((sum, [, v]) => sum + v, 0);
+	const centerX = canvas.width / 2;
+	const centerY = canvas.height / 2;
+	const radius = Math.min(canvas.width, canvas.height) / 2 - 10;
+	const innerRadius = radius * 0.6;
+
+	// EXACT palette from Progress tab "Muscle Focus"
+	const colors = [
+		'#ff69b4',  // pink
+		'#00d4ff',  // light blue (vibrant)
+		'#1e3a8a',  // dark blue
+		'#32cd32',  // lime green
+		'#006400',  // dark green
+		'#7c5cff',  // purple (matches button accent color)
+		'#ff0000',  // red
+		'#ffa500',  // orange
+		'#ffd700'   // yellow
+	];
+
+	let startAngle = -Math.PI / 2;
+	entries.forEach(([muscle, value], idx) => {
+		const percent = (value / total) * 100;
+		const sliceAngle = (percent / 100) * Math.PI * 2;
+		const color = muscle.toLowerCase() === 'abs' ? '#ffffff' : colors[idx % colors.length];
+
+		ctx.beginPath();
+		ctx.arc(centerX, centerY, radius, startAngle, startAngle + sliceAngle);
+		ctx.arc(centerX, centerY, innerRadius, startAngle + sliceAngle, startAngle, true);
+		ctx.closePath();
+		ctx.fillStyle = color;
+		ctx.fill();
+
+		startAngle += sliceAngle;
+
+		const li = document.createElement('li');
+		li.innerHTML = `
+			<span class="progress-muscle-swatch" style="background:${color}"></span>
+			<span>${muscle}</span>
+			<span class="progress-muscle-value">${Math.round(percent)}%</span>
+		`;
+		legend.appendChild(li);
+	});
+
+	const centerLabel = document.getElementById('gym-muscle-center');
+	if (centerLabel) {
+		centerLabel.innerHTML = `
+			<div class="label">Total Sets</div>
+			<div class="value">${total}</div>
+		`;
+	}
 }
 
 // Initialize register link

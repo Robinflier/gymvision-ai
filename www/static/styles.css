@@ -937,19 +937,7 @@ body{
 .gym-period-btn{appearance:none;border:0;background:transparent;color:#c9cad6;font-weight:800;font-size:12px;padding:7px 12px;border-radius:999px;cursor:pointer}
 .gym-period-btn.active{background:linear-gradient(135deg,#7c5cff,#5b42ff);color:#fff;box-shadow:0 6px 18px rgba(124,92,255,0.25)}
 
-/* Donut chart (Top muscles) */
-.gym-donut-wrap{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
-.gym-donut{width:120px;height:120px;border-radius:50%;background:#1a1a1f;position:relative;flex:0 0 auto}
-.gym-donut-hole{position:absolute;inset:16px;border-radius:50%;background:#101014;border:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center}
-.gym-donut-center{text-align:center;line-height:1.05}
-.gym-donut-center-value{font-weight:900;font-size:18px;color:#fff}
-.gym-donut-center-label{margin-top:2px;font-weight:700;font-size:11px;color:var(--sub);text-transform:lowercase}
-.gym-donut-legend{display:flex;flex-direction:column;gap:8px;min-width:180px;flex:1}
-.gym-donut-legend-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.gym-donut-legend-left{display:flex;align-items:center;gap:8px;min-width:0}
-.gym-donut-dot{width:10px;height:10px;border-radius:50%;flex:0 0 auto}
-.gym-donut-name{color:#dfe0e6;font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
-.gym-donut-val{color:#8b8da0;font-size:12px;font-weight:800;flex:0 0 auto}
+/* Gym dashboard muscle chart reuses Progress tab "Muscle Focus" styles */
 .settings-option-sublabel{color:rgba(255,255,255,0.6);font-size:12px;font-weight:400;font-family:'Inter',sans-serif;line-height:1.4}
 .settings-gym-input{background:#0f0f12;color:#fff;border:1px solid #2b2b34;border-radius:8px;padding:8px 34px 8px 12px;font-size:14px;font-weight:500;font-family:'Inter',sans-serif;width:180px;max-width:100%;min-width:120px;display:block;box-sizing:border-box}
 .settings-gym-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:22px;height:22px;border-radius:999px;border:1px solid #2b2b34;background:#0f0f12;color:rgba(255,255,255,0.85);display:none;align-items:center;justify-content:center;padding:0 0 2px 0;line-height:0;font-size:16px;font-weight:700;cursor:pointer}
