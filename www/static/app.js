@@ -1056,7 +1056,7 @@ function initRegisterForm() {
 			openGymPortal('/gym-dashboard');
 			return;
 		}
-
+		
 		const { error } = await supabaseClient.auth.signUp({
 			email,
 			password,
@@ -1286,13 +1286,8 @@ function setAuthRole(role) {
 }
 
 function openGymPortal(path) {
-	const p = path || '/gym-dashboard';
-	// In native app we need absolute URL
-	if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
-		window.location.href = `https://gymvision-ai.onrender.com${p}`;
-		return;
-	}
-	window.location.href = p;
+	// Keep gym portal INSIDE the app (no external browser)
+	showGymDashboardScreen();
 }
 
 function initAuthRoleToggle() {
@@ -1346,6 +1341,113 @@ function updateAuthRoleUI() {
 
 	const submitBtn = document.getElementById('register-submit-btn');
 	if (submitBtn) submitBtn.textContent = isGym ? 'Create Gym Account' : 'Sign Up';
+}
+
+async function showGymDashboardScreen() {
+	// Hide all content sections
+	document.querySelectorAll('.content').forEach(content => {
+		content.classList.add('hidden');
+		content.style.display = 'none';
+	});
+	// Hide main navbar
+	const navbar = document.querySelector('.navbar');
+	if (navbar) navbar.style.display = 'none';
+
+	const gymContent = document.getElementById('gym-dashboard-content');
+	if (gymContent) {
+		gymContent.classList.remove('hidden');
+		gymContent.style.display = '';
+	}
+
+	// Logout button
+	const logoutBtn = document.getElementById('gym-dashboard-logout');
+	if (logoutBtn && !logoutBtn.dataset.bound) {
+		logoutBtn.dataset.bound = 'true';
+		logoutBtn.addEventListener('click', async () => {
+			try { if (supabaseClient) await supabaseClient.auth.signOut(); } catch (e) {}
+			showLoginScreen();
+		});
+	}
+
+	await loadGymDashboardData();
+}
+
+async function loadGymDashboardData() {
+	const errorEl = document.getElementById('gym-dashboard-error');
+	const loadingEl = document.getElementById('gym-dashboard-loading');
+	const panelsEl = document.getElementById('gym-dashboard-panels');
+	const titleEl = document.getElementById('gym-dashboard-title');
+	const recentEl = document.getElementById('gym-dashboard-recent-users');
+
+	if (errorEl) {
+		errorEl.classList.remove('show');
+		errorEl.textContent = '';
+	}
+	if (loadingEl) loadingEl.style.display = '';
+	if (panelsEl) panelsEl.classList.add('hidden');
+
+	try {
+		if (!supabaseClient) await initSupabase();
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			showLoginScreen();
+			return;
+		}
+		const meta = session.user?.user_metadata || {};
+		if (meta.is_gym_account !== true) {
+			if (errorEl) {
+				errorEl.textContent = 'This is a user account. Switch to User to use the app.';
+				errorEl.classList.add('show');
+			}
+			return;
+		}
+		if (titleEl) titleEl.textContent = meta.gym_name || 'Gym Dashboard';
+
+		const apiUrl = getApiUrl('/api/gym/dashboard');
+		const res = await fetch(apiUrl, {
+			headers: { 'Authorization': `Bearer ${session.access_token}` }
+		});
+		const data = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(data?.error || 'Failed to load dashboard');
+
+		const stats = data.statistics || {};
+		const totalUsers = stats.total_users || 0;
+		const withConsent = stats.users_with_consent || 0;
+		const linked = stats.users_linked || 0;
+
+		const totalEl = document.getElementById('gym-dashboard-total-users');
+		const consentEl = document.getElementById('gym-dashboard-users-consent');
+		const linkedEl = document.getElementById('gym-dashboard-users-linked');
+		if (totalEl) totalEl.textContent = totalUsers;
+		if (consentEl) consentEl.textContent = withConsent;
+		if (linkedEl) linkedEl.textContent = linked;
+
+		const recent = Array.isArray(stats.recent_users) ? stats.recent_users : [];
+		if (recentEl) {
+			if (!recent.length) {
+				recentEl.textContent = 'No users yet';
+			} else {
+				recentEl.innerHTML = recent.map(u => {
+					const dt = new Date(u.created_at || u.consent_given_at || Date.now());
+					const d = isNaN(dt.getTime()) ? '' : dt.toLocaleDateString();
+					const id = (u.user_id || '').toString();
+					return `<div style="display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid #242429;">
+						<span>User ${id.slice(0,8)}...</span>
+						<span style="color:var(--sub);font-size:12px;">${d}</span>
+					</div>`;
+				}).join('');
+			}
+		}
+
+		if (loadingEl) loadingEl.style.display = 'none';
+		if (panelsEl) panelsEl.classList.remove('hidden');
+	} catch (e) {
+		if (loadingEl) loadingEl.style.display = 'none';
+		if (errorEl) {
+			errorEl.textContent = e?.message || 'Failed to load dashboard';
+			errorEl.classList.add('show');
+		}
+	}
 }
 
 // Initialize register link

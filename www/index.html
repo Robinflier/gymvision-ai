@@ -862,6 +862,42 @@
 			</div>
 		</div>
 
+		<div class="content hidden" id="gym-dashboard-content">
+			<header class="topbar">
+				<div class="brand brand-logo"><img src="static/logo.png" alt="GymVision" /></div>
+				<div class="icons streak">
+					<button type="button" id="gym-dashboard-logout" class="btn" style="padding:8px 12px;font-size:13px;min-width:auto;">Logout</button>
+				</div>
+			</header>
+			<div style="padding: 22px;">
+				<h2 id="gym-dashboard-title" style="margin:0 0 14px;font-size:22px;font-weight:800;">Gym Dashboard</h2>
+				<div id="gym-dashboard-error" class="auth-error"></div>
+				<div id="gym-dashboard-loading" class="progress-empty" style="padding:18px 0;">Loading dashboard...</div>
+
+				<div id="gym-dashboard-panels" class="hidden">
+					<div class="settings-stats-grid" style="margin-bottom: 14px;">
+						<div class="settings-stat-box" style="background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);">
+							<div class="settings-stat-value" id="gym-dashboard-total-users">0</div>
+							<div class="settings-stat-label">Total Users</div>
+						</div>
+						<div class="settings-stat-box" style="background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);">
+							<div class="settings-stat-value" id="gym-dashboard-users-consent">0</div>
+							<div class="settings-stat-label">With Consent</div>
+						</div>
+						<div class="settings-stat-box" style="background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);">
+							<div class="settings-stat-value" id="gym-dashboard-users-linked">0</div>
+							<div class="settings-stat-label">Linked</div>
+						</div>
+					</div>
+
+					<section class="card" style="margin:0;">
+						<div style="padding:18px 18px 10px;font-weight:800;">Recent Users</div>
+						<div id="gym-dashboard-recent-users" style="padding:0 18px 18px;color:var(--sub);">No users yet</div>
+					</section>
+				</div>
+			</div>
+		</div>
+
 	<footer class="navbar" id="main-navbar" style="display: none;">
 			<button class="nav-btn active" data-tab="workouts" onclick="console.log('Nav workouts clicked'); if(window.switchTab){window.switchTab('workouts');} return false;" ontouchstart="console.log('Nav workouts touched'); if(window.switchTab){window.switchTab('workouts');} return false;" style="touch-action:manipulation;-webkit-touch-callout:none;">
 				<img src="static/nav/dumbell.png" alt="Workouts" class="nav-icon" />
