@@ -3604,6 +3604,13 @@ window.saveWorkout = async function() {
 
 			// Backwards compatible: if columns don't exist yet, retry without gym fields
 			if (error && (String(error.message || '').includes('gym_name') || String(error.message || '').includes('gym_place_id'))) {
+				// Make it explicit to the developer why gym isn't persisted after logout/login
+				try {
+					if (!localStorage.getItem('workouts-gym-columns-missing')) {
+						localStorage.setItem('workouts-gym-columns-missing', 'true');
+						alert('Gym is not being saved with workouts yet.\n\nTo persist gym on workouts (and enable gym charts), add columns gym_name and gym_place_id to the Supabase workouts table. Run the SQL in ADD_WORKOUT_GYM_COLUMNS.sql.');
+					}
+				} catch (e) {}
 				({ data, error } = await supabaseClient
 					.from('workouts')
 					.update(stripGymFields(workoutPayload))
@@ -3637,6 +3644,13 @@ window.saveWorkout = async function() {
 
 			// Backwards compatible: if columns don't exist yet, retry without gym fields
 			if (error && (String(error.message || '').includes('gym_name') || String(error.message || '').includes('gym_place_id'))) {
+				// Make it explicit to the developer why gym isn't persisted after logout/login
+				try {
+					if (!localStorage.getItem('workouts-gym-columns-missing')) {
+						localStorage.setItem('workouts-gym-columns-missing', 'true');
+						alert('Gym is not being saved with workouts yet.\n\nTo persist gym on workouts (and enable gym charts), add columns gym_name and gym_place_id to the Supabase workouts table. Run the SQL in ADD_WORKOUT_GYM_COLUMNS.sql.');
+					}
+				} catch (e) {}
 				({ data, error } = await supabaseClient
 					.from('workouts')
 					.insert(stripGymFields(workoutPayload))
