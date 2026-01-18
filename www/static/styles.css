@@ -921,6 +921,15 @@ body{
 .settings-info-btn:hover{background:rgba(0,0,0,0.28)}
 .settings-info-btn:active{transform:scale(0.98)}
 .settings-info-btn:focus-visible{outline:2px solid rgba(255,255,255,0.55);outline-offset:2px}
+
+/* Gym dashboard charts (simple bars) */
+.gym-chart{padding:0 18px 18px;display:flex;flex-direction:column;gap:10px}
+.gym-chart-empty{color:var(--sub);font-size:13px;font-weight:600;padding:6px 0}
+.gym-chart-row{display:flex;align-items:center;gap:10px}
+.gym-chart-label{flex:0 0 44%;min-width:0;color:#dfe0e6;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gym-chart-barwrap{flex:1;height:10px;background:#1a1a1f;border:1px solid #242429;border-radius:999px;overflow:hidden}
+.gym-chart-bar{height:100%;background:linear-gradient(90deg,#7c5cff,#5b42ff);border-radius:999px}
+.gym-chart-value{flex:0 0 40px;text-align:right;color:#8b8da0;font-size:12px;font-weight:700}
 .settings-option-sublabel{color:rgba(255,255,255,0.6);font-size:12px;font-weight:400;font-family:'Inter',sans-serif;line-height:1.4}
 .settings-gym-input{background:#0f0f12;color:#fff;border:1px solid #2b2b34;border-radius:8px;padding:8px 34px 8px 12px;font-size:14px;font-weight:500;font-family:'Inter',sans-serif;width:180px;max-width:100%;min-width:120px;display:block;box-sizing:border-box}
 .settings-gym-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:22px;height:22px;border-radius:999px;border:1px solid #2b2b34;background:#0f0f12;color:rgba(255,255,255,0.85);display:none;align-items:center;justify-content:center;padding:0 0 2px 0;line-height:0;font-size:16px;font-weight:700;cursor:pointer}

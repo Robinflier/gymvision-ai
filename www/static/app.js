@@ -1439,6 +1439,12 @@ async function loadGymDashboardData() {
 			}
 		}
 
+		// Charts
+		const charts = stats.charts || {};
+		renderGymBars('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
+		renderGymBars('gym-dashboard-chart-muscles', charts.top_muscles_by_sets, 'sets');
+		renderGymBars('gym-dashboard-chart-weeks', charts.workouts_last_weeks, 'workouts');
+
 		if (loadingEl) loadingEl.style.display = 'none';
 		if (panelsEl) panelsEl.classList.remove('hidden');
 	} catch (e) {
@@ -1448,6 +1454,31 @@ async function loadGymDashboardData() {
 			errorEl.classList.add('show');
 		}
 	}
+}
+
+function renderGymBars(containerId, items, unitLabel) {
+	const el = document.getElementById(containerId);
+	if (!el) return;
+	const list = Array.isArray(items) ? items : [];
+	el.innerHTML = '';
+	if (!list.length) {
+		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
+		return;
+	}
+	const max = Math.max(...list.map(x => Number(x?.value || 0)), 1);
+	list.forEach(x => {
+		const label = (x?.label || '').toString();
+		const value = Number(x?.value || 0);
+		const pct = Math.max(0, Math.min(100, Math.round((value / max) * 100)));
+		const row = document.createElement('div');
+		row.className = 'gym-chart-row';
+		row.innerHTML = `
+			<div class="gym-chart-label" title="${label}">${label}</div>
+			<div class="gym-chart-barwrap"><div class="gym-chart-bar" style="width:${pct}%"></div></div>
+			<div class="gym-chart-value">${value}</div>
+		`;
+		el.appendChild(row);
+	});
 }
 
 // Initialize register link

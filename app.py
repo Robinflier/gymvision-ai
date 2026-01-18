@@ -6,7 +6,7 @@ import sqlite3
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from collections import defaultdict
@@ -2197,6 +2197,7 @@ def get_gym_dashboard():
 		# Calculate statistics
 		total_users = len(analytics_all.data) if analytics_all.data else 0
 		users_with_consent = len(analytics_consent.data) if analytics_consent.data else 0
+		users_linked = total_users  # same as total users for this gym_id
 		
 		# Get recent users (last 10) - only users with consent
 		recent_users = []
@@ -2225,6 +2226,124 @@ def get_gym_dashboard():
 					except:
 						pass
 		
+		# ===== Workout analytics for charts (only users with consent) =====
+		def _count_sets(ex_obj: dict) -> int:
+			sets = ex_obj.get("sets")
+			if not isinstance(sets, list):
+				return 0
+			count = 0
+			for s in sets:
+				if not isinstance(s, dict):
+					continue
+				# Strength set
+				w = s.get("weight", "")
+				r = s.get("reps", "")
+				# Cardio set
+				mins = s.get("min", "")
+				secs = s.get("sec", "")
+				km = s.get("km", "")
+				cal = s.get("cal", "")
+				if (w not in ("", None) or r not in ("", None)) or (mins not in ("", None) or secs not in ("", None) or km not in ("", None) or cal not in ("", None)):
+					count += 1
+			return count
+
+		def _exercise_display(ex_obj: dict) -> str:
+			key = ex_obj.get("key") or ""
+			if key and key in MACHINE_METADATA:
+				return str(MACHINE_METADATA[key].get("display") or key)
+			return str(ex_obj.get("display") or key or "Exercise")
+
+		def _exercise_muscles(ex_obj: dict) -> List[str]:
+			# Prefer MACHINE_METADATA by key; else any muscles already present
+			key = ex_obj.get("key") or ""
+			if key and key in MACHINE_METADATA:
+				muscles = MACHINE_METADATA[key].get("muscles") or []
+				return normalize_muscles(muscles) if isinstance(muscles, list) else []
+			m = ex_obj.get("muscles") or []
+			return normalize_muscles(m) if isinstance(m, list) else []
+
+		chart = {
+			"top_machines_by_sets": [],
+			"top_muscles_by_sets": [],
+			"workouts_by_weekday": [],
+			"workouts_last_weeks": []
+		}
+
+		try:
+			consent_user_ids = []
+			if analytics_consent.data:
+				for row in analytics_consent.data:
+					uid = row.get("user_id")
+					if uid:
+						consent_user_ids.append(uid)
+			consent_user_ids = list(dict.fromkeys(consent_user_ids))  # de-dupe keep order
+
+			if consent_user_ids:
+				# Limit to last 90 days to keep it cheap
+				start_date = (datetime.utcnow().date() - timedelta(days=90)).isoformat()
+
+				all_workouts = []
+				# Supabase has an IN limit; chunk
+				for i in range(0, len(consent_user_ids), 50):
+					chunk = consent_user_ids[i:i+50]
+					q = admin_client.table("workouts").select("user_id,date,exercises").in_("user_id", chunk).gte("date", start_date)
+					res = q.execute()
+					if res.data:
+						all_workouts.extend(res.data)
+
+				machine_sets = {}
+				muscle_sets = {}
+				weekday_counts = {k: 0 for k in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]}
+				week_counts = {}
+
+				for w in all_workouts:
+					date_str = w.get("date")
+					try:
+						# date is stored as YYYY-MM-DD
+						dt = datetime.fromisoformat(str(date_str))
+					except Exception:
+						# fallback
+						try:
+							dt = datetime.fromisoformat(str(date_str).split("T")[0])
+						except Exception:
+							dt = None
+					if dt:
+						weekday = dt.strftime("%a")
+						if weekday in weekday_counts:
+							weekday_counts[weekday] += 1
+						iso_year, iso_week, _ = dt.isocalendar()
+						week_key = f"{iso_year}-W{iso_week:02d}"
+						week_counts[week_key] = week_counts.get(week_key, 0) + 1
+
+					exercises = w.get("exercises") or []
+					if not isinstance(exercises, list):
+						continue
+					for ex in exercises:
+						if not isinstance(ex, dict):
+							continue
+						sets_n = _count_sets(ex)
+						if sets_n <= 0:
+							continue
+						name = _exercise_display(ex)
+						machine_sets[name] = machine_sets.get(name, 0) + sets_n
+						for m in _exercise_muscles(ex):
+							if not m or m == "-":
+								continue
+							muscle_sets[m] = muscle_sets.get(m, 0) + sets_n
+
+				top_machines = sorted(machine_sets.items(), key=lambda kv: kv[1], reverse=True)[:10]
+				top_muscles = sorted(muscle_sets.items(), key=lambda kv: kv[1], reverse=True)[:8]
+
+				# last 8 weeks (sorted)
+				last_weeks = sorted(week_counts.items(), key=lambda kv: kv[0])[-8:]
+
+				chart["top_machines_by_sets"] = [{"label": k, "value": v} for k, v in top_machines]
+				chart["top_muscles_by_sets"] = [{"label": k, "value": v} for k, v in top_muscles]
+				chart["workouts_by_weekday"] = [{"label": k, "value": weekday_counts[k]} for k in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]]
+				chart["workouts_last_weeks"] = [{"label": k, "value": v} for k, v in last_weeks]
+		except Exception as e:
+			print(f"[GYM DASHBOARD] Failed to build workout charts: {e}")
+
 		return jsonify({
 			"success": True,
 			"gym_id": gym_id,
@@ -2232,8 +2351,10 @@ def get_gym_dashboard():
 			"statistics": {
 				"total_users": total_users,
 				"users_with_consent": users_with_consent,
+				"users_linked": users_linked,
 				"recent_users": recent_users,
-				"monthly_growth": monthly_growth
+				"monthly_growth": monthly_growth,
+				"charts": chart
 			}
 		}), 200
 		
