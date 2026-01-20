@@ -1345,12 +1345,12 @@ const GYM_DASHBOARD_PERIOD_KEY = 'gym-dashboard-period';
 
 function getGymDashboardPeriod() {
 	const v = (localStorage.getItem(GYM_DASHBOARD_PERIOD_KEY) || '').toString().toLowerCase().trim();
-	return (v === 'week' || v === 'month' || v === 'all') ? v : 'week';
+	return (v === 'week' || v === 'month' || v === 'year' || v === 'all') ? v : 'week';
 }
 
 function setGymDashboardPeriod(period) {
 	const p = (period || '').toString().toLowerCase().trim();
-	localStorage.setItem(GYM_DASHBOARD_PERIOD_KEY, (p === 'month' || p === 'all') ? p : 'week');
+	localStorage.setItem(GYM_DASHBOARD_PERIOD_KEY, (p === 'month' || p === 'year' || p === 'all') ? p : 'week');
 	updateGymDashboardPeriodUI();
 }
 
@@ -1433,6 +1433,7 @@ async function loadGymDashboardData() {
 		// Charts
 		const charts = stats.charts || {};
 		renderGymMachinesChart('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
+		renderGymPeakTimes(charts);
 		renderGymMuscleFocus(charts.top_muscles_by_sets);
 		renderGymBars('gym-dashboard-chart-weeks', charts.workouts_last_weeks, 'workouts');
 
@@ -1445,6 +1446,235 @@ async function loadGymDashboardData() {
 			errorEl.classList.add('show');
 		}
 	}
+}
+
+function renderGymPeakTimes(charts) {
+	const containerId = 'gym-dashboard-chart-peak';
+	const el = document.getElementById(containerId);
+	if (!el) return;
+	const buttons = document.querySelectorAll('.gym-mini-btn[data-peak]');
+	const hasAny = (arr) => Array.isArray(arr) && arr.some(x => Number(x?.value || 0) > 0);
+	const applyMode = (mode) => {
+		buttons.forEach(b => {
+			const active = (b.dataset.peak === mode);
+			b.classList.toggle('active', active);
+			b.setAttribute('aria-selected', active ? 'true' : 'false');
+		});
+		if (mode === 'days') {
+			// Preferred: daily line (requires backend workouts_by_day)
+			if (hasAny(charts.workouts_by_day)) {
+				renderGymPeakDaysLine(containerId, charts.workouts_by_day);
+			} else if (hasAny(charts.workouts_by_weekday)) {
+				// Fallback: weekday bars (older backend)
+				renderGymBars(containerId, charts.workouts_by_weekday, 'workouts');
+			} else {
+				el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
+			}
+		} else {
+			// Preferred: hourly line (requires backend workouts_by_hour)
+			if (hasAny(charts.workouts_by_hour)) {
+				renderGymPeakHoursLine(containerId, charts.workouts_by_hour);
+			} else {
+				el.innerHTML = `<div class="gym-chart-empty">No data yet (deploy backend update for Hours)</div>`;
+			}
+		}
+	};
+	// bind once
+	buttons.forEach(btn => {
+		if (btn.dataset.bound === 'true') return;
+		btn.dataset.bound = 'true';
+		btn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			const mode = (btn.dataset.peak || 'hours').toString();
+			try { localStorage.setItem('gym-peak-mode', mode); } catch (e) {}
+			applyMode(mode);
+		});
+	});
+	let mode = 'hours';
+	try { mode = (localStorage.getItem('gym-peak-mode') || 'hours').toString(); } catch (e) {}
+	mode = (mode === 'days') ? 'days' : 'hours';
+	applyMode(mode);
+}
+
+function renderGymPeakDaysLine(containerId, items) {
+	const el = document.getElementById(containerId);
+	if (!el) return;
+	const list = Array.isArray(items) ? items : [];
+	const values = list.map(x => Number(x?.value || 0));
+	const hasAny = values.some(v => v > 0);
+	el.innerHTML = '';
+	if (!list.length || !hasAny) {
+		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
+		return;
+	}
+
+	const canvas = document.createElement('canvas');
+	canvas.className = 'gym-peak-canvas';
+	el.appendChild(canvas);
+	const ctx = canvas.getContext('2d');
+	if (!ctx) return;
+
+	const w = el.clientWidth || 320;
+	const h = 160;
+	canvas.width = Math.max(260, w);
+	canvas.height = h;
+
+	const padding = { l: 34, r: 10, t: 12, b: 26 };
+	const innerW = canvas.width - padding.l - padding.r;
+	const innerH = canvas.height - padding.t - padding.b;
+	const max = Math.max(...values, 1);
+
+	ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+	// Y grid + labels (0, mid, max)
+	ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+	ctx.fillStyle = 'rgba(223,224,230,0.60)';
+	ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif';
+	ctx.textAlign = 'right';
+	ctx.textBaseline = 'middle';
+	const yTicks = [0, Math.round(max / 2), max].filter((v, i, a) => a.indexOf(v) === i);
+	yTicks.forEach(v => {
+		const y = padding.t + innerH - (innerH * v) / max;
+		ctx.beginPath();
+		ctx.moveTo(padding.l, y);
+		ctx.lineTo(padding.l + innerW, y);
+		ctx.stroke();
+		ctx.fillText(String(v), padding.l - 8, y);
+	});
+
+	const xFor = (i) => padding.l + (innerW * i) / Math.max(values.length - 1, 1);
+	const yFor = (v) => padding.t + innerH - (innerH * v) / max;
+
+	// area fill
+	const grad = ctx.createLinearGradient(0, padding.t, 0, padding.t + innerH);
+	grad.addColorStop(0, 'rgba(0,212,255,0.25)');
+	grad.addColorStop(1, 'rgba(124,92,255,0.00)');
+
+	ctx.beginPath();
+	ctx.moveTo(xFor(0), yFor(values[0]));
+	for (let i = 1; i < values.length; i++) ctx.lineTo(xFor(i), yFor(values[i]));
+	ctx.lineTo(xFor(values.length - 1), padding.t + innerH);
+	ctx.lineTo(xFor(0), padding.t + innerH);
+	ctx.closePath();
+	ctx.fillStyle = grad;
+	ctx.fill();
+
+	// line
+	const lineGrad = ctx.createLinearGradient(padding.l, 0, padding.l + innerW, 0);
+	lineGrad.addColorStop(0, '#7c5cff');
+	lineGrad.addColorStop(1, '#00d4ff');
+	ctx.strokeStyle = lineGrad;
+	ctx.lineWidth = 4;
+	ctx.lineJoin = 'round';
+	ctx.lineCap = 'round';
+	ctx.beginPath();
+	ctx.moveTo(xFor(0), yFor(values[0]));
+	for (let i = 1; i < values.length; i++) ctx.lineTo(xFor(i), yFor(values[i]));
+	ctx.stroke();
+
+	// X labels (dates): show ~5 evenly spaced labels
+	ctx.fillStyle = 'rgba(223,224,230,0.60)';
+	ctx.textAlign = 'center';
+	ctx.textBaseline = 'top';
+	const labelsToShow = 5;
+	const step = Math.max(1, Math.floor(values.length / (labelsToShow - 1)));
+	for (let i = 0; i < values.length; i += step) {
+		const raw = (list[i]?.label || '').toString(); // YYYY-MM-DD
+		const parts = raw.split('-');
+		const shortLabel = parts.length === 3 ? `${parts[2]}-${parts[1]}` : raw; // DD-MM
+		ctx.fillText(shortLabel, xFor(i), padding.t + innerH + 6);
+	}
+	// Ensure last label
+	if (values.length > 1) {
+		const i = values.length - 1;
+		const raw = (list[i]?.label || '').toString();
+		const parts = raw.split('-');
+		const shortLabel = parts.length === 3 ? `${parts[2]}-${parts[1]}` : raw;
+		ctx.fillText(shortLabel, xFor(i), padding.t + innerH + 6);
+	}
+}
+
+function renderGymPeakHoursLine(containerId, items) {
+	const el = document.getElementById(containerId);
+	if (!el) return;
+	const list = Array.isArray(items) ? items : [];
+	const values = list.map(x => Number(x?.value || 0));
+	const hasAny = values.some(v => v > 0);
+	el.innerHTML = '';
+	if (!list.length || !hasAny) {
+		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
+		return;
+	}
+
+	const canvas = document.createElement('canvas');
+	canvas.className = 'gym-peak-canvas';
+	el.appendChild(canvas);
+	const ctx = canvas.getContext('2d');
+	if (!ctx) return;
+
+	const w = el.clientWidth || 320;
+	const h = 140;
+	canvas.width = Math.max(260, w);
+	canvas.height = h;
+
+	const padding = { l: 10, r: 10, t: 12, b: 24 };
+	const innerW = canvas.width - padding.l - padding.r;
+	const innerH = canvas.height - padding.t - padding.b;
+	const max = Math.max(...values, 1);
+
+	// grid
+	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+	ctx.lineWidth = 1;
+	for (let i = 0; i <= 3; i++) {
+		const y = padding.t + (innerH * i) / 3;
+		ctx.beginPath();
+		ctx.moveTo(padding.l, y);
+		ctx.lineTo(padding.l + innerW, y);
+		ctx.stroke();
+	}
+
+	const xFor = (i) => padding.l + (innerW * i) / Math.max(values.length - 1, 1);
+	const yFor = (v) => padding.t + innerH - (innerH * v) / max;
+
+	// area fill
+	const grad = ctx.createLinearGradient(0, padding.t, 0, padding.t + innerH);
+	grad.addColorStop(0, 'rgba(0,212,255,0.30)');
+	grad.addColorStop(1, 'rgba(124,92,255,0.00)');
+
+	ctx.beginPath();
+	ctx.moveTo(xFor(0), yFor(values[0]));
+	for (let i = 1; i < values.length; i++) ctx.lineTo(xFor(i), yFor(values[i]));
+	ctx.lineTo(xFor(values.length - 1), padding.t + innerH);
+	ctx.lineTo(xFor(0), padding.t + innerH);
+	ctx.closePath();
+	ctx.fillStyle = grad;
+	ctx.fill();
+
+	// line
+	const lineGrad = ctx.createLinearGradient(padding.l, 0, padding.l + innerW, 0);
+	lineGrad.addColorStop(0, '#7c5cff');
+	lineGrad.addColorStop(1, '#00d4ff');
+	ctx.strokeStyle = lineGrad;
+	ctx.lineWidth = 4;
+	ctx.lineJoin = 'round';
+	ctx.lineCap = 'round';
+	ctx.beginPath();
+	ctx.moveTo(xFor(0), yFor(values[0]));
+	for (let i = 1; i < values.length; i++) ctx.lineTo(xFor(i), yFor(values[i]));
+	ctx.stroke();
+
+	// x labels: 00, 06, 12, 18, 23
+	ctx.fillStyle = 'rgba(223,224,230,0.75)';
+	ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif';
+	ctx.textAlign = 'center';
+	ctx.textBaseline = 'top';
+	const ticks = [0, 6, 12, 18, 23];
+	ticks.forEach(t => {
+		const x = xFor(Math.min(t, values.length - 1));
+		ctx.fillText(String(t).padStart(2, '0'), x, padding.t + innerH + 6);
+	});
 }
 
 function renderGymBars(containerId, items, unitLabel) {
@@ -1509,9 +1739,27 @@ function renderGymMachinesChart(containerId, items, unitLabel) {
 	});
 	wrap.appendChild(podium);
 
+	// Expander (show/hide ranked list)
+	const expanderRow = document.createElement('div');
+	expanderRow.className = 'gym-machines-expander';
+	const expanderBtn = document.createElement('button');
+	expanderBtn.type = 'button';
+	expanderBtn.className = 'gym-expander-btn';
+	expanderBtn.setAttribute('aria-expanded', 'false');
+	expanderBtn.innerHTML = `
+		<span class="gym-expander-label">More</span>
+		<span class="gym-expander-chevron" aria-hidden="true">
+			<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+				<path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+			</svg>
+		</span>
+	`;
+	expanderRow.appendChild(expanderBtn);
+
 	// Ranked list (all)
 	const ranked = document.createElement('div');
 	ranked.className = 'gym-ranked';
+	ranked.classList.add('collapsed');
 	list.forEach((x, idx) => {
 		const label = (x?.label || '').toString();
 		const value = Number(x?.value || 0);
@@ -1519,6 +1767,8 @@ function renderGymMachinesChart(containerId, items, unitLabel) {
 		const pct = Math.round((value / total) * 100);
 		const row = document.createElement('div');
 		row.className = 'gym-ranked-row';
+		// Always show top 3 rows; hide the rest behind the expander
+		if (idx >= 3) row.classList.add('extra');
 		row.innerHTML = `
 			<div class="gym-ranked-rank">${idx + 1}</div>
 			<div class="gym-ranked-label" title="${label}">${label}</div>
@@ -1526,11 +1776,26 @@ function renderGymMachinesChart(containerId, items, unitLabel) {
 				<div class="gym-ranked-bar" style="width:${pctWidth}%"></div>
 			</div>
 			<div class="gym-ranked-value">${value}</div>
-			<div class="gym-ranked-pct">${pct}%</div>
 		`;
 		ranked.appendChild(row);
 	});
 	wrap.appendChild(ranked);
+	// Expander goes BELOW the (top 3) rows
+	wrap.appendChild(expanderRow);
+
+	expanderBtn.addEventListener('click', () => {
+		const isOpen = !ranked.classList.contains('collapsed');
+		if (isOpen) {
+			ranked.classList.add('collapsed');
+			expanderBtn.setAttribute('aria-expanded', 'false');
+			expanderBtn.querySelector('.gym-expander-label').textContent = 'More';
+		} else {
+			ranked.classList.remove('collapsed');
+			expanderBtn.setAttribute('aria-expanded', 'true');
+			expanderBtn.querySelector('.gym-expander-label').textContent = 'Less';
+		}
+		expanderBtn.classList.toggle('open', !isOpen);
+	});
 
 	el.appendChild(wrap);
 }

@@ -2169,9 +2169,9 @@ def get_gym_dashboard():
 		gym_id = user_response.user.id
 		gym_name = user_metadata.get("gym_name", "Unknown")
 		period = (request.args.get("period") or "week").lower().strip()
-		if period not in ("week", "month", "all"):
+		if period not in ("week", "month", "year", "all"):
 			period = "week"
-		lookback_days = 7 if period == "week" else 30 if period == "month" else 365
+		lookback_days = 7 if period == "week" else 30 if period == "month" else 365 if period == "year" else None
 		
 		# Get analytics data for this gym
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
@@ -2270,6 +2270,7 @@ def get_gym_dashboard():
 			"top_machines_by_sets": [],
 			"top_muscles_by_sets": [],
 			"workouts_by_weekday": [],
+			"workouts_by_day": [],
 			"workouts_last_weeks": []
 		}
 
@@ -2283,8 +2284,10 @@ def get_gym_dashboard():
 			consent_user_ids = list(dict.fromkeys(consent_user_ids))  # de-dupe keep order
 
 			if consent_user_ids:
-				# Limit to a bounded window for cost/perf (controlled by ?period=week|month|all)
-				start_date = (datetime.utcnow().date() - timedelta(days=lookback_days)).isoformat()
+				# Filter window (controlled by ?period=week|month|year|all). For "all" we don't apply a date filter.
+				start_date = None
+				if isinstance(lookback_days, int) and lookback_days > 0:
+					start_date = (datetime.utcnow().date() - timedelta(days=lookback_days)).isoformat()
 
 				all_workouts = []
 				# Supabase has an IN limit; chunk
@@ -2294,19 +2297,21 @@ def get_gym_dashboard():
 					# but keep backwards compatibility if the column doesn't exist yet.
 					try:
 						q = admin_client.table("workouts") \
-							.select("user_id,date,exercises,gym_name,gym_place_id") \
-							.in_("user_id", chunk) \
-							.gte("date", start_date)
+							.select("user_id,date,inserted_at,created_at,exercises,gym_name,gym_place_id") \
+							.in_("user_id", chunk)
+						if start_date:
+							q = q.gte("date", start_date)
 						res = q.execute()
 					except Exception as e:
 						# If gym_name column doesn't exist, we can't do per-workout gym analytics reliably.
 						msg = str(e)
 						if "gym_name" in msg or "gym_place_id" in msg:
-							res = admin_client.table("workouts") \
-								.select("user_id,date,exercises") \
-								.in_("user_id", chunk) \
-								.gte("date", start_date) \
-								.execute()
+							q = admin_client.table("workouts") \
+								.select("user_id,date,inserted_at,created_at,exercises") \
+								.in_("user_id", chunk)
+							if start_date:
+								q = q.gte("date", start_date)
+							res = q.execute()
 						else:
 							raise
 					if res.data:
@@ -2315,7 +2320,9 @@ def get_gym_dashboard():
 				machine_sets = {}
 				muscle_sets = {}
 				weekday_counts = {k: 0 for k in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]}
+				hour_counts = {h: 0 for h in range(24)}
 				week_counts = {}
+				day_counts = {}
 				total_workouts = 0
 				total_exercises = 0
 
@@ -2342,12 +2349,29 @@ def get_gym_dashboard():
 						except Exception:
 							dt = None
 					if dt:
+						day_key = dt.strftime("%Y-%m-%d")
+						day_counts[day_key] = day_counts.get(day_key, 0) + 1
 						weekday = dt.strftime("%a")
 						if weekday in weekday_counts:
 							weekday_counts[weekday] += 1
 						iso_year, iso_week, _ = dt.isocalendar()
 						week_key = f"{iso_year}-W{iso_week:02d}"
 						week_counts[week_key] = week_counts.get(week_key, 0) + 1
+
+					# Peak hours: prefer inserted_at timestamp (more precise than date); fallback to created_at
+					inserted = w.get("inserted_at") or w.get("created_at")
+					if inserted:
+						try:
+							ts = str(inserted).replace("Z", "+00:00")
+							dti = datetime.fromisoformat(ts)
+							try:
+								from zoneinfo import ZoneInfo  # py3.9+
+								dti = dti.astimezone(ZoneInfo("Europe/Amsterdam"))
+							except Exception:
+								pass
+							hour_counts[int(dti.hour)] = hour_counts.get(int(dti.hour), 0) + 1
+						except Exception:
+							pass
 
 					exercises = w.get("exercises") or []
 					if not isinstance(exercises, list):
@@ -2361,10 +2385,11 @@ def get_gym_dashboard():
 							continue
 						name = _exercise_display(ex)
 						machine_sets[name] = machine_sets.get(name, 0) + sets_n
-						for m in _exercise_muscles(ex):
-							if not m or m == "-":
-								continue
-							muscle_sets[m] = muscle_sets.get(m, 0) + sets_n
+						# Muscle focus: ONLY count the PRIMARY muscle for each exercise (not every listed muscle)
+						muscles = _exercise_muscles(ex) or []
+						primary = muscles[0] if muscles else ""
+						if primary and primary != "-" and primary.lower() != "cardio":
+							muscle_sets[primary] = muscle_sets.get(primary, 0) + sets_n
 
 				top_machines = sorted(machine_sets.items(), key=lambda kv: kv[1], reverse=True)[:10]
 				top_muscles = sorted(muscle_sets.items(), key=lambda kv: kv[1], reverse=True)[:8]
@@ -2375,6 +2400,22 @@ def get_gym_dashboard():
 				chart["top_machines_by_sets"] = [{"label": k, "value": v} for k, v in top_machines]
 				chart["top_muscles_by_sets"] = [{"label": k, "value": v} for k, v in top_muscles]
 				chart["workouts_by_weekday"] = [{"label": k, "value": weekday_counts[k]} for k in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]]
+				chart["workouts_by_hour"] = [{"label": f"{h:02d}:00", "value": hour_counts.get(h, 0)} for h in range(24)]
+				# Daily time series for line chart (X = days)
+				try:
+					end_d = datetime.utcnow().date()
+					# Use selected period; for "all" show last 365 days (still "all days" on the x-axis)
+					span_days = lookback_days if isinstance(lookback_days, int) and lookback_days > 0 else 365
+					start_d = end_d - timedelta(days=span_days - 1)
+					series = []
+					d = start_d
+					while d <= end_d:
+						k = d.isoformat()
+						series.append({"label": k, "value": int(day_counts.get(k, 0))})
+						d += timedelta(days=1)
+					chart["workouts_by_day"] = series
+				except Exception:
+					chart["workouts_by_day"] = []
 				chart["workouts_last_weeks"] = [{"label": k, "value": v} for k, v in last_weeks]
 
 				# expose KPIs (same period as charts)

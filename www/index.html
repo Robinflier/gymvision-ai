@@ -875,7 +875,7 @@
 				<div id="gym-dashboard-loading" class="progress-empty" style="padding:18px 0;">Loading dashboard...</div>
 
 				<div id="gym-dashboard-panels" class="hidden">
-					<div class="settings-stats-grid" style="margin-bottom: 14px;">
+					<div class="settings-stats-grid" style="margin-bottom: 44px;">
 						<div class="settings-stat-box" style="background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);">
 							<div class="settings-stat-value" id="gym-dashboard-total-users">0</div>
 							<div class="settings-stat-label">Users</div>
@@ -889,10 +889,11 @@
 							<div class="settings-stat-label">Exercises</div>
 						</div>
 					</div>
-					<div class="gym-dashboard-controls" style="margin: 0 0 14px;">
+					<div class="gym-dashboard-controls" style="margin: 16px 0 14px;">
 						<div class="gym-period-toggle" role="tablist" aria-label="Dashboard period">
 							<button type="button" class="gym-period-btn" data-period="week" aria-selected="false">Week</button>
 							<button type="button" class="gym-period-btn" data-period="month" aria-selected="false">Month</button>
+							<button type="button" class="gym-period-btn" data-period="year" aria-selected="false">Year</button>
 							<button type="button" class="gym-period-btn" data-period="all" aria-selected="false">All</button>
 						</div>
 					</div>
@@ -900,6 +901,17 @@
 					<section class="card" style="margin:14px 0 0;">
 						<div style="padding:18px 18px 10px;font-weight:800;">Most used machines (sets)</div>
 						<div id="gym-dashboard-chart-machines" class="gym-chart"></div>
+					</section>
+
+					<section class="card" style="margin:14px 0 0;">
+						<div style="padding:18px 18px 10px;font-weight:800;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+							<span>Peak times</span>
+							<div class="gym-mini-toggle" role="tablist" aria-label="Peak times view">
+								<button type="button" class="gym-mini-btn active" data-peak="hours" aria-selected="true">Hours</button>
+								<button type="button" class="gym-mini-btn" data-peak="days" aria-selected="false">Days</button>
+							</div>
+						</div>
+						<div id="gym-dashboard-chart-peak" class="gym-chart"></div>
 					</section>
 
 					<section class="card" style="margin:14px 0 0;">
