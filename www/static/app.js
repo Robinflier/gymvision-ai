@@ -1506,19 +1506,20 @@ function renderGymPeakTimes(charts) {
 			b.setAttribute('aria-selected', active ? 'true' : 'false');
 		});
 		if (mode === 'days') {
-			// Preferred: daily line chart (requires backend field workouts_by_day)
-			if (hasAny(charts.workouts_by_day)) {
-				renderGymPeakDaysLine(containerId, charts.workouts_by_day);
-			} else if (hasAny(charts.workouts_by_weekday)) {
-				// Fallback: weekday bars (older backend versions)
-				renderGymBars(containerId, charts.workouts_by_weekday, 'workouts');
+			// Days = weekday buckets only (Mon-Sun)
+			if (hasAny(charts.workouts_by_weekday)) {
+				renderGymPeakHistogram(containerId, charts.workouts_by_weekday, {
+					labelMode: 'weekday'
+				});
 			} else {
 				el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
 			}
 		} else {
-			// Preferred: hour-of-day line chart (requires backend field workouts_by_hour)
+			// Hours = hour-of-day buckets
 			if (hasAny(charts.workouts_by_hour)) {
-				renderGymPeakHoursLine(containerId, charts.workouts_by_hour);
+				renderGymPeakHistogram(containerId, charts.workouts_by_hour, {
+					labelMode: 'hour'
+				});
 			} else {
 				el.innerHTML = `<div class="gym-chart-empty">No data yet (deploy backend update for Hours)</div>`;
 			}
@@ -1542,105 +1543,25 @@ function renderGymPeakTimes(charts) {
 	applyMode(mode);
 }
 
-function renderGymPeakDaysLine(containerId, items) {
-	const el = document.getElementById(containerId);
-	if (!el) return;
-	const list = Array.isArray(items) ? items : [];
-	const values = list.map(x => Number(x?.value || 0));
-	const hasAny = values.some(v => v > 0);
-	el.innerHTML = '';
-	if (!list.length || !hasAny) {
-		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
-		return;
-	}
-
+function createHiDPICanvas(parentEl, cssHeight) {
 	const canvas = document.createElement('canvas');
 	canvas.className = 'gym-peak-canvas';
-	el.appendChild(canvas);
+	parentEl.innerHTML = '';
+	parentEl.appendChild(canvas);
 	const ctx = canvas.getContext('2d');
-	if (!ctx) return;
-
-	const w = el.clientWidth || 320;
-	const h = 160;
-	canvas.width = Math.max(260, w);
-	canvas.height = h;
-
-	const padding = { l: 34, r: 10, t: 12, b: 26 };
-	const innerW = canvas.width - padding.l - padding.r;
-	const innerH = canvas.height - padding.t - padding.b;
-	const max = Math.max(...values, 1);
-
-	ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-	// Y grid + labels (0, mid, max)
-	ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-	ctx.fillStyle = 'rgba(223,224,230,0.60)';
-	ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif';
-	ctx.textAlign = 'right';
-	ctx.textBaseline = 'middle';
-	const yTicks = [0, Math.round(max / 2), max].filter((v, i, a) => a.indexOf(v) === i);
-	yTicks.forEach(v => {
-		const y = padding.t + innerH - (innerH * v) / max;
-		ctx.beginPath();
-		ctx.moveTo(padding.l, y);
-		ctx.lineTo(padding.l + innerW, y);
-		ctx.stroke();
-		ctx.fillText(String(v), padding.l - 8, y);
-	});
-
-	const xFor = (i) => padding.l + (innerW * i) / Math.max(values.length - 1, 1);
-	const yFor = (v) => padding.t + innerH - (innerH * v) / max;
-
-	// area fill
-	const grad = ctx.createLinearGradient(0, padding.t, 0, padding.t + innerH);
-	grad.addColorStop(0, 'rgba(0,212,255,0.25)');
-	grad.addColorStop(1, 'rgba(124,92,255,0.00)');
-
-	ctx.beginPath();
-	ctx.moveTo(xFor(0), yFor(values[0]));
-	for (let i = 1; i < values.length; i++) ctx.lineTo(xFor(i), yFor(values[i]));
-	ctx.lineTo(xFor(values.length - 1), padding.t + innerH);
-	ctx.lineTo(xFor(0), padding.t + innerH);
-	ctx.closePath();
-	ctx.fillStyle = grad;
-	ctx.fill();
-
-	// line
-	const lineGrad = ctx.createLinearGradient(padding.l, 0, padding.l + innerW, 0);
-	lineGrad.addColorStop(0, '#7c5cff');
-	lineGrad.addColorStop(1, '#00d4ff');
-	ctx.strokeStyle = lineGrad;
-	ctx.lineWidth = 4;
-	ctx.lineJoin = 'round';
-	ctx.lineCap = 'round';
-	ctx.beginPath();
-	ctx.moveTo(xFor(0), yFor(values[0]));
-	for (let i = 1; i < values.length; i++) ctx.lineTo(xFor(i), yFor(values[i]));
-	ctx.stroke();
-
-	// X labels (dates): show ~5 evenly spaced labels
-	ctx.fillStyle = 'rgba(223,224,230,0.60)';
-	ctx.textAlign = 'center';
-	ctx.textBaseline = 'top';
-	const labelsToShow = 5;
-	const step = Math.max(1, Math.floor(values.length / (labelsToShow - 1)));
-	for (let i = 0; i < values.length; i += step) {
-		const raw = (list[i]?.label || '').toString(); // YYYY-MM-DD
-		const parts = raw.split('-');
-		const shortLabel = parts.length === 3 ? `${parts[2]}-${parts[1]}` : raw; // DD-MM
-		ctx.fillText(shortLabel, xFor(i), padding.t + innerH + 6);
-	}
-	// Ensure last label
-	if (values.length > 1) {
-		const i = values.length - 1;
-		const raw = (list[i]?.label || '').toString();
-		const parts = raw.split('-');
-		const shortLabel = parts.length === 3 ? `${parts[2]}-${parts[1]}` : raw;
-		ctx.fillText(shortLabel, xFor(i), padding.t + innerH + 6);
-	}
+	if (!ctx) return null;
+	const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+	const cssWidth = Math.max(260, parentEl.clientWidth || 320);
+	const h = cssHeight;
+	canvas.style.width = '100%';
+	canvas.style.height = `${h}px`;
+	canvas.width = Math.round(cssWidth * dpr);
+	canvas.height = Math.round(h * dpr);
+	ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels
+	return { canvas, ctx, width: cssWidth, height: h };
 }
 
-function renderGymPeakHoursLine(containerId, items) {
+function renderGymPeakHistogram(containerId, items, opts = {}) {
 	const el = document.getElementById(containerId);
 	if (!el) return;
 	const list = Array.isArray(items) ? items : [];
@@ -1652,74 +1573,58 @@ function renderGymPeakHoursLine(containerId, items) {
 		return;
 	}
 
-	const canvas = document.createElement('canvas');
-	canvas.className = 'gym-peak-canvas';
-	el.appendChild(canvas);
-	const ctx = canvas.getContext('2d');
-	if (!ctx) return;
-
-	const w = el.clientWidth || 320;
-	const h = 140;
-	canvas.width = Math.max(260, w);
-	canvas.height = h;
-
-	const padding = { l: 10, r: 10, t: 12, b: 24 };
-	const innerW = canvas.width - padding.l - padding.r;
-	const innerH = canvas.height - padding.t - padding.b;
 	const max = Math.max(...values, 1);
+	const labelMode = opts.labelMode || 'hour';
 
-	// grid
-	ctx.clearRect(0, 0, canvas.width, canvas.height);
-	ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-	ctx.lineWidth = 1;
-	for (let i = 0; i <= 3; i++) {
-		const y = padding.t + (innerH * i) / 3;
-		ctx.beginPath();
-		ctx.moveTo(padding.l, y);
-		ctx.lineTo(padding.l + innerW, y);
-		ctx.stroke();
+	const wrap = document.createElement('div');
+	wrap.className = 'gym-peak-hist';
+
+	// Y labels (0 / mid / max)
+	const y = document.createElement('div');
+	y.className = 'gym-peak-y';
+	const mid = Math.round(max / 2);
+	y.innerHTML = `
+		<div class="gym-peak-y-tick">${max}</div>
+		<div class="gym-peak-y-tick">${mid}</div>
+		<div class="gym-peak-y-tick">0</div>
+	`;
+
+	const plot = document.createElement('div');
+	plot.className = 'gym-peak-plot';
+
+	const bars = document.createElement('div');
+	bars.className = 'gym-peak-bars';
+
+	list.forEach((x, i) => {
+		const v = Number(x?.value || 0);
+		const hPct = Math.max(2, Math.round((v / max) * 100));
+		const item = document.createElement('div');
+		item.className = 'gym-peak-baritem';
+		item.innerHTML = `<div class="gym-peak-bar" style="height:${hPct}%"></div>`;
+		bars.appendChild(item);
+	});
+
+	// X labels
+	const xAxis = document.createElement('div');
+	xAxis.className = 'gym-peak-x';
+	if (labelMode === 'weekday') {
+		const labels = list.map(x => (x?.label || '').toString());
+		xAxis.innerHTML = labels.map(l => `<span>${l}</span>`).join('');
+		xAxis.classList.add('weekday');
+	} else {
+		// hour labels: show a few ticks
+		const ticks = [0, 6, 12, 18, 23];
+		xAxis.innerHTML = ticks.map(t => `<span style="left:${(t/23)*100}%">${String(t).padStart(2,'0')}</span>`).join('');
+		xAxis.classList.add('hour');
 	}
 
-	const xFor = (i) => padding.l + (innerW * i) / Math.max(values.length - 1, 1);
-	const yFor = (v) => padding.t + innerH - (innerH * v) / max;
+	plot.appendChild(bars);
+	plot.appendChild(xAxis);
 
-	// area fill
-	const grad = ctx.createLinearGradient(0, padding.t, 0, padding.t + innerH);
-	grad.addColorStop(0, 'rgba(0,212,255,0.30)');
-	grad.addColorStop(1, 'rgba(124,92,255,0.00)');
+	wrap.appendChild(y);
+	wrap.appendChild(plot);
 
-	ctx.beginPath();
-	ctx.moveTo(xFor(0), yFor(values[0]));
-	for (let i = 1; i < values.length; i++) ctx.lineTo(xFor(i), yFor(values[i]));
-	ctx.lineTo(xFor(values.length - 1), padding.t + innerH);
-	ctx.lineTo(xFor(0), padding.t + innerH);
-	ctx.closePath();
-	ctx.fillStyle = grad;
-	ctx.fill();
-
-	// line
-	const lineGrad = ctx.createLinearGradient(padding.l, 0, padding.l + innerW, 0);
-	lineGrad.addColorStop(0, '#7c5cff');
-	lineGrad.addColorStop(1, '#00d4ff');
-	ctx.strokeStyle = lineGrad;
-	ctx.lineWidth = 4;
-	ctx.lineJoin = 'round';
-	ctx.lineCap = 'round';
-	ctx.beginPath();
-	ctx.moveTo(xFor(0), yFor(values[0]));
-	for (let i = 1; i < values.length; i++) ctx.lineTo(xFor(i), yFor(values[i]));
-	ctx.stroke();
-
-	// x labels: 00, 06, 12, 18, 23
-	ctx.fillStyle = 'rgba(223,224,230,0.75)';
-	ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif';
-	ctx.textAlign = 'center';
-	ctx.textBaseline = 'top';
-	const ticks = [0, 6, 12, 18, 23];
-	ticks.forEach(t => {
-		const x = xFor(Math.min(t, values.length - 1));
-		ctx.fillText(String(t).padStart(2, '0'), x, padding.t + innerH + 6);
-	});
+	el.appendChild(wrap);
 }
 
 function renderGymBars(containerId, items, unitLabel) {

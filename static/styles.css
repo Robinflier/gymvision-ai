@@ -940,6 +940,18 @@ body{
 
 .gym-peak-canvas{display:block;width:100%;height:140px}
 
+/* Peak times histogram (vertical bars like classic analytics charts) */
+.gym-peak-hist{display:grid;grid-template-columns:32px 1fr;gap:10px;align-items:stretch}
+.gym-peak-y{display:flex;flex-direction:column;justify-content:space-between;padding:10px 0 22px;color:rgba(223,224,230,0.55);font-weight:800;font-size:12px}
+.gym-peak-plot{position:relative;display:flex;flex-direction:column;gap:8px}
+.gym-peak-bars{height:140px;display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px;align-items:end;padding:10px 0 0;border-bottom:1px solid rgba(255,255,255,0.10)}
+.gym-peak-baritem{display:flex;align-items:flex-end;justify-content:center;height:100%}
+.gym-peak-bar{width:100%;max-width:22px;border-radius:10px 10px 4px 4px;background:linear-gradient(180deg,#7c5cff,#00d4ff);box-shadow:0 10px 22px rgba(0,212,255,0.10)}
+.gym-peak-x{position:relative;height:18px;color:rgba(223,224,230,0.55);font-weight:800;font-size:12px}
+.gym-peak-x.hour span{position:absolute;transform:translateX(-50%);top:2px}
+.gym-peak-x.weekday{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.gym-peak-x.weekday span{text-align:center}
+
 /* Make gym donut slightly smaller than Progress tab donut */
 #gym-muscle-chart{width:100%;aspect-ratio:1/1;display:block;max-width:220px;margin:0 auto}
 .gym-ranked-row{display:flex;align-items:center;gap:6px}
