@@ -939,8 +939,27 @@
 					</section>
 
 					<section class="card" style="margin:14px 0 0;">
-						<div style="padding:18px 18px 10px;font-weight:800;">Workouts (last weeks)</div>
-						<div id="gym-dashboard-chart-weeks" class="gym-chart"></div>
+						<div style="padding:18px 18px 10px;font-weight:800;">Total Volume (kg)</div>
+						<div id="gym-dashboard-chart-volume" class="gym-chart-line"></div>
+					</section>
+
+					<section class="card" style="margin:14px 0 0;">
+						<div style="padding:18px 18px 10px;font-weight:800;">Active Users</div>
+						<div id="gym-dashboard-chart-users" class="gym-chart-line"></div>
+					</section>
+
+					<section class="card" style="margin:14px 0 0;">
+						<div style="padding:18px 18px 10px;font-weight:800;">Exercise Types</div>
+						<div id="gym-dashboard-chart-categories" style="padding:0 18px 18px;">
+							<div class="progress-muscle-content">
+								<div class="progress-muscle-chart-wrapper">
+									<canvas id="gym-categories-chart"></canvas>
+									<div id="gym-categories-empty" class="progress-muscle-empty">No data yet</div>
+									<div id="gym-categories-center" class="progress-muscle-center-label"></div>
+								</div>
+								<ul id="gym-categories-legend" class="progress-muscle-legend"></ul>
+							</div>
+						</div>
 					</section>
 				</div>
 			</div>

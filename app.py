@@ -2331,7 +2331,10 @@ def get_gym_dashboard():
 			"top_muscles_by_sets": [],
 			"workouts_by_weekday": [],
 			"workouts_by_day": [],
-			"workouts_last_weeks": []
+			"workouts_last_weeks": [],
+			"volume_by_week": [],
+			"active_users_by_week": [],
+			"exercise_categories": []
 		}
 
 		try:
@@ -2383,6 +2386,10 @@ def get_gym_dashboard():
 				hour_counts = {h: 0 for h in range(24)}
 				week_counts = {}
 				day_counts = {}
+				volume_by_week = {}  # Total kg per week (weight × reps × sets)
+				active_users_by_week = {}  # Unique users per week
+				cardio_sets = 0
+				strength_sets = 0
 				total_workouts = 0
 				total_exercises = 0
 
@@ -2417,6 +2424,12 @@ def get_gym_dashboard():
 						iso_year, iso_week, _ = dt.isocalendar()
 						week_key = f"{iso_year}-W{iso_week:02d}"
 						week_counts[week_key] = week_counts.get(week_key, 0) + 1
+						# Track active users per week
+						user_id = w.get("user_id")
+						if user_id and week_key not in active_users_by_week:
+							active_users_by_week[week_key] = set()
+						if user_id:
+							active_users_by_week[week_key].add(user_id)
 
 					# Peak hours: prefer inserted_at timestamp (more precise than date); fallback to created_at
 					inserted = w.get("inserted_at") or w.get("created_at")
@@ -2437,6 +2450,11 @@ def get_gym_dashboard():
 					if not isinstance(exercises, list):
 						continue
 					total_exercises += len(exercises)
+					
+					# Calculate volume for this workout (for volume_by_week)
+					workout_volume = 0
+					workout_week_key = week_key if dt else None
+					
 					for ex in exercises:
 						if not isinstance(ex, dict):
 							continue
@@ -2445,11 +2463,48 @@ def get_gym_dashboard():
 							continue
 						name = _exercise_display(ex)
 						machine_sets[name] = machine_sets.get(name, 0) + sets_n
+						
+						# Calculate volume (weight × reps) for strength exercises
+						sets = ex.get("sets") or []
+						if isinstance(sets, list):
+							for s in sets:
+								if not isinstance(s, dict):
+									continue
+								weight = s.get("weight")
+								reps = s.get("reps")
+								# Check if it's a strength exercise (has weight and reps)
+								if weight not in ("", None) and reps not in ("", None):
+									try:
+										w_kg = float(str(weight).replace(",", "."))
+										r = int(str(reps))
+										if w_kg > 0 and r > 0:
+											workout_volume += w_kg * r
+									except (ValueError, TypeError):
+										pass
+						
 						# Muscle focus: ONLY count the PRIMARY muscle for each exercise (not every listed muscle)
 						muscles = _exercise_muscles(ex) or []
 						primary = muscles[0] if muscles else ""
 						if primary and primary != "-" and primary.lower() != "cardio":
 							muscle_sets[primary] = muscle_sets.get(primary, 0) + sets_n
+						
+						# Count Cardio vs Strength sets
+						sets_list = ex.get("sets") or []
+						if isinstance(sets_list, list):
+							for s in sets_list:
+								if not isinstance(s, dict):
+									continue
+								# Check if it's cardio (has min/sec/km/cal) or strength (has weight/reps)
+								has_cardio = any(s.get(k) not in ("", None) for k in ["min", "sec", "km", "cal"])
+								has_strength = s.get("weight") not in ("", None) and s.get("reps") not in ("", None)
+								if has_cardio:
+									cardio_sets += 1
+								elif has_strength:
+									strength_sets += 1
+					
+					# Add volume to week
+					if workout_week_key and workout_volume > 0:
+						volume_by_week[workout_week_key] = volume_by_week.get(workout_week_key, 0) + workout_volume
 
 				top_machines = sorted(machine_sets.items(), key=lambda kv: kv[1], reverse=True)[:10]
 				top_muscles = sorted(muscle_sets.items(), key=lambda kv: kv[1], reverse=True)[:8]
@@ -2461,6 +2516,25 @@ def get_gym_dashboard():
 				chart["top_muscles_by_sets"] = [{"label": k, "value": v} for k, v in top_muscles]
 				chart["workouts_by_weekday"] = [{"label": k, "value": weekday_counts[k]} for k in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]]
 				chart["workouts_by_hour"] = [{"label": f"{h:02d}:00", "value": hour_counts.get(h, 0)} for h in range(24)]
+				
+				# Volume by week (last 8 weeks, sorted)
+				sorted_weeks = sorted(volume_by_week.items(), key=lambda kv: kv[0])[-8:]
+				chart["volume_by_week"] = [{"label": k, "value": round(v, 1)} for k, v in sorted_weeks]
+				
+				# Active users by week (last 8 weeks, sorted)
+				active_users_weekly = {k: len(v) for k, v in active_users_by_week.items()}
+				sorted_active_weeks = sorted(active_users_weekly.items(), key=lambda kv: kv[0])[-8:]
+				chart["active_users_by_week"] = [{"label": k, "value": v} for k, v in sorted_active_weeks]
+				
+				# Exercise categories (Cardio vs Strength)
+				total_category_sets = cardio_sets + strength_sets
+				if total_category_sets > 0:
+					chart["exercise_categories"] = [
+						{"label": "Strength", "value": strength_sets},
+						{"label": "Cardio", "value": cardio_sets}
+					]
+				else:
+					chart["exercise_categories"] = []
 				# Daily time series for line chart (X = days)
 				try:
 					end_d = datetime.utcnow().date()

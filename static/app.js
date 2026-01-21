@@ -1436,10 +1436,17 @@ async function loadGymDashboardData() {
 
 		// Charts
 		const charts = stats.charts || {};
+		console.log('[GYM DASHBOARD] Charts data:', {
+			volume_by_week: charts.volume_by_week?.length || 0,
+			active_users_by_week: charts.active_users_by_week?.length || 0,
+			exercise_categories: charts.exercise_categories?.length || 0
+		});
 		renderGymMachinesChart('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
 		renderGymPeakTimes(charts);
 		renderGymMuscleFocus(charts.top_muscles_by_sets);
-		renderGymBars('gym-dashboard-chart-weeks', charts.workouts_last_weeks, 'workouts');
+		renderGymVolumeLine('gym-dashboard-chart-volume', charts.volume_by_week || []);
+		renderGymUsersLine('gym-dashboard-chart-users', charts.active_users_by_week || []);
+		renderGymCategories(charts.exercise_categories || []);
 
 		if (loadingEl) loadingEl.style.display = 'none';
 		if (panelsEl) panelsEl.classList.remove('hidden');
@@ -1862,6 +1869,300 @@ function renderGymMuscleFocus(items) {
 	});
 
 	const centerLabel = document.getElementById('gym-muscle-center');
+	if (centerLabel) {
+		centerLabel.innerHTML = `
+			<div class="label">Total Sets</div>
+			<div class="value">${total}</div>
+		`;
+	}
+}
+
+function renderGymVolumeLine(containerId, items) {
+	const el = document.getElementById(containerId);
+	if (!el) return;
+	const list = Array.isArray(items) ? items : [];
+	el.innerHTML = '';
+	if (!list.length) {
+		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
+		return;
+	}
+	
+	const values = list.map(x => Number(x?.value || 0));
+	const max = Math.max(...values, 1);
+	const min = Math.min(...values, 0);
+	const range = max - min || 1;
+	
+	const canvas = createHiDPICanvas(el, 140);
+	if (!canvas) return;
+	const { ctx, width, height } = canvas;
+	
+	// Draw grid lines
+	ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+	ctx.lineWidth = 1;
+	for (let i = 0; i <= 4; i++) {
+		const y = (height / 4) * i;
+		ctx.beginPath();
+		ctx.moveTo(0, y);
+		ctx.lineTo(width, y);
+		ctx.stroke();
+	}
+	
+	// Draw line
+	ctx.strokeStyle = '#7c5cff';
+	ctx.lineWidth = 3;
+	ctx.lineCap = 'round';
+	ctx.lineJoin = 'round';
+	ctx.beginPath();
+	
+	const stepX = width / (list.length - 1 || 1);
+	list.forEach((x, i) => {
+		const value = Number(x?.value || 0);
+		const normalized = (value - min) / range;
+		const y = height - (normalized * height);
+		const px = i * stepX;
+		if (i === 0) {
+			ctx.moveTo(px, y);
+		} else {
+			ctx.lineTo(px, y);
+		}
+	});
+	ctx.stroke();
+	
+	// Draw area fill
+	ctx.fillStyle = 'rgba(124, 92, 255, 0.15)';
+	ctx.beginPath();
+	list.forEach((x, i) => {
+		const value = Number(x?.value || 0);
+		const normalized = (value - min) / range;
+		const y = height - (normalized * height);
+		const px = i * stepX;
+		if (i === 0) {
+			ctx.moveTo(px, height);
+			ctx.lineTo(px, y);
+		} else {
+			ctx.lineTo(px, y);
+		}
+		if (i === list.length - 1) {
+			ctx.lineTo(width, height);
+			ctx.closePath();
+		}
+	});
+	ctx.fill();
+	
+	// Draw points
+	ctx.fillStyle = '#7c5cff';
+	list.forEach((x, i) => {
+		const value = Number(x?.value || 0);
+		const normalized = (value - min) / range;
+		const y = height - (normalized * height);
+		const px = i * stepX;
+		ctx.beginPath();
+		ctx.arc(px, y, 4, 0, Math.PI * 2);
+		ctx.fill();
+	});
+	
+	// X-axis labels (week numbers)
+	const xAxis = document.createElement('div');
+	xAxis.className = 'gym-line-xaxis';
+	xAxis.style.cssText = 'display:flex;justify-content:space-between;padding:8px 0 0;color:rgba(223,224,230,0.55);font-weight:800;font-size:11px;';
+	list.forEach(x => {
+		const label = (x?.label || '').toString().replace('2026-', 'W');
+		const span = document.createElement('span');
+		span.textContent = label;
+		xAxis.appendChild(span);
+	});
+	el.appendChild(xAxis);
+	
+	// Y-axis labels
+	const yAxis = document.createElement('div');
+	yAxis.className = 'gym-line-yaxis';
+	yAxis.style.cssText = 'position:absolute;left:0;top:0;bottom:0;width:32px;display:flex;flex-direction:column;justify-content:space-between;padding:10px 0 22px;color:rgba(223,224,230,0.55);font-weight:800;font-size:11px;';
+	const yLabels = [max, Math.round((max + min) / 2), min].filter(v => v >= 0);
+	yLabels.forEach(v => {
+		const span = document.createElement('span');
+		span.textContent = v >= 1000 ? `${(v/1000).toFixed(1)}k` : v.toString();
+		yAxis.appendChild(span);
+	});
+	el.style.position = 'relative';
+	el.appendChild(yAxis);
+}
+
+function renderGymUsersLine(containerId, items) {
+	const el = document.getElementById(containerId);
+	if (!el) return;
+	const list = Array.isArray(items) ? items : [];
+	el.innerHTML = '';
+	if (!list.length) {
+		el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
+		return;
+	}
+	
+	const values = list.map(x => Number(x?.value || 0));
+	const max = Math.max(...values, 1);
+	const min = Math.min(...values, 0);
+	const range = max - min || 1;
+	
+	const canvas = createHiDPICanvas(el, 140);
+	if (!canvas) return;
+	const { ctx, width, height } = canvas;
+	
+	// Draw grid lines
+	ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+	ctx.lineWidth = 1;
+	for (let i = 0; i <= 4; i++) {
+		const y = (height / 4) * i;
+		ctx.beginPath();
+		ctx.moveTo(0, y);
+		ctx.lineTo(width, y);
+		ctx.stroke();
+	}
+	
+	// Draw line
+	ctx.strokeStyle = '#00d4ff';
+	ctx.lineWidth = 3;
+	ctx.lineCap = 'round';
+	ctx.lineJoin = 'round';
+	ctx.beginPath();
+	
+	const stepX = width / (list.length - 1 || 1);
+	list.forEach((x, i) => {
+		const value = Number(x?.value || 0);
+		const normalized = (value - min) / range;
+		const y = height - (normalized * height);
+		const px = i * stepX;
+		if (i === 0) {
+			ctx.moveTo(px, y);
+		} else {
+			ctx.lineTo(px, y);
+		}
+	});
+	ctx.stroke();
+	
+	// Draw area fill
+	ctx.fillStyle = 'rgba(0, 212, 255, 0.15)';
+	ctx.beginPath();
+	list.forEach((x, i) => {
+		const value = Number(x?.value || 0);
+		const normalized = (value - min) / range;
+		const y = height - (normalized * height);
+		const px = i * stepX;
+		if (i === 0) {
+			ctx.moveTo(px, height);
+			ctx.lineTo(px, y);
+		} else {
+			ctx.lineTo(px, y);
+		}
+		if (i === list.length - 1) {
+			ctx.lineTo(width, height);
+			ctx.closePath();
+		}
+	});
+	ctx.fill();
+	
+	// Draw points
+	ctx.fillStyle = '#00d4ff';
+	list.forEach((x, i) => {
+		const value = Number(x?.value || 0);
+		const normalized = (value - min) / range;
+		const y = height - (normalized * height);
+		const px = i * stepX;
+		ctx.beginPath();
+		ctx.arc(px, y, 4, 0, Math.PI * 2);
+		ctx.fill();
+	});
+	
+	// X-axis labels
+	const xAxis = document.createElement('div');
+	xAxis.className = 'gym-line-xaxis';
+	xAxis.style.cssText = 'display:flex;justify-content:space-between;padding:8px 0 0;color:rgba(223,224,230,0.55);font-weight:800;font-size:11px;';
+	list.forEach(x => {
+		const label = (x?.label || '').toString().replace('2026-', 'W');
+		const span = document.createElement('span');
+		span.textContent = label;
+		xAxis.appendChild(span);
+	});
+	el.appendChild(xAxis);
+	
+	// Y-axis labels
+	const yAxis = document.createElement('div');
+	yAxis.className = 'gym-line-yaxis';
+	yAxis.style.cssText = 'position:absolute;left:0;top:0;bottom:0;width:32px;display:flex;flex-direction:column;justify-content:space-between;padding:10px 0 22px;color:rgba(223,224,230,0.55);font-weight:800;font-size:11px;';
+	const yLabels = [max, Math.round((max + min) / 2), min].filter(v => v >= 0);
+	yLabels.forEach(v => {
+		const span = document.createElement('span');
+		span.textContent = v.toString();
+		yAxis.appendChild(span);
+	});
+	el.style.position = 'relative';
+	el.appendChild(yAxis);
+}
+
+function renderGymCategories(items) {
+	const empty = document.getElementById('gym-categories-empty');
+	const legend = document.getElementById('gym-categories-legend');
+	const canvas = document.getElementById('gym-categories-chart');
+	if (!legend || !canvas) return;
+	const ctx = canvas.getContext('2d');
+	if (!ctx) return;
+
+	canvas.width = canvas.clientWidth || 260;
+	canvas.height = canvas.clientHeight || 260;
+	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	legend.innerHTML = '';
+
+	const list = Array.isArray(items) ? items : [];
+	if (!list.length) {
+		if (empty) empty.style.display = '';
+		return;
+	}
+
+	const entries = list
+		.map(x => [(x?.label || '').toString(), Number(x?.value || 0)])
+		.filter(([k, v]) => k && v > 0);
+
+	if (!entries.length) {
+		if (empty) empty.style.display = '';
+		return;
+	}
+	if (empty) empty.style.display = 'none';
+
+	const total = entries.reduce((sum, [, v]) => sum + v, 0);
+	const centerX = canvas.width / 2;
+	const centerY = canvas.height / 2;
+	const radius = Math.min(canvas.width, canvas.height) / 2 - 10;
+	const innerRadius = radius * 0.6;
+
+	// Colors for Strength (purple) and Cardio (cyan)
+	const colors = {
+		'Strength': '#7c5cff',
+		'Cardio': '#00d4ff'
+	};
+
+	let startAngle = -Math.PI / 2;
+	entries.forEach(([category, value]) => {
+		const percent = (value / total) * 100;
+		const sliceAngle = (percent / 100) * Math.PI * 2;
+		const color = colors[category] || '#7c5cff';
+
+		ctx.beginPath();
+		ctx.arc(centerX, centerY, radius, startAngle, startAngle + sliceAngle);
+		ctx.arc(centerX, centerY, innerRadius, startAngle + sliceAngle, startAngle, true);
+		ctx.closePath();
+		ctx.fillStyle = color;
+		ctx.fill();
+
+		startAngle += sliceAngle;
+
+		const li = document.createElement('li');
+		li.innerHTML = `
+			<span class="progress-muscle-swatch" style="background:${color}"></span>
+			<span>${category}</span>
+			<span class="progress-muscle-value">${Math.round(percent)}%</span>
+		`;
+		legend.appendChild(li);
+	});
+
+	const centerLabel = document.getElementById('gym-categories-center');
 	if (centerLabel) {
 		centerLabel.innerHTML = `
 			<div class="label">Total Sets</div>
