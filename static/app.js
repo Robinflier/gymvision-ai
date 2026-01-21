@@ -1430,6 +1430,10 @@ async function loadGymDashboardData() {
 		if (workoutsEl) workoutsEl.textContent = totalWorkouts;
 		if (exercisesEl) exercisesEl.textContent = totalExercises;
 
+		// Initialize comparison toggle and render comparisons
+		initGymComparisonToggle();
+		updateGymComparisonLabels(stats.comparison || {});
+
 		// Charts
 		const charts = stats.charts || {};
 		renderGymMachinesChart('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
@@ -1446,6 +1450,89 @@ async function loadGymDashboardData() {
 			errorEl.classList.add('show');
 		}
 	}
+}
+
+const GYM_COMPARISON_KEY = 'gym-dashboard-comparison';
+
+function getGymComparison() {
+	const v = (localStorage.getItem(GYM_COMPARISON_KEY) || '').toString().toLowerCase().trim();
+	return (v === 'yesterday' || v === 'last_week' || v === 'last_month') ? v : 'last_month';
+}
+
+function setGymComparison(comparison) {
+	const c = (comparison || '').toString().toLowerCase().trim();
+	localStorage.setItem(GYM_COMPARISON_KEY, (c === 'yesterday' || c === 'last_week' || c === 'last_month') ? c : 'last_month');
+	updateGymComparisonUI();
+	// Re-render labels with new comparison
+	const panelsEl = document.getElementById('gym-dashboard-panels');
+	if (panelsEl && !panelsEl.classList.contains('hidden')) {
+		loadGymDashboardData();
+	}
+}
+
+function updateGymComparisonUI() {
+	const comparison = getGymComparison();
+	document.querySelectorAll('.gym-comparison-btn').forEach(btn => {
+		const isActive = (btn.dataset.comparison === comparison);
+		btn.classList.toggle('active', isActive);
+		btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+	});
+}
+
+function initGymComparisonToggle() {
+	const buttons = document.querySelectorAll('.gym-comparison-btn');
+	if (!buttons || !buttons.length) return;
+	buttons.forEach(btn => {
+		if (btn.dataset.bound === 'true') return;
+		btn.dataset.bound = 'true';
+		btn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			setGymComparison(btn.dataset.comparison || 'last_month');
+		});
+	});
+	updateGymComparisonUI();
+}
+
+function updateGymComparisonLabels(comparisonData) {
+	const comparison = getGymComparison();
+	const comp = comparisonData[comparison] || {};
+	const stats = {
+		users: parseInt(document.getElementById('gym-dashboard-total-users')?.textContent || '0'),
+		workouts: parseInt(document.getElementById('gym-dashboard-total-workouts')?.textContent || '0'),
+		exercises: parseInt(document.getElementById('gym-dashboard-total-exercises')?.textContent || '0')
+	};
+	const prev = {
+		users: comp.users || 0,
+		workouts: comp.workouts || 0,
+		exercises: comp.exercises || 0
+	};
+
+	function renderComparison(current, previous, elId) {
+		const el = document.getElementById(elId);
+		if (!el) return;
+		if (previous === 0) {
+			if (current === 0) {
+				el.innerHTML = '<span class="gym-comparison-neutral">—</span>';
+			} else {
+				// New data (was 0, now > 0) - show as +100%
+				el.innerHTML = '<span class="gym-comparison-positive">+100% ↑</span>';
+			}
+			return;
+		}
+		const diff = current - previous;
+		const pct = Math.round((diff / previous) * 100);
+		const isPositive = diff > 0;
+		const isNeutral = diff === 0;
+		const arrow = isNeutral ? '' : (isPositive ? '↑' : '↓');
+		const sign = isNeutral ? '' : (isPositive ? '+' : '');
+		const className = isNeutral ? 'gym-comparison-neutral' : (isPositive ? 'gym-comparison-positive' : 'gym-comparison-negative');
+		el.innerHTML = `<span class="${className}">${sign}${pct}% ${arrow}</span>`;
+	}
+
+	renderComparison(stats.users, prev.users, 'gym-dashboard-comparison-users');
+	renderComparison(stats.workouts, prev.workouts, 'gym-dashboard-comparison-workouts');
+	renderComparison(stats.exercises, prev.exercises, 'gym-dashboard-comparison-exercises');
 }
 
 function renderGymPeakTimes(charts) {
@@ -1530,12 +1617,14 @@ function renderGymPeakHistogram(containerId, items, opts = {}) {
 	const wrap = document.createElement('div');
 	wrap.className = 'gym-peak-hist';
 
+	// Y labels (0 / mid / max) - skip mid if it equals max or if max <= 1
 	const y = document.createElement('div');
 	y.className = 'gym-peak-y';
 	const mid = Math.round(max / 2);
+	const showMid = max > 1 && mid < max;
 	y.innerHTML = `
 		<div class="gym-peak-y-tick">${max}</div>
-		<div class="gym-peak-y-tick">${mid}</div>
+		${showMid ? `<div class="gym-peak-y-tick">${mid}</div>` : ''}
 		<div class="gym-peak-y-tick">0</div>
 	`;
 
@@ -1544,6 +1633,9 @@ function renderGymPeakHistogram(containerId, items, opts = {}) {
 
 	const bars = document.createElement('div');
 	bars.className = 'gym-peak-bars';
+	if (labelMode === 'hour') {
+		bars.classList.add('hour-mode');
+	}
 
 	list.forEach((x, i) => {
 		const v = Number(x?.value || 0);

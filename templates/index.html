@@ -875,18 +875,28 @@
 				<div id="gym-dashboard-loading" class="progress-empty" style="padding:18px 0;">Loading dashboard...</div>
 
 				<div id="gym-dashboard-panels" class="hidden">
+					<div class="gym-comparison-toggle-wrapper" style="margin-bottom: 16px;">
+						<div class="gym-comparison-toggle" role="tablist" aria-label="Comparison period">
+							<button type="button" class="gym-comparison-btn" data-comparison="yesterday" aria-selected="false">vs Yesterday</button>
+							<button type="button" class="gym-comparison-btn" data-comparison="last_week" aria-selected="false">vs Last Week</button>
+							<button type="button" class="gym-comparison-btn active" data-comparison="last_month" aria-selected="true">vs Last Month</button>
+						</div>
+					</div>
 					<div class="settings-stats-grid" style="margin-bottom: 44px;">
 						<div class="settings-stat-box" style="background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);">
 							<div class="settings-stat-value" id="gym-dashboard-total-users">0</div>
 							<div class="settings-stat-label">Users</div>
+							<div class="gym-stat-comparison" id="gym-dashboard-comparison-users"></div>
 						</div>
 						<div class="settings-stat-box" style="background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);">
 							<div class="settings-stat-value" id="gym-dashboard-total-workouts">0</div>
 							<div class="settings-stat-label">Workouts</div>
+							<div class="gym-stat-comparison" id="gym-dashboard-comparison-workouts"></div>
 						</div>
 						<div class="settings-stat-box" style="background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);">
 							<div class="settings-stat-value" id="gym-dashboard-total-exercises">0</div>
 							<div class="settings-stat-label">Exercises</div>
+							<div class="gym-stat-comparison" id="gym-dashboard-comparison-exercises"></div>
 						</div>
 					</div>
 					<div class="gym-dashboard-controls" style="margin: 16px 0 14px;">

@@ -2203,6 +2203,71 @@ def get_gym_dashboard():
 		users_with_consent = len(analytics_consent.data) if analytics_consent.data else 0
 		users_linked = total_users  # same as total users for this gym_id
 		
+		# Calculate previous period comparisons (for KPI cards)
+		now = datetime.utcnow()
+		comparison_data = {
+			"yesterday": {"users": 0, "workouts": 0, "exercises": 0},
+			"last_week": {"users": 0, "workouts": 0, "exercises": 0},
+			"last_month": {"users": 0, "workouts": 0, "exercises": 0}
+		}
+		
+		# Get user creation dates from auth.users (more accurate than gym_analytics.created_at)
+		user_creation_dates = {}
+		if analytics_all.data:
+			user_ids = [u.get("user_id") for u in analytics_all.data if u.get("user_id")]
+			if user_ids:
+				try:
+					# Get user creation dates from auth.users
+					all_users = admin_client.auth.admin.list_users()
+					users_list = getattr(all_users, "data", None) or getattr(all_users, "users", None) or []
+					for auth_user in users_list:
+						if auth_user.id in user_ids:
+							# Use created_at from auth.users (when the account was created)
+							user_creation_dates[auth_user.id] = auth_user.created_at
+				except Exception as e:
+					print(f"[GYM DASHBOARD] Error fetching user creation dates: {e}")
+		
+		# Initialize comparison data - will be filled when we process workouts
+		# Users: count total users up to and including the comparison period
+		# For "yesterday", we want users that existed at the end of yesterday (before today)
+		today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+		if analytics_all.data:
+			# Yesterday: total users whose accounts were created before today started
+			comparison_data["yesterday"]["users"] = len([
+				u for u in analytics_all.data
+				if u.get("user_id"):
+					user_id = u.get("user_id")
+					# Use actual user creation date from auth.users if available
+					if user_id in user_creation_dates:
+						try:
+							created_str = user_creation_dates[user_id].replace('Z', '+00:00')
+							created = datetime.fromisoformat(created_str)
+							if created < today_start:
+								True
+							else:
+								False
+						except:
+							False
+					else:
+						# Fallback: use gym_analytics.created_at (less accurate)
+						if u.get("created_at"):
+							try:
+								created_str = u.get("created_at").replace('Z', '+00:00')
+								created = datetime.fromisoformat(created_str)
+								if created < today_start:
+									True
+								else:
+									False
+							except:
+								False
+						else:
+							# If no created_at, assume old user (count it as existing yesterday)
+							True
+				else:
+					False
+			])
+			print(f"[GYM DASHBOARD] Yesterday users comparison: {comparison_data['yesterday']['users']} (total users: {total_users})")
+		
 		# Get recent users (last 10) - only users with consent
 		recent_users = []
 		if analytics_consent.data:
@@ -2421,6 +2486,134 @@ def get_gym_dashboard():
 				# expose KPIs (same period as charts)
 				kpi_total_workouts = total_workouts
 				kpi_total_exercises = total_exercises
+				
+				# Calculate previous period comparisons for workouts and exercises
+				# Yesterday: we need to get ALL workouts (not filtered by period) to count yesterday's workouts
+				# Because all_workouts is already filtered by the current period, we need to query separately for yesterday
+				yesterday_date = (datetime.utcnow() - timedelta(days=1)).date().isoformat()
+				
+				# Query workouts from yesterday specifically (not filtered by current period)
+				yesterday_workouts = []
+				for i in range(0, len(consent_user_ids), 50):
+					chunk = consent_user_ids[i:i+50]
+					try:
+						q = admin_client.table("workouts") \
+							.select("user_id,date,exercises,gym_name") \
+							.in_("user_id", chunk) \
+							.eq("date", yesterday_date)
+						res = q.execute()
+						if res.data:
+							yesterday_workouts.extend(res.data)
+					except Exception as e:
+						print(f"[GYM DASHBOARD] Error fetching yesterday workouts: {e}")
+				
+				# Filter to workouts with matching gym
+				yesterday_workouts_filtered = [
+					w for w in yesterday_workouts
+					if (w.get("gym_name") or "").lower().strip() == target_gym
+				]
+				comparison_data["yesterday"]["workouts"] = len(yesterday_workouts_filtered)
+				comparison_data["yesterday"]["exercises"] = sum([
+					len(w.get("exercises") or [])
+					for w in yesterday_workouts_filtered
+				])
+				
+				# Last week: same period but 7 days ago
+				if lookback_days:
+					last_week_start = (datetime.utcnow() - timedelta(days=lookback_days + 7)).date().isoformat()
+					last_week_end = (datetime.utcnow() - timedelta(days=7)).date().isoformat()
+					last_week_workouts = [
+						w for w in all_workouts
+						if last_week_start <= w.get("date", "") <= last_week_end
+						and (w.get("gym_name") or "").lower().strip() == target_gym
+					]
+					comparison_data["last_week"]["workouts"] = len(last_week_workouts)
+					comparison_data["last_week"]["exercises"] = sum([len(w.get("exercises") or []) for w in last_week_workouts])
+				
+				# Last month: same period but 30 days ago
+				if lookback_days:
+					last_month_start = (datetime.utcnow() - timedelta(days=lookback_days + 30)).date().isoformat()
+					last_month_end = (datetime.utcnow() - timedelta(days=30)).date().isoformat()
+					last_month_workouts = [
+						w for w in all_workouts
+						if last_month_start <= w.get("date", "") <= last_month_end
+						and (w.get("gym_name") or "").lower().strip() == target_gym
+					]
+					comparison_data["last_month"]["workouts"] = len(last_month_workouts)
+					comparison_data["last_month"]["exercises"] = sum([len(w.get("exercises") or []) for w in last_month_workouts])
+				
+				# Last week/month users: count total users up to and including those periods
+				# Use the same user_creation_dates dict we created earlier
+				if analytics_all.data and lookback_days:
+					# Last week users: total users created up to and including the end of last week period
+					last_week_user_end = now - timedelta(days=7)
+					comparison_data["last_week"]["users"] = len([
+						u for u in analytics_all.data
+						if u.get("user_id"):
+							user_id = u.get("user_id")
+							# Use actual user creation date from auth.users if available
+							if user_id in user_creation_dates:
+								try:
+									created_str = user_creation_dates[user_id].replace('Z', '+00:00')
+									created = datetime.fromisoformat(created_str)
+									if created <= last_week_user_end:
+										True
+									else:
+										False
+								except:
+									False
+							else:
+								# Fallback: use gym_analytics.created_at
+								if u.get("created_at"):
+									try:
+										created = datetime.fromisoformat(u.get("created_at").replace('Z', '+00:00'))
+										if created <= last_week_user_end:
+											True
+										else:
+											False
+									except:
+										False
+								else:
+									# If no created_at, assume old user (count it)
+									True
+						else:
+							False
+					])
+					
+					# Last month users: total users created up to and including the end of last month period
+					last_month_user_end = now - timedelta(days=30)
+					comparison_data["last_month"]["users"] = len([
+						u for u in analytics_all.data
+						if u.get("user_id"):
+							user_id = u.get("user_id")
+							# Use actual user creation date from auth.users if available
+							if user_id in user_creation_dates:
+								try:
+									created_str = user_creation_dates[user_id].replace('Z', '+00:00')
+									created = datetime.fromisoformat(created_str)
+									if created <= last_month_user_end:
+										True
+									else:
+										False
+								except:
+									False
+							else:
+								# Fallback: use gym_analytics.created_at
+								if u.get("created_at"):
+									try:
+										created = datetime.fromisoformat(u.get("created_at").replace('Z', '+00:00'))
+										if created <= last_month_user_end:
+											True
+										else:
+											False
+									except:
+										False
+								else:
+									# If no created_at, assume old user (count it)
+									True
+						else:
+							False
+					])
 			else:
 				kpi_total_workouts = 0
 				kpi_total_exercises = 0
@@ -2443,6 +2636,7 @@ def get_gym_dashboard():
 				"period": period,
 				"recent_users": recent_users,
 				"monthly_growth": monthly_growth,
+				"comparison": comparison_data,
 				"charts": chart
 			}
 		}), 200
