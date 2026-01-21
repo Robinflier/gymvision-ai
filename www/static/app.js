@@ -135,7 +135,7 @@ function createDefaultSets(count = DEFAULT_SET_COUNT, isCardio = false) {
 	return Array.from({ length: count }, () => ({ weight: '', reps: '' }));
 }
 
-function getLastExerciseData(exerciseKey) {
+function getLastExerciseData(exerciseKey, exerciseDisplay = null, isCustom = false) {
 	// Find the most recent workout that contains this exercise
 	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
 	
@@ -146,6 +146,13 @@ function getLastExerciseData(exerciseKey) {
 		return dateB - dateA;
 	});
 	
+	// For custom exercises, prioritize matching by display name (case-insensitive)
+	// since the key changes each time
+	const searchKey = (exerciseKey || '').toLowerCase();
+	const searchDisplay = (exerciseDisplay || '').toLowerCase();
+	
+	console.log('[GET LAST DATA] Searching for:', { searchKey, searchDisplay, isCustom, totalWorkouts: sortedWorkouts.length });
+	
 	// Find the first workout that has this exercise
 	for (const workout of sortedWorkouts) {
 		if (!workout.exercises || !Array.isArray(workout.exercises)) continue;
@@ -153,16 +160,48 @@ function getLastExerciseData(exerciseKey) {
 		const exercise = workout.exercises.find(ex => {
 			const exKey = (ex.key || '').toLowerCase();
 			const exDisplay = (ex.display || '').toLowerCase();
-			const searchKey = (exerciseKey || '').toLowerCase();
-			return exKey === searchKey || exDisplay === searchKey;
+			const exIsCustom = ex.isCustom === true;
+			
+			// For custom exercises, match primarily by display name
+			if (isCustom || exIsCustom) {
+				if (searchDisplay && exDisplay === searchDisplay) {
+					console.log('[GET LAST DATA] Matched custom exercise by display:', exDisplay);
+					return true;
+				}
+			}
+			
+			// Also try key and display matching for all exercises
+			const matched = exKey === searchKey || exDisplay === searchKey || exDisplay === searchDisplay;
+			if (matched) {
+				console.log('[GET LAST DATA] Matched exercise:', { exKey, exDisplay, searchKey, searchDisplay });
+			}
+			return matched;
 		});
 		
 		if (exercise && exercise.sets && Array.isArray(exercise.sets) && exercise.sets.length > 0) {
 			// Return the sets from the last workout
-			return exercise.sets.map(set => ({
-				weight: set.weight || '',
-				reps: set.reps || ''
-			}));
+			// Handle both weight/reps and cardio fields
+			return exercise.sets.map(set => {
+				// Check if it's a cardio exercise
+				if (set.min !== undefined || set.sec !== undefined || set.km !== undefined || set.cal !== undefined) {
+					return {
+						min: set.min || '',
+						sec: set.sec || '',
+						km: set.km || '',
+						cal: set.cal || '',
+						notes: set.notes || ''
+					};
+				}
+				// Regular weight/reps exercise - preserve actual values (convert to numbers for consistency)
+				const weight = set.weight != null && set.weight !== '' ? (typeof set.weight === 'number' ? set.weight : parseFloat(set.weight)) : '';
+				const reps = set.reps != null && set.reps !== '' ? (typeof set.reps === 'number' ? set.reps : parseInt(set.reps)) : '';
+				return {
+					weight: weight !== '' && !isNaN(weight) ? weight : '',
+					reps: reps !== '' && !isNaN(reps) ? reps : ''
+				};
+			});
+			console.log('[GET LAST DATA] Mapped sets:', mappedSets);
+			return mappedSets;
 		}
 	}
 	
@@ -1489,7 +1528,6 @@ async function loadGymDashboardData() {
 		renderGymMachinesChart('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
 		renderGymPeakTimes(charts);
 		renderGymMuscleFocus(charts.top_muscles_by_sets);
-		renderGymVolumeLine('gym-dashboard-chart-volume', charts.volume_by_week || []);
 		renderGymUsersLine('gym-dashboard-chart-users', charts.active_users_by_week || []);
 		renderGymCategories(charts.exercise_categories || []);
 
@@ -2091,27 +2129,6 @@ function renderGymUsersLine(containerId, items) {
 		}
 	});
 	ctx.stroke();
-	
-	// Draw area fill
-	ctx.fillStyle = 'rgba(0, 212, 255, 0.15)';
-	ctx.beginPath();
-	list.forEach((x, i) => {
-		const value = Number(x?.value || 0);
-		const normalized = (value - min) / range;
-		const y = height - (normalized * height);
-		const px = i * stepX;
-		if (i === 0) {
-			ctx.moveTo(px, height);
-			ctx.lineTo(px, y);
-		} else {
-			ctx.lineTo(px, y);
-		}
-		if (i === list.length - 1) {
-			ctx.lineTo(width, height);
-			ctx.closePath();
-		}
-	});
-	ctx.fill();
 	
 	// Draw points
 	ctx.fillStyle = '#00d4ff';
@@ -3391,8 +3408,10 @@ function initExerciseSelector() {
 					return;
 				}
 
+				// Generate a consistent key based on the exercise name (for matching in getLastExerciseData)
+				const nameSlug = exerciseName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
 				const customExercise = {
-					key: `custom_${Date.now()}_${exerciseName.toLowerCase().replace(/\s+/g, '_')}`,
+					key: `custom_${nameSlug}_${Date.now()}`, // Keep timestamp for uniqueness but make name searchable
 					display: exerciseName,
 					isCustom: true, // Mark as custom so it doesn't try to fetch metadata
 					exerciseType: selectedType, // Store the type: 'weight-reps', 'bodyweight', or 'cardio'
@@ -4238,9 +4257,21 @@ async function addExerciseToWorkout(exercise) {
 	} else {
 		// New exercise - try to get last workout data for placeholders
 		const isCardio = isCardioExercise(exerciseData);
-		const lastSets = getLastExerciseData(exerciseData.key || exerciseData.display);
+		const isCustom = exerciseData.isCustom === true;
+		console.log('[ADD EXERCISE] Looking for last data:', {
+			key: exerciseData.key,
+			display: exerciseData.display,
+			isCustom: isCustom
+		});
+		const lastSets = getLastExerciseData(
+			exerciseData.key || exerciseData.display,
+			exerciseData.display,
+			isCustom
+		);
+		console.log('[ADD EXERCISE] Found last sets:', lastSets);
 		if (lastSets && lastSets.length > 0) {
 			previousSetsForPlaceholder = lastSets;
+			// Create EMPTY sets - values will only be shown as placeholders
 			existingSets = createDefaultSets(lastSets.length, isCardio);
 		} else {
 			existingSets = createDefaultSets(DEFAULT_SET_COUNT, isCardio);
@@ -4254,11 +4285,23 @@ async function addExerciseToWorkout(exercise) {
 		exerciseData.key = `${displaySlug}_${Date.now()}`;
 	}
 	
-	currentWorkout.exercises.push({
+	// IMPORTANT: Sets must be EMPTY (no values), only previousSets should have values for placeholders
+	const exerciseToAdd = {
 		...exerciseData,
-		sets: existingSets,
+		sets: existingSets.map(() => ({ weight: '', reps: '' })), // Force empty sets
 		previousSets: previousSetsForPlaceholder || exerciseData.previousSets
+	};
+	
+	console.log('[ADD EXERCISE] Adding exercise with:', {
+		display: exerciseToAdd.display,
+		isCustom: exerciseToAdd.isCustom,
+		setsCount: exerciseToAdd.sets.length,
+		setsAreEmpty: exerciseToAdd.sets.every(s => s.weight === '' && s.reps === ''),
+		previousSetsCount: exerciseToAdd.previousSets?.length || 0,
+		firstPreviousSet: exerciseToAdd.previousSets?.[0]
 	});
+	
+	currentWorkout.exercises.push(exerciseToAdd);
 	
 	renderWorkoutList();
 	saveWorkoutDraft();
@@ -4384,24 +4427,46 @@ function renderWorkoutList() {
 			// Get placeholder values from previousSets or from the set itself if it has values
 			const prevSet = Array.isArray(ex.previousSets) ? ex.previousSets[setIdx] : null;
 			
-				const setRow = document.createElement('div');
-				setRow.className = 'workout-edit-set-row data';
-				if ((setIdx % 2) === 1) {
-					setRow.classList.add('even');
-				}
-				// Regular: Weight and Reps columns
-			// For weight placeholder: use set value if it exists, otherwise use previousSet, otherwise 0
-			// Convert to display unit (kg or lbs)
-			const weightKg = (set.weight != null && set.weight !== '') 
-				? set.weight 
-				: (prevSet && prevSet.weight != null && prevSet.weight !== '' ? prevSet.weight : 0);
-			const weightPlaceholder = convertWeightForDisplay(weightKg);
-			const weightDisplayValue = set.weight != null && set.weight !== '' ? convertWeightForDisplay(set.weight) : '';
+			// Debug logging
+			if (setIdx === 0) {
+				console.log('[RENDER SETS] Exercise:', {
+					display: ex.display,
+					isCustom: ex.isCustom,
+					previousSetsExists: Array.isArray(ex.previousSets),
+					previousSetsLength: ex.previousSets?.length || 0,
+					firstPrevSet: ex.previousSets?.[0],
+					currentSet: set
+				});
+			}
 			
-			// For reps placeholder: use set value if it exists, otherwise use previousSet, otherwise 0
-			const repsPlaceholder = (set.reps != null && set.reps !== '') 
-				? set.reps 
-				: (prevSet && prevSet.reps != null && prevSet.reps !== '' ? prevSet.reps : 0);
+			const setRow = document.createElement('div');
+			setRow.className = 'workout-edit-set-row data';
+			if ((setIdx % 2) === 1) {
+				setRow.classList.add('even');
+			}
+				// Regular: Weight and Reps columns
+			// Placeholder should show last workout values (from previousSets), not current set values
+			// Only show placeholder if the current set is empty
+			const weightKg = (prevSet && prevSet.weight != null && prevSet.weight !== '') ? prevSet.weight : 0;
+			const weightPlaceholder = convertWeightForDisplay(weightKg);
+			// Only show value if set actually has a value (user has typed something)
+			const weightDisplayValue = (set.weight != null && set.weight !== '') ? convertWeightForDisplay(set.weight) : '';
+			
+			// For reps placeholder: use previousSet value, not current set value
+			const repsPlaceholder = (prevSet && prevSet.reps != null && prevSet.reps !== '') ? prevSet.reps : 0;
+			// Only show value if set actually has a value (user has typed something)
+			const repsDisplayValue = (set.reps != null && set.reps !== '') ? set.reps : '';
+			
+			// Debug logging for first set
+			if (setIdx === 0) {
+				console.log('[RENDER SETS] Placeholders:', {
+					weightPlaceholder,
+					repsPlaceholder,
+					prevSet,
+					weightDisplayValue,
+					repsDisplayValue
+				});
+			}
 			
 			setRow.innerHTML = `
 				<div class="set-col">
@@ -4411,7 +4476,7 @@ function renderWorkoutList() {
 					<input type="number" class="workout-edit-set-input weight" placeholder="${weightPlaceholder}" inputmode="decimal" value="${weightDisplayValue}" aria-label="Set weight (${getWeightUnitLabel().toLowerCase()})">
 				</div>`}
 				<div class="reps-col">
-					<input type="number" class="workout-edit-set-input reps" placeholder="${repsPlaceholder}" inputmode="numeric" value="${set.reps ?? ''}" aria-label="Set reps">
+					<input type="number" class="workout-edit-set-input reps" placeholder="${repsPlaceholder}" inputmode="numeric" value="${repsDisplayValue}" aria-label="Set reps">
 				</div>
 				<div class="action-col">
 					<button type="button" class="workout-edit-set-delete" aria-label="Delete set">
@@ -4603,9 +4668,17 @@ window.saveWorkout = async function() {
 			workoutName.value = capitalizedName; // Update the input field to show capitalized version
 		}
 		
+		// Filter out empty sets but preserve exercise metadata (including isCustom flag)
 		currentWorkout.exercises = (currentWorkout.exercises || []).map(ex => ({
 			...ex,
-			sets: (ex.sets || []).filter(set => set.weight !== '' || set.reps !== '')
+			sets: (ex.sets || []).filter(set => {
+				// For cardio, check cardio fields
+				if (set.min !== undefined || set.sec !== undefined || set.km !== undefined || set.cal !== undefined) {
+					return set.min !== '' || set.sec !== '' || set.km !== '' || set.cal !== '';
+				}
+				// For regular exercises, check weight/reps
+				return set.weight !== '' || set.reps !== '';
+			})
 		}));
 		
 		let duration = currentWorkout.duration || 0;
