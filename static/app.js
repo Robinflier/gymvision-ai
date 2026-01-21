@@ -4043,7 +4043,7 @@ async function addExerciseToWorkout(exercise) {
 				previousSetsForPlaceholder = validLastSets;
 				// Create EMPTY sets - values will only be shown as placeholders
 				existingSets = createDefaultSets(validLastSets.length, isCardio);
-			} else {
+		} else {
 				console.log('[ADD EXERCISE] ⚠️ Last sets found but all empty, using default');
 				existingSets = createDefaultSets(DEFAULT_SET_COUNT, isCardio);
 			}
