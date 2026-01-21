@@ -495,6 +495,16 @@ ALIASES: Dict[str, str] = {
 	"rotary_torso": "rotary_torso_machine",
 	"torso_machine": "rotary_torso_machine",
 	"torso_rotation_machine": "rotary_torso_machine",
+	
+	# Forearms
+	"forearm_curl": "forearm_curl",
+	"reverse_forearm_curl": "reverse_forearm_curl",
+	"wrist_curl": "forearm_curl",
+	"reverse_wrist_curl": "reverse_forearm_curl",
+	
+	# Back
+	"back_extension": "back_extension",
+	"hyperextension": "back_extension",
 }
 
 for _key in MACHINE_METADATA.keys():
