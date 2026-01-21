@@ -158,7 +158,7 @@ login_manager.login_message = "Please log in to access the app."
 
 # Allowed muscle names (lowercase)
 ALLOWED_MUSCLES = {
-	"back", "chest", "shoulders", "biceps", "triceps", "quads", "hamstrings", "calves", "abs", "glutes", "cardio",
+	"back", "chest", "shoulders", "biceps", "triceps", "quads", "hamstrings", "calves", "abs", "glutes", "forearms", "cardio",
 }
 
 # Synonym mapping (lowercase) -> allowed name
@@ -223,6 +223,7 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"deadlift": {"display": "Deadlift", "muscles": normalize_muscles(["Back", "Glutes", "Hamstrings"]), "video": "https://www.youtube.com/embed/AweC3UaM14o", "image": "https://strengthlevel.com/images/illustrations/deadlift.png"},
 	"romanian_deadlift": {"display": "Romanian Deadlift", "muscles": normalize_muscles(["Hamstrings", "Glutes", "Back"]), "video": "https://www.youtube.com/embed/bT5OOBgY4bc", "image": "https://strengthlevel.com/images/illustrations/romanian-deadlift.png"},
 	"sumo_deadlift": {"display": "Sumo Deadlift", "muscles": normalize_muscles(["Glutes", "Hamstrings", "Back"]), "video": "https://www.youtube.com/embed/pfSMst14EFk", "image": "https://strengthlevel.com/images/illustrations/sumo-deadlift.png"},
+	"back_extension": {"display": "Back Extension", "muscles": normalize_muscles(["Back", "Glutes", "-"]), "video": "https://www.youtube.com/embed/z1JDvhlY1A0", "image": "/images/backextension.jpg"},
 
 	# Shoulders
 	"shoulder_press_machine": {"display": "Shoulder Press Machine", "muscles": normalize_muscles(["Shoulders", "Triceps", "-"]), "video": "https://www.youtube.com/embed/WvLMauqrnK8", "image": "https://strengthlevel.com/images/illustrations/shoulder-press.png"},
@@ -254,6 +255,10 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"ez_bar_curl": {"display": "EZ Bar Curl", "muscles": normalize_muscles(["Biceps", "-", "-"]), "video": "https://www.youtube.com/embed/-gSM-kqNlUw", "image": "https://strengthlevel.com/images/illustrations/ez-bar-curl.png"},
 	"reverse_curl": {"display": "Reverse Curl", "muscles": normalize_muscles(["Biceps", "-", "-"]), "video": "https://www.youtube.com/embed/hUA-fIpM7nA", "image": "https://strengthlevel.com/images/illustrations/reverse-curl.png"},
 	"spider_curl": {"display": "Spider Curl", "muscles": normalize_muscles(["Biceps", "-", "-"]), "video": "https://www.youtube.com/embed/ke2shAeQ0O8", "image": "https://strengthlevel.com/images/illustrations/spider-curl.png"},
+
+	# Forearms
+	"forearm_curl": {"display": "Forearm Curl", "muscles": normalize_muscles(["Forearms", "-", "-"]), "video": "https://www.youtube.com/embed/3VLTzIrnb5g", "image": "/images/forearmcurl.jpg"},
+	"reverse_forearm_curl": {"display": "Reverse Forearm Curl", "muscles": normalize_muscles(["Forearms", "-", "-"]), "video": "https://www.youtube.com/embed/osYPwlBiCRM", "image": "/images/reverseforearmcurl.jpg"},
 
 	# Triceps
 	"tricep_pushdown": {"display": "Tricep Pushdown (Bar)", "muscles": normalize_muscles(["Triceps", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/6Fzep104f0s", "image": "/images/triceppushdown.jpg"},

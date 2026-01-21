@@ -3123,7 +3123,7 @@ function initExerciseSelector() {
 	}
 	
 	// Muscle filters
-	const muscles = ['All', 'Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Abs', 'Cardio'];
+	const muscles = ['All', 'Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Abs', 'Forearms', 'Cardio'];
 	if (musclesContainer) {
 		// Clear container first to prevent duplicates when initExerciseSelector is called multiple times
 		musclesContainer.innerHTML = '';
@@ -4721,7 +4721,7 @@ window.saveWorkout = async function() {
 		// Filter out empty sets but preserve exercise metadata (including isCustom flag)
 		currentWorkout.exercises = (currentWorkout.exercises || []).map(ex => {
 			const filtered = {
-				...ex,
+			...ex,
 				sets: (ex.sets || []).filter(set => {
 					// For cardio, check cardio fields
 					if (set.min !== undefined || set.sec !== undefined || set.km !== undefined || set.cal !== undefined) {
