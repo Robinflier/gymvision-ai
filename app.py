@@ -2233,39 +2233,34 @@ def get_gym_dashboard():
 		today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 		if analytics_all.data:
 			# Yesterday: total users whose accounts were created before today started
-			comparison_data["yesterday"]["users"] = len([
-				u for u in analytics_all.data
-				if u.get("user_id"):
-					user_id = u.get("user_id")
-					# Use actual user creation date from auth.users if available
-					if user_id in user_creation_dates:
+			yesterday_users_count = 0
+			for u in analytics_all.data:
+				if not u.get("user_id"):
+					continue
+				user_id = u.get("user_id")
+				# Use actual user creation date from auth.users if available
+				if user_id in user_creation_dates:
+					try:
+						created_str = user_creation_dates[user_id].replace('Z', '+00:00')
+						created = datetime.fromisoformat(created_str)
+						if created < today_start:
+							yesterday_users_count += 1
+					except:
+						pass
+				else:
+					# Fallback: use gym_analytics.created_at (less accurate)
+					if u.get("created_at"):
 						try:
-							created_str = user_creation_dates[user_id].replace('Z', '+00:00')
+							created_str = u.get("created_at").replace('Z', '+00:00')
 							created = datetime.fromisoformat(created_str)
 							if created < today_start:
-								True
-							else:
-								False
+								yesterday_users_count += 1
 						except:
-							False
+							pass
 					else:
-						# Fallback: use gym_analytics.created_at (less accurate)
-						if u.get("created_at"):
-							try:
-								created_str = u.get("created_at").replace('Z', '+00:00')
-								created = datetime.fromisoformat(created_str)
-								if created < today_start:
-									True
-								else:
-									False
-							except:
-								False
-						else:
-							# If no created_at, assume old user (count it as existing yesterday)
-							True
-				else:
-					False
-			])
+						# If no created_at, assume old user (count it as existing yesterday)
+						yesterday_users_count += 1
+			comparison_data["yesterday"]["users"] = yesterday_users_count
 			print(f"[GYM DASHBOARD] Yesterday users comparison: {comparison_data['yesterday']['users']} (total users: {total_users})")
 		
 		# Get recent users (last 10) - only users with consent
@@ -2547,73 +2542,63 @@ def get_gym_dashboard():
 				if analytics_all.data and lookback_days:
 					# Last week users: total users created up to and including the end of last week period
 					last_week_user_end = now - timedelta(days=7)
-					comparison_data["last_week"]["users"] = len([
-						u for u in analytics_all.data
-						if u.get("user_id"):
-							user_id = u.get("user_id")
-							# Use actual user creation date from auth.users if available
-							if user_id in user_creation_dates:
-								try:
-									created_str = user_creation_dates[user_id].replace('Z', '+00:00')
-									created = datetime.fromisoformat(created_str)
-									if created <= last_week_user_end:
-										True
-									else:
-										False
-								except:
-									False
-							else:
-								# Fallback: use gym_analytics.created_at
-								if u.get("created_at"):
-									try:
-										created = datetime.fromisoformat(u.get("created_at").replace('Z', '+00:00'))
-										if created <= last_week_user_end:
-											True
-										else:
-											False
-									except:
-										False
-								else:
-									# If no created_at, assume old user (count it)
-									True
+					last_week_users_count = 0
+					for u in analytics_all.data:
+						if not u.get("user_id"):
+							continue
+						user_id = u.get("user_id")
+						# Use actual user creation date from auth.users if available
+						if user_id in user_creation_dates:
+							try:
+								created_str = user_creation_dates[user_id].replace('Z', '+00:00')
+								created = datetime.fromisoformat(created_str)
+								if created <= last_week_user_end:
+									last_week_users_count += 1
+							except:
+								pass
 						else:
-							False
-					])
+							# Fallback: use gym_analytics.created_at
+							if u.get("created_at"):
+								try:
+									created = datetime.fromisoformat(u.get("created_at").replace('Z', '+00:00'))
+									if created <= last_week_user_end:
+										last_week_users_count += 1
+								except:
+									pass
+							else:
+								# If no created_at, assume old user (count it)
+								last_week_users_count += 1
+					comparison_data["last_week"]["users"] = last_week_users_count
 					
 					# Last month users: total users created up to and including the end of last month period
 					last_month_user_end = now - timedelta(days=30)
-					comparison_data["last_month"]["users"] = len([
-						u for u in analytics_all.data
-						if u.get("user_id"):
-							user_id = u.get("user_id")
-							# Use actual user creation date from auth.users if available
-							if user_id in user_creation_dates:
-								try:
-									created_str = user_creation_dates[user_id].replace('Z', '+00:00')
-									created = datetime.fromisoformat(created_str)
-									if created <= last_month_user_end:
-										True
-									else:
-										False
-								except:
-									False
-							else:
-								# Fallback: use gym_analytics.created_at
-								if u.get("created_at"):
-									try:
-										created = datetime.fromisoformat(u.get("created_at").replace('Z', '+00:00'))
-										if created <= last_month_user_end:
-											True
-										else:
-											False
-									except:
-										False
-								else:
-									# If no created_at, assume old user (count it)
-									True
+					last_month_users_count = 0
+					for u in analytics_all.data:
+						if not u.get("user_id"):
+							continue
+						user_id = u.get("user_id")
+						# Use actual user creation date from auth.users if available
+						if user_id in user_creation_dates:
+							try:
+								created_str = user_creation_dates[user_id].replace('Z', '+00:00')
+								created = datetime.fromisoformat(created_str)
+								if created <= last_month_user_end:
+									last_month_users_count += 1
+							except:
+								pass
 						else:
-							False
-					])
+							# Fallback: use gym_analytics.created_at
+							if u.get("created_at"):
+								try:
+									created = datetime.fromisoformat(u.get("created_at").replace('Z', '+00:00'))
+									if created <= last_month_user_end:
+										last_month_users_count += 1
+								except:
+									pass
+							else:
+								# If no created_at, assume old user (count it)
+								last_month_users_count += 1
+					comparison_data["last_month"]["users"] = last_month_users_count
 			else:
 				kpi_total_workouts = 0
 				kpi_total_exercises = 0
