@@ -156,21 +156,46 @@ function getLastExerciseData(exerciseKey, exerciseDisplay = null, isCustom = fal
 			const exDisplay = (ex.display || '').toLowerCase();
 			const exIsCustom = ex.isCustom === true;
 			
-			// For custom exercises, match primarily by display name
+			console.log('[GET LAST DATA] Checking exercise:', {
+				exKey,
+				exDisplay,
+				exIsCustom,
+				searchKey,
+				searchDisplay,
+				isCustom
+			});
+			
+			// For custom exercises, match primarily by display name (case-insensitive, trimmed)
 			if (isCustom || exIsCustom) {
-				if (searchDisplay && exDisplay === searchDisplay) {
+				const displayMatch = searchDisplay && exDisplay === searchDisplay;
+				if (displayMatch) {
+					console.log('[GET LAST DATA] ✅ Matched custom exercise by display:', exDisplay);
 					return true;
 				}
+				// Don't try other matching for custom exercises - they must match by display name
+				return false;
 			}
 			
-			// Also try key and display matching for all exercises
-			return exKey === searchKey || exDisplay === searchKey || exDisplay === searchDisplay;
+			// For regular exercises, try key and display matching
+			const matched = exKey === searchKey || exDisplay === searchKey || exDisplay === searchDisplay;
+			if (matched) {
+				console.log('[GET LAST DATA] ✅ Matched regular exercise:', { exKey, exDisplay, searchKey, searchDisplay });
+			}
+			return matched;
 		});
 		
 		if (exercise && exercise.sets && Array.isArray(exercise.sets) && exercise.sets.length > 0) {
+			console.log('[GET LAST DATA] Found exercise with sets:', {
+				display: exercise.display,
+				isCustom: exercise.isCustom,
+				setsCount: exercise.sets.length,
+				firstSet: exercise.sets[0],
+				allSets: exercise.sets
+			});
+			
 			// Return the sets from the last workout
 			// Handle both weight/reps and cardio fields
-			return exercise.sets.map(set => {
+			const mappedSets = exercise.sets.map(set => {
 				// Check if it's a cardio exercise
 				if (set.min !== undefined || set.sec !== undefined || set.km !== undefined || set.cal !== undefined) {
 					return {
@@ -181,12 +206,20 @@ function getLastExerciseData(exerciseKey, exerciseDisplay = null, isCustom = fal
 						notes: set.notes || ''
 					};
 				}
-				// Regular weight/reps exercise
+				// Regular weight/reps exercise - preserve actual values
+				// IMPORTANT: Keep as numbers, not strings, for proper comparison
+				const weight = set.weight != null && set.weight !== '' ? Number(set.weight) : '';
+				const reps = set.reps != null && set.reps !== '' ? Number(set.reps) : '';
+				
+				// Return the values if they are valid numbers (can have weight OR reps, or both)
 				return {
-				weight: set.weight || '',
-				reps: set.reps || ''
+					weight: (weight !== '' && !isNaN(weight)) ? weight : '',
+					reps: (reps !== '' && !isNaN(reps)) ? reps : ''
 				};
 			});
+			
+			console.log('[GET LAST DATA] Mapped sets:', mappedSets);
+			return mappedSets;
 		}
 	}
 	
@@ -3980,16 +4013,42 @@ async function addExerciseToWorkout(exercise) {
 		// New exercise - try to get last workout data for placeholders
 		const isCardio = isCardioExercise(exerciseData);
 		const isCustom = exerciseData.isCustom === true;
+		console.log('[ADD EXERCISE] Looking for last data:', {
+			key: exerciseData.key,
+			display: exerciseData.display,
+			isCustom: isCustom,
+			exerciseData: exerciseData
+		});
+		
+		// For custom exercises, use display name for matching (key changes every time)
+		const searchKey = isCustom ? exerciseData.display : (exerciseData.key || exerciseData.display);
 		const lastSets = getLastExerciseData(
-			exerciseData.key || exerciseData.display,
+			searchKey,
 			exerciseData.display,
 			isCustom
 		);
+		console.log('[ADD EXERCISE] getLastExerciseData returned:', lastSets);
+		
 		if (lastSets && lastSets.length > 0) {
-			previousSetsForPlaceholder = lastSets;
-			// Create EMPTY sets - values will only be shown as placeholders
-			existingSets = createDefaultSets(lastSets.length, isCardio);
+			// Filter out empty sets (where BOTH weight AND reps are empty)
+			const validLastSets = lastSets.filter(s => {
+				const hasWeight = s.weight != null && s.weight !== '';
+				const hasReps = s.reps != null && s.reps !== '';
+				// Keep set if it has at least weight OR reps (not both empty)
+				return hasWeight || hasReps;
+			});
+			
+			if (validLastSets.length > 0) {
+				console.log('[ADD EXERCISE] ✅ Found valid last sets, using as placeholders:', validLastSets);
+				previousSetsForPlaceholder = validLastSets;
+				// Create EMPTY sets - values will only be shown as placeholders
+				existingSets = createDefaultSets(validLastSets.length, isCardio);
+			} else {
+				console.log('[ADD EXERCISE] ⚠️ Last sets found but all empty, using default');
+				existingSets = createDefaultSets(DEFAULT_SET_COUNT, isCardio);
+			}
 		} else {
+			console.log('[ADD EXERCISE] ❌ No last sets found, using default empty sets');
 			existingSets = createDefaultSets(DEFAULT_SET_COUNT, isCardio);
 		}
 	}
@@ -4085,17 +4144,25 @@ function renderWorkoutList() {
 			}
 			
 			// Regular: Weight and Reps columns
-			// Placeholder should show last workout values (from previousSets), not current set values
-			// Only show placeholder if the current set is empty
-			const weightKg = (prevSet && prevSet.weight != null && prevSet.weight !== '') ? prevSet.weight : 0;
-			const weightPlaceholder = convertWeightForDisplay(weightKg);
-			// Only show value if set actually has a value (user has typed something)
-			const weightDisplayValue = (set.weight != null && set.weight !== '') ? convertWeightForDisplay(set.weight) : '';
+			// Placeholder logic:
+			// - If set has a value (user typed): show that value (white text)
+			// - If set is empty but prevSet exists: show prevSet value as placeholder (gray)
+			// - If set is empty and no prevSet: show "0" as placeholder (gray)
+			const hasSetWeight = set.weight != null && set.weight !== '';
+			const hasSetReps = set.reps != null && set.reps !== '';
 			
-			// For reps placeholder: use previousSet value, not current set value
-			const repsPlaceholder = (prevSet && prevSet.reps != null && prevSet.reps !== '') ? prevSet.reps : 0;
-			// Only show value if set actually has a value (user has typed something)
-			const repsDisplayValue = (set.reps != null && set.reps !== '') ? set.reps : '';
+			// Placeholder: use previousSet value if available, otherwise "0"
+			const hasPrevWeight = prevSet && prevSet.weight != null && prevSet.weight !== '';
+			const weightKg = hasPrevWeight ? prevSet.weight : 0;
+			const weightPlaceholder = convertWeightForDisplay(weightKg);
+			// Value: only show if set actually has a value (user has typed something)
+			const weightDisplayValue = hasSetWeight ? convertWeightForDisplay(set.weight) : '';
+			
+			// For reps placeholder: use previousSet value if available, otherwise "0"
+			const hasPrevReps = prevSet && prevSet.reps != null && prevSet.reps !== '';
+			const repsPlaceholder = hasPrevReps ? prevSet.reps : '0';
+			// Value: only show if set actually has a value (user has typed something)
+			const repsDisplayValue = hasSetReps ? set.reps : '';
 			
 			// Debug logging for first set
 			if (setIdx === 0) {
