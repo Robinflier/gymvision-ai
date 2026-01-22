@@ -915,7 +915,21 @@ function initLoginForm() {
 				}
 			}
 
-			console.log('[LOGIN] Login successful, initializing app...');
+			console.log('[LOGIN] Login successful');
+			
+			// Check if there's a redirect parameter (e.g., from admin-dashboard)
+			const urlParams = new URLSearchParams(window.location.search);
+			const redirect = urlParams.get('redirect');
+			
+			if (redirect) {
+				// Redirect to the specified page (e.g., /admin-dashboard)
+				console.log('[LOGIN] Redirecting to:', redirect);
+				window.location.href = redirect;
+				return;
+			}
+			
+			// No redirect - initialize app normally
+			console.log('[LOGIN] Initializing app...');
 			// Hide login content
 			const loginContent = document.getElementById('login-content');
 			if (loginContent) {
