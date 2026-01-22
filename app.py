@@ -2553,6 +2553,8 @@ def register_gym_account():
 		# This prevents unauthorized access to gym data
 		user_id = None
 		user_created = False
+		user_exists = False  # Initialize variable
+		user_response = None  # Initialize variable
 		
 		# Strategy: Create user WITHOUT metadata first to avoid trigger issues
 		# Then update metadata separately
@@ -2576,6 +2578,8 @@ def register_gym_account():
 					user_exists = True
 				else:
 					print(f"[GYM REGISTER] Error checking for existing user: {check_error}")
+					# If error checking, assume user doesn't exist and try to create
+					user_exists = False
 			
 			# Only create if user doesn't exist
 			if not user_exists:
@@ -2590,6 +2594,7 @@ def register_gym_account():
 					"user_metadata": {}
 				})
 			
+			# Only process user_response if it exists (i.e., user was created)
 			if user_response and hasattr(user_response, 'user') and user_response.user:
 				user_id = user_response.user.id
 				print(f"[GYM REGISTER] Step 1: Created user without metadata: user_id={user_id}")
