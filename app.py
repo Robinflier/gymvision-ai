@@ -664,6 +664,51 @@ def my_user_id():
 	return render_template("my-user-id.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
 
 
+@app.route("/api/my-user-id", methods=["GET", "OPTIONS"])
+def api_my_user_id():
+	"""
+	Simple API endpoint that returns the current user's ID as JSON.
+	Just login and call this endpoint to get your User ID.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# Get Authorization header
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Please log in first. Include Authorization header with Bearer token."}), 401
+	
+	access_token = auth_header.replace("Bearer ", "").strip()
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+		
+		if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
+		# Verify user
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+		
+		return jsonify({
+			"user_id": user_response.user.id,
+			"email": user_response.user.email
+		}), 200
+		
+	except Exception as e:
+		print(f"[MY USER ID API] Error: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to get user ID: {str(e)}"}), 500
+
+
 def is_admin_user(user_id: str, user_email: str = None) -> bool:
 	"""
 	Check if a user is an admin.
