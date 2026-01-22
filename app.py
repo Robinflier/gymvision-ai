@@ -645,23 +645,12 @@ def gym_dashboard():
 	return render_template("gym-dashboard.html")
 
 
-@app.route("/admin-panel", methods=["GET"])
-def admin_panel():
-	"""Admin panel page for managing gym accounts."""
+@app.route("/admin-dashboard", methods=["GET"])
+def admin_dashboard():
+	"""Admin dashboard page for managing gym accounts. Requires login."""
 	supabase_url = os.getenv("SUPABASE_URL") or ""
 	supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or ""
-	return render_template("admin-panel.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
-
-
-@app.route("/my-user-id", methods=["GET"])
-def my_user_id():
-	"""
-	Simple page to show the current user's ID.
-	Useful for finding your user ID to add to ADMIN_USER_IDS.
-	"""
-	supabase_url = os.getenv("SUPABASE_URL") or ""
-	supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or ""
-	return render_template("my-user-id.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
+	return render_template("admin-dashboard.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
 
 
 @app.route("/api/my-user-id", methods=["GET", "OPTIONS"])
