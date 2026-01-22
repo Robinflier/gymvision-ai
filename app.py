@@ -2554,24 +2554,40 @@ def register_gym_account():
 		user_id = None
 		user_created = False
 		
+		# Strategy: Create user WITHOUT metadata first to avoid trigger issues
+		# Then update metadata separately
 		try:
+			# Step 1: Create user with minimal metadata (or none) to avoid trigger errors
 			user_response = admin_client.auth.admin.create_user({
 				"email": email,
 				"password": password,
 				"email_confirm": True,  # Auto-confirm email for gym accounts
-				"user_metadata": {
-					"is_gym_account": True,
-					"gym_name": gym_name.strip(),
-					"contact_name": contact_name.strip(),
-					"contact_phone": contact_phone.strip(),
-					"is_verified": False  # Must be verified by admin before accessing data
-				}
+				# Don't set user_metadata here - triggers might fail
+				# We'll set it in step 2
 			})
 			
 			if user_response.user:
 				user_id = user_response.user.id
-				user_created = True
-				print(f"[GYM REGISTER] Successfully created gym account: user_id={user_id}")
+				print(f"[GYM REGISTER] Step 1: Created user without metadata: user_id={user_id}")
+				
+				# Step 2: Update metadata separately (this should work even if trigger fails)
+				try:
+					admin_client.auth.admin.update_user_by_id(user_id, {
+						"user_metadata": {
+							"is_gym_account": True,
+							"gym_name": gym_name.strip(),
+							"contact_name": contact_name.strip(),
+							"contact_phone": contact_phone.strip(),
+							"is_verified": False
+						}
+					})
+					user_created = True
+					print(f"[GYM REGISTER] Step 2: Successfully updated metadata for gym account: user_id={user_id}")
+				except Exception as update_error:
+					print(f"[GYM REGISTER] Warning: User created but metadata update failed: {update_error}")
+					# User exists, metadata might be set by trigger or we can retry later
+					user_created = True
+					print(f"[GYM REGISTER] User {user_id} created, metadata may be incomplete but account exists")
 		except Exception as create_error:
 			error_str = str(create_error)
 			print(f"[GYM REGISTER] Error during create_user: {create_error}")
