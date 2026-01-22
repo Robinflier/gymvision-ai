@@ -186,6 +186,8 @@
 			cursor: pointer;
 		}
 	</style>
+	<!-- Supabase library - MUST load before script -->
+	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 	<div class="admin-container">
@@ -237,32 +239,14 @@
 
 		async function initSupabase() {
 			try {
-				// Wait for Supabase to be available
-				if (typeof window.supabase === 'undefined') {
-					// Load Supabase library
-					const script = document.createElement('script');
-					script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
-					
-					await new Promise((resolve, reject) => {
-						script.onload = () => {
-							if (typeof window.supabase === 'undefined') {
-								reject(new Error('Supabase library loaded but window.supabase is undefined'));
-								return;
-							}
-							resolve();
-						};
-						script.onerror = () => {
-							reject(new Error('Failed to load Supabase library'));
-						};
-						document.head.appendChild(script);
-					});
+				// Check if Supabase is loaded
+				if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
+					showError('Supabase library failed to load. Please refresh the page.');
+					document.getElementById('gym-accounts-list').innerHTML = '<div class="loading" style="color: #c33;">Supabase not loaded. Please refresh.</div>';
+					return;
 				}
 				
 				// Create Supabase client
-				if (!window.supabase || !window.supabase.createClient) {
-					throw new Error('Supabase createClient is not available');
-				}
-				
 				supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 				
 				if (!supabase || !supabase.auth) {
