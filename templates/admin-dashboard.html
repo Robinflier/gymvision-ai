@@ -297,36 +297,10 @@
 	<div id="admin-container" class="admin-container">
 		<div class="admin-header">
 			<h1>🔐 Admin Dashboard</h1>
-			<p>Manage gym accounts and access permissions</p>
+			<p>Approve or reject gym account requests</p>
 		</div>
 
 		<div id="error-message" class="error" style="display: none;"></div>
-
-		<div class="admin-stats">
-			<div class="admin-stat-card">
-				<h3>Total Gym Accounts</h3>
-				<div class="stat-value" id="stat-total">-</div>
-			</div>
-			<div class="admin-stat-card">
-				<h3>Verified</h3>
-				<div class="stat-value" id="stat-verified">-</div>
-			</div>
-			<div class="admin-stat-card">
-				<h3>Unverified</h3>
-				<div class="stat-value" id="stat-unverified">-</div>
-			</div>
-			<div class="admin-stat-card">
-				<h3>Premium</h3>
-				<div class="stat-value" id="stat-premium">-</div>
-			</div>
-		</div>
-
-		<div class="filter-tabs">
-			<button class="filter-tab active" data-filter="all">All</button>
-			<button class="filter-tab" data-filter="unverified">Unverified</button>
-			<button class="filter-tab" data-filter="verified">Verified</button>
-			<button class="filter-tab" data-filter="premium">Premium</button>
-		</div>
 
 		<div class="gym-accounts-list" id="gym-accounts-list">
 			<div class="loading">Loading gym accounts...</div>
@@ -509,7 +483,6 @@
 					}
 					container.innerHTML = '<div class="loading" style="color: #ef4444; padding: 20px; background: #1a1a1b; border-radius: 8px; border: 1px solid #ef4444;">❌ Error ' + response.status + ': ' + errorText + '</div>';
 					showError('Failed to load gym accounts: ' + errorText);
-					updateStats([]);
 					return;
 				}
 
@@ -518,13 +491,11 @@
 					data = await response.json();
 				} catch (e) {
 					container.innerHTML = '<div class="loading" style="color: #ef4444;">Failed to parse response. Check if server is running.</div>';
-					updateStats([]);
 					return;
 				}
 				
 				if (!data) {
 					container.innerHTML = '<div class="loading">No data returned from server.</div>';
-					updateStats([]);
 					return;
 				}
 				
@@ -532,78 +503,41 @@
 				
 				if (accounts.length === 0) {
 					container.innerHTML = '<div class="loading" style="padding: 40px; text-align: center; color: #888;">No gym accounts found.<br><br>Gym accounts will appear here after they register.</div>';
-					updateStats([]);
 					return;
 				}
 				
 				renderGymAccounts(accounts);
-				updateStats(accounts);
 			} catch (error) {
 				container.innerHTML = '<div class="loading" style="color: #ef4444; padding: 20px; background: #1a1a1b; border-radius: 8px; border: 1px solid #ef4444;">❌ Network Error: ' + error.message + '<br><br>Make sure the server is running and try again.</div>';
 				showError('Failed to load gym accounts: ' + error.message);
-				updateStats([]);
 			}
-		}
-
-		function updateStats(accounts) {
-			const total = accounts.length;
-			const verified = accounts.filter(a => a.is_verified).length;
-			const unverified = total - verified;
-			const premium = accounts.filter(a => a.is_premium).length;
-
-			document.getElementById('stat-total').textContent = total;
-			document.getElementById('stat-verified').textContent = verified;
-			document.getElementById('stat-unverified').textContent = unverified;
-			document.getElementById('stat-premium').textContent = premium;
 		}
 
 		function renderGymAccounts(accounts) {
 			const container = document.getElementById('gym-accounts-list');
 			
 			if (accounts.length === 0) {
-				container.innerHTML = '<div class="loading">No gym accounts found.</div>';
+				container.innerHTML = '<div class="loading" style="padding: 40px; text-align: center; color: #888;">No gym accounts found.<br><br>Gym accounts will appear here after they register.</div>';
 				return;
 			}
 
-			// Filter accounts
-			let filtered = accounts;
-			if (currentFilter === 'unverified') {
-				filtered = accounts.filter(a => !a.is_verified);
-			} else if (currentFilter === 'verified') {
-				filtered = accounts.filter(a => a.is_verified);
-			} else if (currentFilter === 'premium') {
-				filtered = accounts.filter(a => a.is_premium);
-			}
-
-			container.innerHTML = filtered.map(account => `
+			// Show all accounts, newest first (already sorted by backend)
+			container.innerHTML = accounts.map(account => `
 				<div class="gym-account-item">
 					<div class="gym-account-info">
 						<h3>${escapeHtml(account.gym_name || 'Unknown')}</h3>
 						<p><strong>Email:</strong> ${escapeHtml(account.email || 'N/A')}</p>
-						<p><strong>Contact:</strong> ${escapeHtml(account.contact_name || 'N/A')} ${account.contact_phone ? `(${escapeHtml(account.contact_phone)})` : ''}</p>
+						${account.contact_name ? `<p><strong>Contact:</strong> ${escapeHtml(account.contact_name)}${account.contact_phone ? ` (${escapeHtml(account.contact_phone)})` : ''}</p>` : ''}
 						<p><strong>Created:</strong> ${formatDate(account.created_at)}</p>
-					</div>
-					<div class="gym-account-status">
-						<span class="status-badge ${account.is_verified ? 'verified' : 'unverified'}">
-							${account.is_verified ? '✓ Verified' : '⚠ Unverified'}
-						</span>
-						<span class="status-badge ${account.is_premium ? 'premium' : 'basic'}">
-							${account.is_premium ? '⭐ Premium' : 'Basic'}
-						</span>
 					</div>
 					<div class="admin-actions">
 						${!account.is_verified ? `
-							<button class="btn btn-success" onclick="approveGym('${account.user_id}')">Approve</button>
+							<button class="btn btn-success" onclick="approveGym('${account.user_id}')" title="Approve">✓</button>
+							<button class="btn btn-danger" onclick="rejectGym('${account.user_id}')" title="Reject">✗</button>
 						` : `
-							<button class="btn btn-danger" onclick="rejectGym('${account.user_id}')">Reject</button>
+							<span class="status-badge verified" style="margin-right: 10px;">✓ Verified</span>
+							<button class="btn btn-danger" onclick="rejectGym('${account.user_id}')" title="Reject">✗</button>
 						`}
-					</div>
-					<div class="admin-actions">
-						<div class="checkbox-wrapper">
-							<input type="checkbox" id="premium-${account.user_id}" ${account.is_premium ? 'checked' : ''} 
-								onchange="togglePremium('${account.user_id}', this.checked)">
-							<label for="premium-${account.user_id}">Premium Access</label>
-						</div>
 					</div>
 				</div>
 			`).join('');
@@ -713,15 +647,7 @@
 			return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 		}
 
-		// Filter tabs
-		document.querySelectorAll('.filter-tab').forEach(tab => {
-			tab.addEventListener('click', () => {
-				document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
-				tab.classList.add('active');
-				currentFilter = tab.dataset.filter;
-				loadGymAccounts();
-			});
-		});
+		// No filters needed - removed
 
 		// Initialize on page load
 		init();
