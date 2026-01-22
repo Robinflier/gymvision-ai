@@ -14,7 +14,11 @@
 	<!-- Supabase library - MUST load before app.js -->
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 	<script>
-		// Public Supabase config (anon key)
+		// Export createClient for Supabase v2
+		const { createClient } = supabase;
+		window.createClient = createClient;
+		// Supabase config - hardcoded for Capacitor/iOS compatibility
+		// Note: ANON key is safe to expose in frontend (designed to be public)
 		window.SUPABASE_URL = "https://jugdkqzhcbqbjbvktqlz.supabase.co";
 		window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp1Z2RrcXpoY2JxYmpidmt0cWx6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODI2NzIsImV4cCI6MjA4MDI1ODY3Mn0.rqCqBK14sOZvsxNUhIHIxaOnVMvdnNOjx_0YIXy1VIY";
 	</script>
@@ -173,7 +177,7 @@
 						<label class="auth-label" for="contact-phone">Contact Phone</label>
 						<input type="tel" id="contact-phone" class="auth-input" placeholder="+31 6 12345678">
 					</div>
-					<button type="submit" class="auth-button" id="submit-btn">Register</button>
+					<button type="submit" class="auth-button" id="submit-btn">Create Gym Account</button>
 				</form>
 				
 				<div class="auth-link">
@@ -191,52 +195,72 @@
 			return path;
 		}
 		
-		// Handle registration form - use Supabase signUp directly (like normal users)
-		document.getElementById('gym-register-form').addEventListener('submit', async (e) => {
-			e.preventDefault();
-			const submitBtn = document.getElementById('submit-btn');
-			const errorMsg = document.getElementById('error-message');
-			const gymName = document.getElementById('gym-name').value.trim();
-			const email = document.getElementById('email').value;
-			const password = document.getElementById('password').value;
-			const contactName = document.getElementById('contact-name').value.trim();
-			const contactPhone = document.getElementById('contact-phone').value.trim();
+		// Wait for DOM and Supabase to be ready
+		document.addEventListener('DOMContentLoaded', () => {
+			const form = document.getElementById('gym-register-form');
+			if (!form) return;
 			
-			if (!gymName || !email || !password) {
-				errorMsg.textContent = 'Please fill in all required fields';
-				errorMsg.classList.add('show');
-				return;
-			}
-			
-			submitBtn.disabled = true;
-			submitBtn.textContent = 'Registering...';
-			errorMsg.classList.remove('show');
-			
-			try {
-				// Initialize Supabase client
-				const sb = (window.supabase && window.supabase.createClient)
-					? window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY)
-					: null;
-				if (!sb) throw new Error('Failed to load Supabase. Please disable ad blockers and refresh.');
+			// Handle registration form - use Supabase signUp directly (like normal users)
+			form.addEventListener('submit', async (e) => {
+				e.preventDefault();
+				e.stopPropagation();
 				
-				// Step 1: Create user account via Supabase signUp (this always works)
-				const { data: signUpData, error: signUpError } = await sb.auth.signUp({
-					email,
-					password
-				});
+				const submitBtn = document.getElementById('submit-btn');
+				const errorMsg = document.getElementById('error-message');
+				const gymName = document.getElementById('gym-name').value.trim();
+				const email = document.getElementById('email').value.trim();
+				const password = document.getElementById('password').value;
+				const contactName = document.getElementById('contact-name').value.trim();
+				const contactPhone = document.getElementById('contact-phone').value.trim();
 				
-				if (signUpError) {
-					let errorMessage = signUpError.message;
-					if (signUpError.message.includes('already registered') || signUpError.message.includes('already exists')) {
-						errorMessage = 'This email is already registered. Please sign in instead.';
-					} else if (signUpError.message.includes('Password')) {
-						errorMessage = 'Password must be at least 6 characters';
-					}
-					throw new Error(errorMessage);
+				if (!gymName || !email || !password) {
+					errorMsg.textContent = 'Please fill in all required fields';
+					errorMsg.style.background = '#ef4444';
+					errorMsg.classList.add('show');
+					return;
 				}
 				
-				// Step 2: Update metadata via backend (only updates, doesn't create - much safer)
-				if (signUpData?.user?.id) {
+				submitBtn.disabled = true;
+				submitBtn.textContent = 'Registering...';
+				errorMsg.classList.remove('show');
+				
+				try {
+					// Wait for Supabase to be available
+					if (typeof window.createClient === 'undefined') {
+						// Wait a bit for Supabase to load
+						await new Promise(resolve => setTimeout(resolve, 100));
+						if (typeof window.createClient === 'undefined') {
+							throw new Error('Failed to load Supabase. Please refresh the page.');
+						}
+					}
+					
+					if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) {
+						throw new Error('Supabase configuration missing. Please refresh the page.');
+					}
+					
+					const sb = window.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+					
+					// Step 1: Create user account via Supabase signUp (this always works)
+					const { data: signUpData, error: signUpError } = await sb.auth.signUp({
+						email,
+						password
+					});
+					
+					if (signUpError) {
+						let errorMessage = signUpError.message;
+						if (signUpError.message.includes('already registered') || signUpError.message.includes('already exists')) {
+							errorMessage = 'This email is already registered. Please sign in instead.';
+						} else if (signUpError.message.includes('Password')) {
+							errorMessage = 'Password must be at least 6 characters';
+						}
+						throw new Error(errorMessage);
+					}
+					
+					if (!signUpData || !signUpData.user || !signUpData.user.id) {
+						throw new Error('Account creation failed. Please try again.');
+					}
+					
+					// Step 2: Update metadata via backend (only updates, doesn't create - much safer)
 					try {
 						const updateResponse = await fetch(getApiUrl('/api/gym/update-metadata'), {
 							method: 'POST',
@@ -251,31 +275,44 @@
 						
 						const updateData = await updateResponse.json().catch(() => ({}));
 						if (!updateResponse.ok) {
-							console.warn('Metadata update failed, but account was created:', updateData.error);
-							// Account exists, metadata update is optional
+							console.warn('[GYM REGISTER] Metadata update failed, but account was created:', updateData.error);
+							// Account exists, metadata update is optional - but warn user
+							errorMsg.textContent = 'Account created, but metadata update failed. Please contact support.';
+							errorMsg.style.background = '#f59e0b';
+							errorMsg.classList.add('show');
+							submitBtn.disabled = false;
+							submitBtn.textContent = 'Register';
+							return;
 						}
 					} catch (updateError) {
-						console.warn('Metadata update failed, but account was created:', updateError);
-						// Account exists, metadata update is optional
+						console.error('[GYM REGISTER] Metadata update error:', updateError);
+						// Account exists, but metadata update failed
+						errorMsg.textContent = 'Account created, but metadata update failed. Please contact support.';
+						errorMsg.style.background = '#f59e0b';
+						errorMsg.classList.add('show');
+						submitBtn.disabled = false;
+						submitBtn.textContent = 'Register';
+						return;
 					}
+					
+					// Registration successful - show success message
+					errorMsg.textContent = 'Gym account created successfully! Your account needs to be verified by an administrator before you can access the dashboard.';
+					errorMsg.style.background = '#10b981';
+					errorMsg.classList.add('show');
+					
+					// Redirect to login after a moment
+					setTimeout(() => {
+						window.location.href = '/gym-login';
+					}, 2000);
+				} catch (error) {
+					console.error('[GYM REGISTER] Error:', error);
+					errorMsg.textContent = error.message || 'Failed to register. Please try again.';
+					errorMsg.style.background = '#ef4444';
+					errorMsg.classList.add('show');
+					submitBtn.disabled = false;
+					submitBtn.textContent = 'Create Gym Account';
 				}
-				
-				// Registration successful - show success message
-				errorMsg.textContent = 'Gym account created successfully! Your account needs to be verified by an administrator before you can access the dashboard.';
-				errorMsg.style.background = '#10b981';
-				errorMsg.classList.add('show');
-				
-				// Redirect to login after a moment
-				setTimeout(() => {
-					window.location.href = '/gym-login';
-				}, 2000);
-			} catch (error) {
-				errorMsg.textContent = error.message || 'Failed to register';
-				errorMsg.style.background = '#ef4444';
-				errorMsg.classList.add('show');
-				submitBtn.disabled = false;
-				submitBtn.textContent = 'Register';
-			}
+			});
 		});
 	</script>
 </body>
