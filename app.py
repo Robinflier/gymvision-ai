@@ -750,13 +750,54 @@ def list_gym_accounts():
 		# Try to get users, but if it fails or hangs, just return empty list
 		try:
 			all_users = admin_client.auth.admin.list_users()
+			print(f"[ADMIN] list_users() response type: {type(all_users)}")
+			print(f"[ADMIN] list_users() response attributes: {dir(all_users)}")
+			
+			# Try different ways to access the users list
+			users_list = []
+			if hasattr(all_users, 'users'):
+				users_list = all_users.users
+				print(f"[ADMIN] Found users via .users attribute: {len(users_list)}")
+			elif hasattr(all_users, 'data'):
+				users_list = all_users.data
+				print(f"[ADMIN] Found users via .data attribute: {len(users_list)}")
+			elif isinstance(all_users, dict):
+				users_list = all_users.get('users', []) or all_users.get('data', [])
+				print(f"[ADMIN] Found users via dict access: {len(users_list)}")
+			else:
+				# Try to convert to list if it's iterable
+				try:
+					users_list = list(all_users) if all_users else []
+					print(f"[ADMIN] Found users via list conversion: {len(users_list)}")
+				except:
+					pass
+			
+			# If still empty, try calling with page parameter
+			if not users_list:
+				print("[ADMIN] Trying list_users() with page parameter...")
+				try:
+					all_users_paged = admin_client.auth.admin.list_users(page=1, per_page=1000)
+					if hasattr(all_users_paged, 'users'):
+						users_list = all_users_paged.users
+					elif hasattr(all_users_paged, 'data'):
+						users_list = all_users_paged.data
+					print(f"[ADMIN] Found {len(users_list)} users with pagination")
+				except Exception as page_error:
+					print(f"[ADMIN] Pagination also failed: {page_error}")
+			
 		except Exception as e:
 			print(f"[ADMIN] Error calling list_users(): {e} - returning empty list")
 			import traceback
 			traceback.print_exc()
 			return jsonify({"accounts": []}), 200
 		
-		users_list = getattr(all_users, "data", None) or getattr(all_users, "users", None) or []
+		if not users_list:
+			print("[ADMIN] WARNING: users_list is empty or None")
+			print("[ADMIN] This could mean:")
+			print("[ADMIN]   1. No users exist in Supabase")
+			print("[ADMIN]   2. Service role key doesn't have permission")
+			print("[ADMIN]   3. list_users() API has changed")
+		
 		print(f"[ADMIN] Found {len(users_list)} total users")
 		
 		# Debug: print first few users to see their metadata
@@ -2610,8 +2651,37 @@ def debug_gym_accounts():
 			return jsonify({"error": "Supabase configuration missing"}), 500
 		
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-		all_users = admin_client.auth.admin.list_users()
-		users_list = getattr(all_users, "data", None) or getattr(all_users, "users", None) or []
+		
+		# Try to get users with better error handling
+		try:
+			all_users = admin_client.auth.admin.list_users()
+			print(f"[DEBUG] list_users() response type: {type(all_users)}")
+			
+			users_list = []
+			if hasattr(all_users, 'users'):
+				users_list = all_users.users
+			elif hasattr(all_users, 'data'):
+				users_list = all_users.data
+			elif isinstance(all_users, dict):
+				users_list = all_users.get('users', []) or all_users.get('data', [])
+			else:
+				try:
+					users_list = list(all_users) if all_users else []
+				except:
+					pass
+			
+			# Try with pagination if empty
+			if not users_list:
+				all_users_paged = admin_client.auth.admin.list_users(page=1, per_page=1000)
+				if hasattr(all_users_paged, 'users'):
+					users_list = all_users_paged.users
+				elif hasattr(all_users_paged, 'data'):
+					users_list = all_users_paged.data
+		except Exception as e:
+			print(f"[DEBUG] Error getting users: {e}")
+			import traceback
+			traceback.print_exc()
+			users_list = []
 		
 		debug_info = {
 			"total_users": len(users_list),
