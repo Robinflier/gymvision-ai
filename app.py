@@ -2615,24 +2615,38 @@ def register_gym_account():
 			
 			# Step 3: Update metadata separately (this should work even if trigger fails)
 			try:
-				admin_client.auth.admin.update_user_by_id(user_id, {
-					"user_metadata": {
-						"is_gym_account": True,
-						"gym_name": gym_name.strip(),
-						"contact_name": contact_name.strip(),
-						"contact_phone": contact_phone.strip(),
-						"is_verified": False
-					}
+				metadata_to_set = {
+					"is_gym_account": True,
+					"gym_name": gym_name.strip(),
+					"contact_name": contact_name.strip(),
+					"contact_phone": contact_phone.strip(),
+					"is_verified": False
+				}
+				print(f"[GYM REGISTER] Step 2: Updating metadata for user {user_id} with: {metadata_to_set}")
+				
+				update_response = admin_client.auth.admin.update_user_by_id(user_id, {
+					"user_metadata": metadata_to_set
 				})
+				
+				# Verify the update worked
+				verify_user = admin_client.auth.admin.get_user_by_id(user_id)
+				if verify_user and hasattr(verify_user, 'user') and verify_user.user:
+					verified_meta = getattr(verify_user.user, 'user_metadata', {}) or getattr(verify_user.user, 'raw_user_meta_data', {}) or {}
+					print(f"[GYM REGISTER] Step 2: Verified metadata after update: {verified_meta}")
+					if verified_meta.get("is_gym_account") == True:
+						print(f"[GYM REGISTER] Step 2: ✅ Metadata successfully set - is_gym_account=True")
+					else:
+						print(f"[GYM REGISTER] Step 2: ⚠️ WARNING: Metadata update may have failed - is_gym_account={verified_meta.get('is_gym_account')}")
+				
 				user_created = True
 				print(f"[GYM REGISTER] Step 2: Successfully updated metadata for gym account: user_id={user_id}")
 			except Exception as update_error:
-				print(f"[GYM REGISTER] Warning: User created but metadata update failed: {update_error}")
+				print(f"[GYM REGISTER] ERROR: Metadata update failed: {update_error}")
 				import traceback
 				traceback.print_exc()
-				# User exists, metadata might be set by trigger or we can retry later
+				# User exists, but metadata update failed
 				user_created = True
-				print(f"[GYM REGISTER] User {user_id} created, metadata may be incomplete but account exists")
+				print(f"[GYM REGISTER] User {user_id} exists, but metadata update failed - account may not appear in admin dashboard")
 		except Exception as create_error:
 			error_str = str(create_error)
 			print(f"[GYM REGISTER] Error during create_user: {create_error}")
