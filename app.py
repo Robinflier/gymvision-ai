@@ -752,6 +752,8 @@ def list_gym_accounts():
 			all_users = admin_client.auth.admin.list_users()
 		except Exception as e:
 			print(f"[ADMIN] Error calling list_users(): {e} - returning empty list")
+			import traceback
+			traceback.print_exc()
 			return jsonify({"accounts": []}), 200
 		
 		users_list = getattr(all_users, "data", None) or getattr(all_users, "users", None) or []
@@ -759,28 +761,49 @@ def list_gym_accounts():
 		
 		# Debug: print first few users to see their metadata
 		if users_list:
-			print(f"[ADMIN] First user sample: id={users_list[0].id}, email={users_list[0].email}, metadata={users_list[0].user_metadata}")
+			try:
+				first_user = users_list[0]
+				print(f"[ADMIN] First user sample: id={getattr(first_user, 'id', 'N/A')}, email={getattr(first_user, 'email', 'N/A')}")
+				print(f"[ADMIN] First user metadata type: {type(getattr(first_user, 'user_metadata', None))}")
+				print(f"[ADMIN] First user metadata: {getattr(first_user, 'user_metadata', None)}")
+			except Exception as e:
+				print(f"[ADMIN] Error inspecting first user: {e}")
 		
 		gym_accounts = []
-		for user in users_list:
+		for idx, user in enumerate(users_list):
 			try:
-				user_meta = getattr(user, 'user_metadata', None) or {}
+				# Try different ways to get metadata
+				user_meta = {}
+				if hasattr(user, 'user_metadata'):
+					user_meta = user.user_metadata or {}
+				elif hasattr(user, 'raw_user_meta_data'):
+					user_meta = user.raw_user_meta_data or {}
+				elif isinstance(user, dict):
+					user_meta = user.get('user_metadata', {}) or user.get('raw_user_meta_data', {})
+				
 				is_gym = user_meta.get("is_gym_account") == True
-				print(f"[ADMIN] User {user.email}: is_gym_account={is_gym}, metadata={user_meta}")
+				user_email = getattr(user, 'email', None) or (user.get('email') if isinstance(user, dict) else 'unknown')
+				
+				if idx < 3:  # Only log first 3 to avoid spam
+					print(f"[ADMIN] User {user_email}: is_gym_account={is_gym}, metadata_keys={list(user_meta.keys())}")
 				
 				if is_gym:
+					user_id = getattr(user, 'id', None) or (user.get('id') if isinstance(user, dict) else None)
+					created_at = getattr(user, 'created_at', None) or (user.get('created_at') if isinstance(user, dict) else None)
+					
 					gym_accounts.append({
-						"user_id": user.id,
-						"email": user.email,
+						"user_id": user_id,
+						"email": user_email,
 						"gym_name": user_meta.get("gym_name", "Unknown"),
 						"contact_name": user_meta.get("contact_name", ""),
 						"contact_phone": user_meta.get("contact_phone", ""),
 						"is_verified": user_meta.get("is_verified", False) == True,
 						"is_premium": user_meta.get("is_premium", False) == True,
-						"created_at": getattr(user, 'created_at', None)
+						"created_at": created_at
 					})
 			except Exception as e:
-				print(f"[ADMIN] Error processing user {getattr(user, 'id', 'unknown')}: {e}")
+				user_id = getattr(user, 'id', 'unknown') if hasattr(user, 'id') else (user.get('id') if isinstance(user, dict) else 'unknown')
+				print(f"[ADMIN] Error processing user {user_id}: {e}")
 				import traceback
 				traceback.print_exc()
 				continue
