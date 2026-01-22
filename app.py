@@ -811,8 +811,17 @@ def approve_gym_account(user_id: str):
 			# Check if user is admin (by ID or email)
 			if not is_admin_user(user_response.user.id, user_response.user.email):
 				return jsonify({"error": "Admin access required"}), 403
+		except Exception as e:
+			return jsonify({"error": "Authentication error: " + str(e)}), 401
+	
+	# Update gym account (always execute, even when skip_auth is True)
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 		
-		# Update gym account
+		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 		user_to_update = admin_client.auth.admin.get_user_by_id(user_id)
 		
@@ -878,8 +887,17 @@ def reject_gym_account(user_id: str):
 			# Check if user is admin (by ID or email)
 			if not is_admin_user(user_response.user.id, user_response.user.email):
 				return jsonify({"error": "Admin access required"}), 403
+		except Exception as e:
+			return jsonify({"error": "Authentication error: " + str(e)}), 401
+	
+	# Update gym account (always execute, even when skip_auth is True)
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 		
-		# Update gym account
+		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 		user_to_update = admin_client.auth.admin.get_user_by_id(user_id)
 		
@@ -945,12 +963,20 @@ def toggle_premium_gym_account(user_id: str):
 			# Check if user is admin (by ID or email)
 			if not is_admin_user(user_response.user.id, user_response.user.email):
 				return jsonify({"error": "Admin access required"}), 403
+		except Exception as e:
+			return jsonify({"error": "Authentication error: " + str(e)}), 401
+	
+	# Get request data and update gym account (always execute, even when skip_auth is True)
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 		
-		# Get request data
+		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
 		data = request.get_json() or {}
 		is_premium = data.get("is_premium", False) == True
 		
-		# Update gym account
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 		user_to_update = admin_client.auth.admin.get_user_by_id(user_id)
 		
