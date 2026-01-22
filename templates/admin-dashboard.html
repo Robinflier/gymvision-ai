@@ -238,18 +238,23 @@
 		let supabase;
 		let currentFilter = 'all';
 
-		// Initialize Supabase and check auth
+		// Initialize Supabase and check auth - FORCE LOGIN
 		async function init() {
+			// HIDE everything until we verify login
+			document.querySelector('.admin-stats').style.display = 'none';
+			document.querySelector('.filter-tabs').style.display = 'none';
+			document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Checking authentication...</div>';
+			
 			try {
 				// Check if Supabase is loaded
 				if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
-					showError('Supabase library failed to load. Please refresh the page.');
+					redirectToLogin('Supabase library failed to load');
 					return;
 				}
 				
 				supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 				
-				// Check authentication - REQUIRED
+				// FORCE CHECK AUTHENTICATION - NO EXCEPTIONS
 				const { data: { session }, error } = await supabase.auth.getSession();
 				
 				if (error) {
@@ -258,27 +263,53 @@
 					return;
 				}
 				
-				if (!session || !session.user) {
-					console.log('[ADMIN] No session found, redirecting to login');
+				if (!session || !session.user || !session.access_token) {
+					console.log('[ADMIN] No valid session found, redirecting to login');
 					redirectToLogin('Please log in to access the admin dashboard');
 					return;
 				}
 				
+				// Verify token is still valid by making a test call
+				try {
+					const testResponse = await fetch('/api/admin/gym-accounts', {
+						headers: {
+							'Authorization': `Bearer ${session.access_token}`
+						}
+					});
+					
+					if (testResponse.status === 401) {
+						redirectToLogin('Session expired. Please log in again');
+						return;
+					}
+				} catch (e) {
+					console.error('[ADMIN] Token validation error:', e);
+				}
+				
 				console.log('[ADMIN] Authenticated as:', session.user.email);
+				
+				// SHOW everything now that we're authenticated
+				document.querySelector('.admin-stats').style.display = 'grid';
+				document.querySelector('.filter-tabs').style.display = 'flex';
+				
 				loadGymAccounts();
 			} catch (error) {
 				console.error('[ADMIN] Error initializing:', error);
-				showError('Failed to initialize: ' + error.message);
-				setTimeout(() => redirectToLogin(), 2000);
+				redirectToLogin('Failed to initialize: ' + error.message);
 			}
 		}
 
 		function redirectToLogin(message) {
-			showError(message + '. Redirecting to login...');
+			// HIDE everything
+			document.querySelector('.admin-stats').style.display = 'none';
+			document.querySelector('.filter-tabs').style.display = 'none';
+			
+			if (message) {
+				showError(message + '. Redirecting to login...');
+			}
 			document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Redirecting to login...</div>';
-			setTimeout(() => {
-				window.location.href = '/login?redirect=/admin-dashboard';
-			}, 1500);
+			
+			// IMMEDIATE redirect - no delay
+			window.location.href = '/login?redirect=/admin-dashboard';
 		}
 
 		async function loadGymAccounts() {
