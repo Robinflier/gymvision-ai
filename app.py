@@ -2559,10 +2559,11 @@ def register_gym_account():
 		# The trigger on_auth_user_created might fail if we set metadata during creation
 		try:
 			# Step 1: Create user with NO metadata to avoid any trigger errors
+			# Note: email_confirm is False - gym accounts must verify their email like regular users
 			user_response = admin_client.auth.admin.create_user({
 				"email": email,
 				"password": password,
-				"email_confirm": True,  # Auto-confirm email for gym accounts
+				"email_confirm": False,  # Require email verification for security
 				# Explicitly set empty metadata to avoid trigger issues
 				"user_metadata": {}
 			})
