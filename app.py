@@ -2582,8 +2582,7 @@ def register_gym_account():
 	if request.method == "OPTIONS":
 		return jsonify({}), 200
 	return jsonify({"error": "This endpoint is deprecated. Use Supabase signUp instead."}), 410
-		# supabase-py v2 returns `.data`; older variants may return `.users`
-		users_list = getattr(all_users, "data", None)
+@app.route("/api/gym/dashboard", methods=["GET", "OPTIONS"])
 		if users_list is None:
 			users_list = getattr(all_users, "users", None)
 		if users_list is None and isinstance(all_users, dict):
