@@ -258,11 +258,13 @@
 				// First, try to get session
 				let { data: { session }, error } = await supabase.auth.getSession();
 				
-				// If no session, try to sign out any stale sessions
+				// If no session, IMMEDIATELY redirect - no exceptions
 				if (!session || !session.user || !session.access_token) {
-					console.log('[ADMIN] No valid session, signing out and redirecting');
+					console.log('[ADMIN] No valid session, redirecting immediately');
+					// Clear any stale session data
 					await supabase.auth.signOut().catch(() => {});
-					redirectToLogin('Please log in to access the admin dashboard');
+					// IMMEDIATE redirect - no delay
+					window.location.replace('/login?redirect=/admin-dashboard');
 					return;
 				}
 				
@@ -312,8 +314,8 @@
 			}
 			document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Redirecting to login...</div>';
 			
-			// IMMEDIATE redirect - no delay
-			window.location.href = '/login?redirect=/admin-dashboard';
+			// IMMEDIATE redirect - use replace() to prevent back button
+			window.location.replace('/login?redirect=/admin-dashboard');
 		}
 
 		async function loadGymAccounts() {
