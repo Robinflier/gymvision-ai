@@ -738,9 +738,41 @@ def list_gym_accounts():
 		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
 			return jsonify({"error": "Supabase configuration missing"}), 500
 		
+		print("[ADMIN] Fetching all users from Supabase...")
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-		all_users = admin_client.auth.admin.list_users()
-		users_list = getattr(all_users, "data", None) or getattr(all_users, "users", None) or []
+		
+		# Add timeout protection - if this hangs, return empty list after 8 seconds
+		import signal
+		import threading
+		
+		result = {"users": None, "error": None}
+		
+		def fetch_users():
+			try:
+				all_users = admin_client.auth.admin.list_users()
+				result["users"] = all_users
+			except Exception as e:
+				result["error"] = str(e)
+		
+		fetch_thread = threading.Thread(target=fetch_users)
+		fetch_thread.daemon = True
+		fetch_thread.start()
+		fetch_thread.join(timeout=8)  # 8 second timeout
+		
+		if fetch_thread.is_alive():
+			print("[ADMIN] WARNING: list_users() took too long, returning empty list")
+			return jsonify({"accounts": []}), 200
+		
+		if result["error"]:
+			print(f"[ADMIN] Error fetching users: {result['error']}")
+			return jsonify({"error": f"Failed to fetch users: {result['error']}"}), 500
+		
+		if not result["users"]:
+			print("[ADMIN] No users returned from Supabase")
+			return jsonify({"accounts": []}), 200
+		
+		users_list = getattr(result["users"], "data", None) or getattr(result["users"], "users", None) or []
+		print(f"[ADMIN] Found {len(users_list)} total users, filtering for gym accounts...")
 		
 		gym_accounts = []
 		for user in users_list:
@@ -756,6 +788,8 @@ def list_gym_accounts():
 					"is_premium": user_meta.get("is_premium", False) == True,
 					"created_at": user.created_at
 				})
+		
+		print(f"[ADMIN] Found {len(gym_accounts)} gym accounts")
 		
 		# Sort by created_at (newest first)
 		gym_accounts.sort(key=lambda x: x.get("created_at", ""), reverse=True)
