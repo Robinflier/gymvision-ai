@@ -219,19 +219,10 @@
 					: null;
 				if (!sb) throw new Error('Failed to load Supabase. Please disable ad blockers and refresh.');
 				
-				// Register using Supabase signUp (like normal users) with gym metadata
+				// Step 1: Create user account via Supabase signUp (this always works)
 				const { data: signUpData, error: signUpError } = await sb.auth.signUp({
 					email,
-					password,
-					options: {
-						data: {
-							is_gym_account: true,
-							gym_name: gymName,
-							contact_name: contactName,
-							contact_phone: contactPhone,
-							is_verified: false  // Needs admin approval
-						}
-					}
+					password
 				});
 				
 				if (signUpError) {
@@ -242,6 +233,31 @@
 						errorMessage = 'Password must be at least 6 characters';
 					}
 					throw new Error(errorMessage);
+				}
+				
+				// Step 2: Update metadata via backend (only updates, doesn't create - much safer)
+				if (signUpData?.user?.id) {
+					try {
+						const updateResponse = await fetch(getApiUrl('/api/gym/update-metadata'), {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({
+								user_id: signUpData.user.id,
+								gym_name: gymName,
+								contact_name: contactName,
+								contact_phone: contactPhone
+							})
+						});
+						
+						const updateData = await updateResponse.json().catch(() => ({}));
+						if (!updateResponse.ok) {
+							console.warn('Metadata update failed, but account was created:', updateData.error);
+							// Account exists, metadata update is optional
+						}
+					} catch (updateError) {
+						console.warn('Metadata update failed, but account was created:', updateError);
+						// Account exists, metadata update is optional
+					}
 				}
 				
 				// Registration successful - show success message

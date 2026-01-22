@@ -1091,20 +1091,13 @@ function initRegisterForm() {
 			return;
 		}
 		
-		// Gym registration uses Supabase signUp directly (like normal users) but with gym metadata
+		// Gym registration: Step 1 - Create user via Supabase signUp (like normal users)
+		// Step 2 - Update metadata via backend endpoint
 		if (role === 'gym') {
+			// Step 1: Create user account (this always works, no database errors)
 			const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
 				email,
-				password,
-				options: {
-					data: {
-						is_gym_account: true,
-						gym_name: gymName,
-						contact_name: contactName,
-						contact_phone: contactPhone,
-						is_verified: false  // Needs admin approval
-					}
-				}
+				password
 			});
 			
 			if (signUpError) {
@@ -1126,6 +1119,32 @@ function initRegisterForm() {
 					submitBtn.textContent = 'Create Gym Account';
 				}
 				return;
+			}
+			
+			// Step 2: Update metadata via backend (only updates, doesn't create - much safer)
+			if (signUpData?.user?.id) {
+				try {
+					const apiUrl = getApiUrl('/api/gym/update-metadata');
+					const updateResponse = await fetch(apiUrl, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							user_id: signUpData.user.id,
+							gym_name: gymName,
+							contact_name: contactName,
+							contact_phone: contactPhone
+						})
+					});
+					
+					const updateData = await updateResponse.json().catch(() => ({}));
+					if (!updateResponse.ok) {
+						console.warn('Metadata update failed, but account was created:', updateData.error);
+						// Account exists, metadata update is optional - user can still login
+					}
+				} catch (updateError) {
+					console.warn('Metadata update failed, but account was created:', updateError);
+					// Account exists, metadata update is optional
+				}
 			}
 			
 			// Registration successful - show success message

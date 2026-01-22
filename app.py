@@ -2500,11 +2500,12 @@ def sync_gym_data():
 		return jsonify({"error": f"Failed to sync gym data: {str(e)}"}), 500
 
 
-@app.route("/api/gym/register", methods=["POST", "OPTIONS"])
-def register_gym_account():
+@app.route("/api/gym/update-metadata", methods=["POST", "OPTIONS"])
+def update_gym_metadata():
 	"""
-	Register a new gym account.
-	Creates a Supabase user with is_gym_account flag in metadata.
+	Update user metadata to mark account as gym account.
+	User must already be created via Supabase signUp (frontend).
+	This endpoint only updates metadata, doesn't create users.
 	"""
 	if request.method == "OPTIONS":
 		return jsonify({}), 200
@@ -2514,14 +2515,13 @@ def register_gym_account():
 	
 	try:
 		data = request.get_json()
-		email = data.get("email")
-		password = data.get("password")
+		user_id = data.get("user_id")  # User ID from signUp response
 		gym_name = data.get("gym_name")
 		contact_name = data.get("contact_name", "")
 		contact_phone = data.get("contact_phone", "")
 		
-		if not email or not password or not gym_name:
-			return jsonify({"error": "Email, password, and gym name are required"}), 400
+		if not user_id or not gym_name:
+			return jsonify({"error": "User ID and gym name are required"}), 400
 		
 		SUPABASE_URL = os.getenv("SUPABASE_URL")
 		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
@@ -2530,6 +2530,58 @@ def register_gym_account():
 			return jsonify({"error": "Supabase configuration missing"}), 500
 		
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		
+		# Get current metadata
+		try:
+			user_detail = admin_client.auth.admin.get_user_by_id(user_id)
+			current_meta = {}
+			if user_detail and hasattr(user_detail, 'user') and user_detail.user:
+				current_meta = getattr(user_detail.user, 'user_metadata', {}) or getattr(user_detail.user, 'raw_user_meta_data', {}) or {}
+		except Exception as e:
+			print(f"[GYM UPDATE] Error getting user: {e}")
+			return jsonify({"error": "User not found"}), 404
+		
+		# Update metadata
+		updated_meta = current_meta.copy() if current_meta else {}
+		updated_meta.update({
+			"is_gym_account": True,
+			"gym_name": gym_name.strip(),
+			"contact_name": contact_name.strip(),
+			"contact_phone": contact_phone.strip(),
+			"is_verified": False
+		})
+		
+		try:
+			admin_client.auth.admin.update_user_by_id(user_id, {
+				"user_metadata": updated_meta
+			})
+			print(f"[GYM UPDATE] Successfully updated metadata for user {user_id}")
+			return jsonify({
+				"success": True,
+				"message": "Gym account metadata updated successfully"
+			}), 200
+		except Exception as update_error:
+			print(f"[GYM UPDATE] Error updating metadata: {update_error}")
+			import traceback
+			traceback.print_exc()
+			return jsonify({"error": f"Failed to update metadata: {str(update_error)}"}), 500
+		
+	except Exception as e:
+		print(f"[GYM UPDATE] Error: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to update gym metadata: {str(e)}"}), 500
+
+
+@app.route("/api/gym/register", methods=["POST", "OPTIONS"])
+def register_gym_account():
+	"""
+	DEPRECATED: This endpoint is no longer used.
+	Gym accounts are now created via Supabase signUp (frontend) and metadata is updated via /api/gym/update-metadata
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	return jsonify({"error": "This endpoint is deprecated. Use Supabase signUp instead."}), 410
 		
 		# Check if gym name already exists
 		all_users = admin_client.auth.admin.list_users()
