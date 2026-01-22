@@ -2789,13 +2789,6 @@ def register_gym_account():
 					return jsonify({"error": "Failed to create gym account due to a database error. This may be a temporary issue. Please try again in a few moments or contact support."}), 500
 				else:
 					return jsonify({"error": f"Failed to create gym account: {error_str}"}), 500
-					# This shouldn't happen if we checked above, but just in case
-					return jsonify({"error": "An account with this email already exists. Please use a different email or try logging in."}), 400
-				elif "Database error" in error_str:
-					# Database error - account creation failed completely
-					return jsonify({"error": "Failed to create gym account due to a database error. This may be a temporary issue. Please try again in a few moments or contact support."}), 500
-				else:
-					return jsonify({"error": f"Failed to create gym account: {error_str}"}), 500
 		
 		# If account was created, ensure metadata is set correctly
 		if user_id:
