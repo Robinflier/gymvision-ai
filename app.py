@@ -802,8 +802,11 @@ def list_gym_accounts():
 				
 				is_gym = user_meta.get("is_gym_account") == True
 				
-				if idx < 5:  # Log first 5 to see what's happening
+				# Log all users to see what's happening (not just first 5)
+				if is_gym or idx < 10:  # Log gym accounts and first 10 regular users
 					print(f"[ADMIN] User {user_email} (id={user_id}): is_gym_account={is_gym}, has_metadata={bool(user_meta)}, metadata_keys={list(user_meta.keys()) if user_meta else []}")
+					if user_meta:
+						print(f"[ADMIN]   Full metadata: {user_meta}")
 				
 				if is_gym:
 					created_at = getattr(user, 'created_at', None) or (user.get('created_at') if isinstance(user, dict) else None)
