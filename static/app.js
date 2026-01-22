@@ -530,9 +530,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 			hasSession = false;
 		}
 		
-		// If no session, show login screen and stop
+		// If no session, check if we're on login page
 		if (!hasSession) {
-			console.log('[INIT] No session - showing login screen');
+			console.log('[INIT] No session');
+			// If we're already on login page, don't interfere - let login page handle it
+			if (window.location.pathname === '/login') {
+				console.log('[INIT] Already on login page - letting it handle auth');
+				hideLoadingOverlay();
+				return;
+			}
+			// Otherwise show login screen
+			console.log('[INIT] Showing login screen');
 			showLoginScreen();
 			hideLoadingOverlay();
 		return;
