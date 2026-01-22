@@ -649,50 +649,10 @@ def gym_dashboard():
 def admin_dashboard():
 	"""
 	Admin dashboard page for managing gym accounts. 
-	REQUIRES LOGIN - Will redirect to login if not authenticated.
+	REQUIRES LOGIN - Frontend will show login form if not authenticated.
+	We don't check auth server-side because Supabase sessions are client-side only.
+	The frontend JavaScript will handle authentication and show/hide the login form.
 	"""
-	# Check for Supabase session token in cookies or Authorization header
-	auth_token = None
-	
-	# Try to get token from Authorization header (if coming from API redirect)
-	auth_header = request.headers.get("Authorization")
-	if auth_header and auth_header.startswith("Bearer "):
-		auth_token = auth_header.replace("Bearer ", "").strip()
-	
-	# Try to get from cookies (Supabase stores session in cookies)
-	for cookie in request.cookies:
-		if 'sb-' in cookie.lower() and 'token' in cookie.lower():
-			auth_token = request.cookies.get(cookie)
-			break
-	
-	# If no token found, redirect to login immediately
-	if not auth_token:
-		return redirect("/login?redirect=/admin-dashboard")
-	
-	# If we have a token, verify it's valid
-	if SUPABASE_AVAILABLE and auth_token:
-		try:
-			SUPABASE_URL = os.getenv("SUPABASE_URL")
-			SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
-			
-			if SUPABASE_URL and SUPABASE_ANON_KEY:
-				supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-				user_response = supabase_client.auth.get_user(auth_token)
-				
-				# If token is invalid, redirect to login
-				if not user_response.user:
-					return redirect("/login?redirect=/admin-dashboard")
-				
-				# Check if user is admin
-				if not is_admin_user(user_response.user.id, user_response.user.email):
-					# Not admin - show error page or redirect
-					return redirect("/login?redirect=/admin-dashboard&error=admin_required")
-		except Exception as e:
-			# Token invalid or error - redirect to login
-			print(f"[ADMIN DASHBOARD] Auth check error: {e}")
-			return redirect("/login?redirect=/admin-dashboard")
-	
-	# If we get here, user is authenticated (or we couldn't verify, let frontend handle it)
 	supabase_url = os.getenv("SUPABASE_URL") or ""
 	supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or ""
 	return render_template("admin-dashboard.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
