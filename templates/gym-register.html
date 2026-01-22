@@ -191,7 +191,7 @@
 			return path;
 		}
 		
-		// Handle registration form
+		// Handle registration form - use Supabase signUp directly (like normal users)
 		document.getElementById('gym-register-form').addEventListener('submit', async (e) => {
 			e.preventDefault();
 			const submitBtn = document.getElementById('submit-btn');
@@ -202,47 +202,60 @@
 			const contactName = document.getElementById('contact-name').value.trim();
 			const contactPhone = document.getElementById('contact-phone').value.trim();
 			
+			if (!gymName || !email || !password) {
+				errorMsg.textContent = 'Please fill in all required fields';
+				errorMsg.classList.add('show');
+				return;
+			}
+			
 			submitBtn.disabled = true;
 			submitBtn.textContent = 'Registering...';
 			errorMsg.classList.remove('show');
 			
 			try {
-				const response = await fetch(getApiUrl('/api/gym/register'), {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json'
-					},
-					body: JSON.stringify({
-						gym_name: gymName,
-						email,
-						password,
-						contact_name: contactName,
-						contact_phone: contactPhone
-					})
-				});
-				
-				const data = await response.json();
-				
-				if (!response.ok) {
-					throw new Error(data.error || 'Registration failed');
-				}
-				
-				// Auto-login after registration
+				// Initialize Supabase client
 				const sb = (window.supabase && window.supabase.createClient)
 					? window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY)
 					: null;
 				if (!sb) throw new Error('Failed to load Supabase. Please disable ad blockers and refresh.');
-				const { data: loginData, error: loginError } = await sb.auth.signInWithPassword({
+				
+				// Register using Supabase signUp (like normal users) with gym metadata
+				const { data: signUpData, error: signUpError } = await sb.auth.signUp({
 					email,
-					password
+					password,
+					options: {
+						data: {
+							is_gym_account: true,
+							gym_name: gymName,
+							contact_name: contactName,
+							contact_phone: contactPhone,
+							is_verified: false  // Needs admin approval
+						}
+					}
 				});
 				
-				if (loginError) throw loginError;
+				if (signUpError) {
+					let errorMessage = signUpError.message;
+					if (signUpError.message.includes('already registered') || signUpError.message.includes('already exists')) {
+						errorMessage = 'This email is already registered. Please sign in instead.';
+					} else if (signUpError.message.includes('Password')) {
+						errorMessage = 'Password must be at least 6 characters';
+					}
+					throw new Error(errorMessage);
+				}
 				
-				// Redirect to dashboard
-				window.location.href = '/gym-dashboard';
+				// Registration successful - show success message
+				errorMsg.textContent = 'Gym account created successfully! Your account needs to be verified by an administrator before you can access the dashboard.';
+				errorMsg.style.background = '#10b981';
+				errorMsg.classList.add('show');
+				
+				// Redirect to login after a moment
+				setTimeout(() => {
+					window.location.href = '/gym-login';
+				}, 2000);
 			} catch (error) {
 				errorMsg.textContent = error.message || 'Failed to register';
+				errorMsg.style.background = '#ef4444';
 				errorMsg.classList.add('show');
 				submitBtn.disabled = false;
 				submitBtn.textContent = 'Register';
