@@ -647,7 +647,12 @@ def gym_dashboard():
 
 @app.route("/admin-dashboard", methods=["GET"])
 def admin_dashboard():
-	"""Admin dashboard page for managing gym accounts. Requires login."""
+	"""
+	Admin dashboard page for managing gym accounts. 
+	REQUIRES LOGIN - Frontend will redirect if not authenticated.
+	Note: We don't check auth server-side here because Supabase handles it client-side.
+	The frontend JavaScript will redirect to /login if no valid session exists.
+	"""
 	supabase_url = os.getenv("SUPABASE_URL") or ""
 	supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or ""
 	return render_template("admin-dashboard.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
