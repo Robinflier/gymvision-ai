@@ -800,13 +800,20 @@ def list_gym_accounts():
 						elif isinstance(user, dict):
 							user_meta = user.get('user_metadata', {}) or user.get('raw_user_meta_data', {})
 				
-				is_gym = user_meta.get("is_gym_account") == True
+				# Check if user is a gym account - handle both boolean True and string "true"
+				is_gym_value = user_meta.get("is_gym_account")
+				is_gym = is_gym_value == True or is_gym_value == "true" or str(is_gym_value).lower() == "true"
 				
 				# Log all users to see what's happening (not just first 5)
 				if is_gym or idx < 10:  # Log gym accounts and first 10 regular users
 					print(f"[ADMIN] User {user_email} (id={user_id}): is_gym_account={is_gym}, has_metadata={bool(user_meta)}, metadata_keys={list(user_meta.keys()) if user_meta else []}")
 					if user_meta:
 						print(f"[ADMIN]   Full metadata: {user_meta}")
+					if not is_gym and user_meta:
+						# Check if metadata has gym-related fields but is_gym_account is missing/wrong
+						if user_meta.get("gym_name") or user_meta.get("contact_name"):
+							print(f"[ADMIN]   WARNING: User has gym fields but is_gym_account is not set correctly!")
+							print(f"[ADMIN]   is_gym_account value: {user_meta.get('is_gym_account')} (type: {type(user_meta.get('is_gym_account'))})")
 				
 				if is_gym:
 					created_at = getattr(user, 'created_at', None) or (user.get('created_at') if isinstance(user, dict) else None)
@@ -2582,6 +2589,79 @@ def register_gym_account():
 	if request.method == "OPTIONS":
 		return jsonify({}), 200
 	return jsonify({"error": "This endpoint is deprecated. Use Supabase signUp instead."}), 410
+
+
+@app.route("/api/admin/debug-gym-accounts", methods=["GET", "OPTIONS"])
+def debug_gym_accounts():
+	"""
+	Debug endpoint to check what gym accounts exist and their metadata.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+		
+		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		all_users = admin_client.auth.admin.list_users()
+		users_list = getattr(all_users, "data", None) or getattr(all_users, "users", None) or []
+		
+		debug_info = {
+			"total_users": len(users_list),
+			"users_with_metadata": [],
+			"gym_accounts_found": []
+		}
+		
+		for user in users_list[:50]:  # Check first 50 users
+			try:
+				user_id = getattr(user, 'id', None) or (user.get('id') if isinstance(user, dict) else None)
+				user_email = getattr(user, 'email', None) or (user.get('email') if isinstance(user, dict) else 'unknown')
+				
+				# Get full user details
+				user_detail = admin_client.auth.admin.get_user_by_id(user_id)
+				user_obj = user_detail.user if hasattr(user_detail, 'user') else None
+				
+				user_meta = {}
+				if user_obj:
+					if hasattr(user_obj, 'user_metadata') and user_obj.user_metadata:
+						user_meta = user_obj.user_metadata
+					elif hasattr(user_obj, 'raw_user_meta_data') and user_obj.raw_user_meta_data:
+						user_meta = user_obj.raw_user_meta_data
+				
+				if user_meta:
+					is_gym_value = user_meta.get("is_gym_account")
+					is_gym = is_gym_value == True or is_gym_value == "true" or str(is_gym_value).lower() == "true"
+					
+					debug_info["users_with_metadata"].append({
+						"email": user_email,
+						"id": user_id,
+						"metadata": user_meta,
+						"is_gym_account_value": is_gym_value,
+						"is_gym_account_type": str(type(is_gym_value)),
+						"is_gym": is_gym
+					})
+					
+					if is_gym:
+						debug_info["gym_accounts_found"].append({
+							"email": user_email,
+							"id": user_id,
+							"gym_name": user_meta.get("gym_name"),
+							"is_verified": user_meta.get("is_verified"),
+							"metadata": user_meta
+						})
+			except Exception as e:
+				continue
+		
+		return jsonify(debug_info), 200
+	except Exception as e:
+		return jsonify({"error": str(e)}), 500
 @app.route("/api/gym/dashboard", methods=["GET", "OPTIONS"])
 def get_gym_dashboard():
 	"""
