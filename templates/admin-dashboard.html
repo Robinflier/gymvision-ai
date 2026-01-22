@@ -273,8 +273,8 @@
 	</style>
 </head>
 <body>
-	<!-- LOGIN FORM - shown if not authenticated -->
-	<div id="login-container" class="login-container">
+	<!-- LOGIN FORM - TEMPORARILY HIDDEN -->
+	<div id="login-container" class="login-container" style="display: none;">
 		<div class="login-card">
 			<h1>🔐 Admin Dashboard</h1>
 			<p>Please log in to access the admin panel</p>
@@ -342,14 +342,14 @@
 
 		// Initialize Supabase
 		async function init() {
-			console.log('[ADMIN INIT] Starting initialization...');
 			console.log('[ADMIN INIT] TEMPORARILY DISABLED AUTH - showing dashboard directly');
 			
-			// TEMPORARILY DISABLED AUTH - show dashboard directly
+			// TEMPORARILY DISABLED AUTH - show dashboard directly, NO LOGIN CHECK
 			document.getElementById('login-container').style.display = 'none';
+			document.getElementById('admin-container').style.display = 'block';
 			document.getElementById('admin-container').classList.add('authenticated');
 			
-			// Try to load gym accounts (will fail without auth, but we can see the UI)
+			// Load gym accounts
 			try {
 				const response = await fetch('/api/admin/gym-accounts');
 				if (response.ok) {
@@ -357,7 +357,8 @@
 					renderGymAccounts(data.accounts || []);
 					updateStats(data.accounts || []);
 				} else {
-					showError('Cannot load gym accounts without authentication. This is expected.');
+					const errorText = await response.text();
+					showError('Failed to load gym accounts: ' + errorText);
 				}
 			} catch (error) {
 				console.error('[ADMIN] Error loading gym accounts:', error);
