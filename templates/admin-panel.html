@@ -270,17 +270,38 @@
 
 		async function loadGymAccounts() {
 			try {
+				const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+				
+				if (sessionError) {
+					console.error('[ADMIN] Session error:', sessionError);
+					showError('Error checking authentication. Please refresh the page.');
+					document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Authentication error.</div>';
+					return;
+				}
+				
+				if (!session || !session.user) {
+					showError('Please log in to access the admin panel. <a href="/login" style="color: #667eea; text-decoration: underline;">Go to login</a>');
+					document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Please log in first.</div>';
+					return;
+				}
+
+				console.log('[ADMIN] Loading gym accounts for:', session.user.email);
 				const response = await fetch('/api/admin/gym-accounts', {
 					headers: {
-						'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session.access_token}`
+						'Authorization': `Bearer ${session.access_token}`
 					}
 				});
 
 				if (!response.ok) {
-					if (response.status === 403) {
-						showError('You do not have admin access.');
+					if (response.status === 401) {
+						showError('Please log in to access the admin panel. <a href="/login" style="color: #667eea; text-decoration: underline;">Go to login</a>');
+						document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Please log in first.</div>';
+					} else if (response.status === 403) {
+						showError('You do not have admin access. Make sure your User ID or Email is in ADMIN_USER_IDS or ADMIN_USER_EMAILS in Render.');
+						document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Access denied.</div>';
 					} else {
-						showError('Failed to load gym accounts.');
+						const errorData = await response.json().catch(() => ({}));
+						showError('Failed to load gym accounts: ' + (errorData.error || 'Unknown error'));
 					}
 					return;
 				}
@@ -289,8 +310,8 @@
 				renderGymAccounts(data.accounts || []);
 				updateStats(data.accounts || []);
 			} catch (error) {
-				console.error('Error loading gym accounts:', error);
-				showError('Failed to load gym accounts.');
+				console.error('[ADMIN] Error loading gym accounts:', error);
+				showError('Failed to load gym accounts: ' + error.message);
 			}
 		}
 
