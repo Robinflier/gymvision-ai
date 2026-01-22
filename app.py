@@ -2556,38 +2556,52 @@ def register_gym_account():
 		
 		# Strategy: Create user WITHOUT metadata first to avoid trigger issues
 		# Then update metadata separately
+		# The trigger on_auth_user_created might fail if we set metadata during creation
 		try:
-			# Step 1: Create user with minimal metadata (or none) to avoid trigger errors
+			# Step 1: Create user with NO metadata to avoid any trigger errors
 			user_response = admin_client.auth.admin.create_user({
 				"email": email,
 				"password": password,
 				"email_confirm": True,  # Auto-confirm email for gym accounts
-				# Don't set user_metadata here - triggers might fail
-				# We'll set it in step 2
+				# Explicitly set empty metadata to avoid trigger issues
+				"user_metadata": {}
 			})
 			
-			if user_response.user:
+			if user_response and hasattr(user_response, 'user') and user_response.user:
 				user_id = user_response.user.id
 				print(f"[GYM REGISTER] Step 1: Created user without metadata: user_id={user_id}")
-				
-				# Step 2: Update metadata separately (this should work even if trigger fails)
-				try:
-					admin_client.auth.admin.update_user_by_id(user_id, {
-						"user_metadata": {
-							"is_gym_account": True,
-							"gym_name": gym_name.strip(),
-							"contact_name": contact_name.strip(),
-							"contact_phone": contact_phone.strip(),
-							"is_verified": False
-						}
-					})
-					user_created = True
-					print(f"[GYM REGISTER] Step 2: Successfully updated metadata for gym account: user_id={user_id}")
-				except Exception as update_error:
-					print(f"[GYM REGISTER] Warning: User created but metadata update failed: {update_error}")
-					# User exists, metadata might be set by trigger or we can retry later
-					user_created = True
-					print(f"[GYM REGISTER] User {user_id} created, metadata may be incomplete but account exists")
+			else:
+				# Sometimes the response structure is different
+				if hasattr(user_response, 'id'):
+					user_id = user_response.id
+					print(f"[GYM REGISTER] Step 1: Created user (alternative response format): user_id={user_id}")
+				else:
+					raise Exception("User creation succeeded but no user ID returned")
+			
+			# Step 2: Wait a moment for triggers to complete, then update metadata
+			import time
+			time.sleep(0.5)  # Small delay to let triggers finish
+			
+			# Step 3: Update metadata separately (this should work even if trigger fails)
+			try:
+				admin_client.auth.admin.update_user_by_id(user_id, {
+					"user_metadata": {
+						"is_gym_account": True,
+						"gym_name": gym_name.strip(),
+						"contact_name": contact_name.strip(),
+						"contact_phone": contact_phone.strip(),
+						"is_verified": False
+					}
+				})
+				user_created = True
+				print(f"[GYM REGISTER] Step 2: Successfully updated metadata for gym account: user_id={user_id}")
+			except Exception as update_error:
+				print(f"[GYM REGISTER] Warning: User created but metadata update failed: {update_error}")
+				import traceback
+				traceback.print_exc()
+				# User exists, metadata might be set by trigger or we can retry later
+				user_created = True
+				print(f"[GYM REGISTER] User {user_id} created, metadata may be incomplete but account exists")
 		except Exception as create_error:
 			error_str = str(create_error)
 			print(f"[GYM REGISTER] Error during create_user: {create_error}")
