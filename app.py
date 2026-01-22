@@ -2656,6 +2656,7 @@ def register_gym_account():
 			# ALWAYS check if user was created despite the error
 			# This handles both "already exists" and "database error" cases
 			user_exists = False
+			user_id = None
 			try:
 				all_users = admin_client.auth.admin.list_users()
 				users_list = getattr(all_users, "data", None) or []
@@ -2672,6 +2673,7 @@ def register_gym_account():
 			
 			# If user exists (either from error or was created), update metadata
 			if user_exists and user_id:
+				print(f"[GYM REGISTER] User exists despite error, will update metadata: {user_id}")
 				try:
 					# Get current metadata
 					user_detail = admin_client.auth.admin.get_user_by_id(user_id)
