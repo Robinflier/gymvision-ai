@@ -4,6 +4,24 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>Admin Dashboard - GymVision AI</title>
+	<!-- IMMEDIATE AUTH CHECK - happens before page renders -->
+	<script>
+		// Check for Supabase session in localStorage/cookies BEFORE anything loads
+		(function() {
+			// Check if we have a Supabase session stored
+			const hasSession = localStorage.getItem('sb-jugdkqzhcbqbjbvktqlz-auth-token') || 
+			                   document.cookie.includes('sb-') ||
+			                   sessionStorage.getItem('supabase.auth.token');
+			
+			if (!hasSession) {
+				// NO SESSION - redirect immediately
+				window.location.replace('/login?redirect=/admin-dashboard');
+				return;
+			}
+			
+			// If we get here, there might be a session, but we'll verify it properly after Supabase loads
+		})();
+	</script>
 	<link rel="stylesheet" href="/static/styles.css">
 	<!-- Supabase library - MUST load before script -->
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
