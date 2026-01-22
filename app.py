@@ -2653,30 +2653,55 @@ def debug_gym_accounts():
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 		
 		# Try to get users with better error handling
+		all_users = None
+		users_list = []
+		
 		try:
 			all_users = admin_client.auth.admin.list_users()
 			print(f"[DEBUG] list_users() response type: {type(all_users)}")
+			print(f"[DEBUG] list_users() response dir: {[x for x in dir(all_users) if not x.startswith('_')][:20]}")
 			
-			users_list = []
+			# Try multiple ways to access users
 			if hasattr(all_users, 'users'):
 				users_list = all_users.users
+				print(f"[DEBUG] Found {len(users_list)} users via .users")
 			elif hasattr(all_users, 'data'):
 				users_list = all_users.data
+				print(f"[DEBUG] Found {len(users_list)} users via .data")
 			elif isinstance(all_users, dict):
 				users_list = all_users.get('users', []) or all_users.get('data', [])
+				print(f"[DEBUG] Found {len(users_list)} users via dict")
+			elif hasattr(all_users, 'model_dump'):
+				data = all_users.model_dump()
+				users_list = data.get('users', []) or data.get('data', [])
+				print(f"[DEBUG] Found {len(users_list)} users via model_dump")
+			elif hasattr(all_users, '__dict__'):
+				data = all_users.__dict__
+				users_list = data.get('users', []) or data.get('data', [])
+				print(f"[DEBUG] Found {len(users_list)} users via __dict__")
 			else:
 				try:
 					users_list = list(all_users) if all_users else []
+					print(f"[DEBUG] Found {len(users_list)} users via list()")
 				except:
-					pass
+					print("[DEBUG] Could not convert to list")
 			
 			# Try with pagination if empty
 			if not users_list:
-				all_users_paged = admin_client.auth.admin.list_users(page=1, per_page=1000)
-				if hasattr(all_users_paged, 'users'):
-					users_list = all_users_paged.users
-				elif hasattr(all_users_paged, 'data'):
-					users_list = all_users_paged.data
+				print("[DEBUG] Trying with pagination...")
+				try:
+					all_users_paged = admin_client.auth.admin.list_users(page=1, per_page=1000)
+					if hasattr(all_users_paged, 'users'):
+						users_list = all_users_paged.users
+						print(f"[DEBUG] Found {len(users_list)} users via pagination .users")
+					elif hasattr(all_users_paged, 'data'):
+						users_list = all_users_paged.data
+						print(f"[DEBUG] Found {len(users_list)} users via pagination .data")
+				except Exception as page_e:
+					print(f"[DEBUG] Pagination failed: {page_e}")
+			
+			if not users_list:
+				print(f"[DEBUG] WARNING: No users found. Response: {repr(all_users)[:200]}")
 		except Exception as e:
 			print(f"[DEBUG] Error getting users: {e}")
 			import traceback
