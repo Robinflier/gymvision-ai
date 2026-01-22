@@ -240,10 +240,20 @@
 					
 					const sb = window.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 					
-					// Step 1: Create user account via Supabase signUp (this always works)
+					// Create user account via Supabase signUp with metadata directly
+					// This ensures metadata is set immediately during account creation
 					const { data: signUpData, error: signUpError } = await sb.auth.signUp({
 						email,
-						password
+						password,
+						options: {
+							data: {
+								is_gym_account: true,
+								gym_name: gymName,
+								contact_name: contactName,
+								contact_phone: contactPhone,
+								is_verified: false
+							}
+						}
 					});
 					
 					if (signUpError) {
@@ -260,7 +270,8 @@
 						throw new Error('Account creation failed. Please try again.');
 					}
 					
-					// Step 2: Update metadata via backend (only updates, doesn't create - much safer)
+					// Double-check: Also update via backend to ensure metadata is set correctly
+					// (Sometimes Supabase signUp metadata doesn't persist, so this is a backup)
 					try {
 						const updateResponse = await fetch(getApiUrl('/api/gym/update-metadata'), {
 							method: 'POST',
@@ -275,24 +286,14 @@
 						
 						const updateData = await updateResponse.json().catch(() => ({}));
 						if (!updateResponse.ok) {
-							console.warn('[GYM REGISTER] Metadata update failed, but account was created:', updateData.error);
-							// Account exists, metadata update is optional - but warn user
-							errorMsg.textContent = 'Account created, but metadata update failed. Please contact support.';
-							errorMsg.style.background = '#f59e0b';
-							errorMsg.classList.add('show');
-							submitBtn.disabled = false;
-							submitBtn.textContent = 'Register';
-							return;
+							console.warn('[GYM REGISTER] Backend metadata update failed, but account was created with metadata:', updateData.error);
+							// Account exists with metadata from signUp, so this is just a warning
+						} else {
+							console.log('[GYM REGISTER] Metadata confirmed via backend update');
 						}
 					} catch (updateError) {
-						console.error('[GYM REGISTER] Metadata update error:', updateError);
-						// Account exists, but metadata update failed
-						errorMsg.textContent = 'Account created, but metadata update failed. Please contact support.';
-						errorMsg.style.background = '#f59e0b';
-						errorMsg.classList.add('show');
-						submitBtn.disabled = false;
-						submitBtn.textContent = 'Register';
-						return;
+						console.warn('[GYM REGISTER] Backend metadata update error (non-critical):', updateError);
+						// Account exists with metadata from signUp, so this is just a warning
 					}
 					
 					// Registration successful - show success message
