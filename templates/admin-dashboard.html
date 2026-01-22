@@ -343,9 +343,28 @@
 		// Initialize Supabase
 		async function init() {
 			console.log('[ADMIN INIT] Starting initialization...');
-			console.log('[ADMIN INIT] SUPABASE_URL:', SUPABASE_URL);
-			console.log('[ADMIN INIT] window.supabase:', typeof window.supabase);
+			console.log('[ADMIN INIT] TEMPORARILY DISABLED AUTH - showing dashboard directly');
 			
+			// TEMPORARILY DISABLED AUTH - show dashboard directly
+			document.getElementById('login-container').style.display = 'none';
+			document.getElementById('admin-container').classList.add('authenticated');
+			
+			// Try to load gym accounts (will fail without auth, but we can see the UI)
+			try {
+				const response = await fetch('/api/admin/gym-accounts');
+				if (response.ok) {
+					const data = await response.json();
+					renderGymAccounts(data.accounts || []);
+					updateStats(data.accounts || []);
+				} else {
+					showError('Cannot load gym accounts without authentication. This is expected.');
+				}
+			} catch (error) {
+				console.error('[ADMIN] Error loading gym accounts:', error);
+				showError('Cannot load gym accounts: ' + error.message);
+			}
+			
+			/* ORIGINAL AUTH CODE - DISABLED
 			if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
 				console.error('[ADMIN INIT] Supabase library not loaded');
 				showLoginError('Supabase library failed to load. Please refresh.');
@@ -385,6 +404,7 @@
 			document.getElementById('login-container').style.display = 'none';
 			document.getElementById('admin-container').classList.add('authenticated');
 			loadGymAccounts();
+			*/
 		}
 
 		// Handle login form submission
