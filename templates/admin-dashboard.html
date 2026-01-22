@@ -255,17 +255,21 @@
 				supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 				
 				// FORCE CHECK AUTHENTICATION - NO EXCEPTIONS
-				const { data: { session }, error } = await supabase.auth.getSession();
+				// First, try to get session
+				let { data: { session }, error } = await supabase.auth.getSession();
 				
-				if (error) {
-					console.error('[ADMIN] Session error:', error);
-					redirectToLogin('Error checking authentication');
+				// If no session, try to sign out any stale sessions
+				if (!session || !session.user || !session.access_token) {
+					console.log('[ADMIN] No valid session, signing out and redirecting');
+					await supabase.auth.signOut().catch(() => {});
+					redirectToLogin('Please log in to access the admin dashboard');
 					return;
 				}
 				
-				if (!session || !session.user || !session.access_token) {
-					console.log('[ADMIN] No valid session found, redirecting to login');
-					redirectToLogin('Please log in to access the admin dashboard');
+				if (error) {
+					console.error('[ADMIN] Session error:', error);
+					await supabase.auth.signOut().catch(() => {});
+					redirectToLogin('Error checking authentication');
 					return;
 				}
 				
@@ -545,8 +549,14 @@
 			});
 		});
 
-		// Initialize on page load
-		init();
+		// Initialize on page load - CHECK LOGIN FIRST
+		// Don't show anything until we verify login
+		window.addEventListener('DOMContentLoaded', () => {
+			// Hide everything immediately
+			document.querySelector('.admin-stats').style.display = 'none';
+			document.querySelector('.filter-tabs').style.display = 'none';
+			init();
+		});
 	</script>
 </body>
 </html>
