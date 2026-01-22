@@ -497,22 +497,33 @@
 			container.innerHTML = '<div class="loading">Loading gym accounts...</div>';
 			
 			try {
+				console.log('[ADMIN] Fetching gym accounts from /api/admin/gym-accounts');
 				// TEMPORARILY DISABLED AUTH - call API without auth header
 				const response = await fetch('/api/admin/gym-accounts');
+				console.log('[ADMIN] Response status:', response.status, response.statusText);
 
 				if (!response.ok) {
 					const errorText = await response.text();
 					console.error('[ADMIN] Failed to load gym accounts:', response.status, errorText);
-					container.innerHTML = '<div class="loading">Failed to load gym accounts. Please try again.</div>';
+					container.innerHTML = '<div class="loading">Failed to load gym accounts (Status: ' + response.status + '). ' + errorText + '</div>';
 					return;
 				}
 
 				const data = await response.json();
-				console.log('[ADMIN] Loaded gym accounts:', data.accounts?.length || 0);
+				console.log('[ADMIN] Response data:', data);
+				console.log('[ADMIN] Loaded gym accounts:', data.accounts?.length || 0, 'accounts');
+				
+				if (!data.accounts) {
+					console.error('[ADMIN] No accounts field in response:', data);
+					container.innerHTML = '<div class="loading">No accounts field in response. Check console for details.</div>';
+					return;
+				}
+				
 				renderGymAccounts(data.accounts || []);
 				updateStats(data.accounts || []);
 			} catch (error) {
 				console.error('[ADMIN] Error loading gym accounts:', error);
+				console.error('[ADMIN] Error stack:', error.stack);
 				container.innerHTML = '<div class="loading">Error: ' + error.message + '</div>';
 			}
 		}
