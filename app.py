@@ -772,20 +772,31 @@ def list_gym_accounts():
 		gym_accounts = []
 		for idx, user in enumerate(users_list):
 			try:
-				# Try different ways to get metadata
+				# Try different ways to get metadata - Supabase can return it in different formats
 				user_meta = {}
-				if hasattr(user, 'user_metadata'):
-					user_meta = user.user_metadata or {}
-				elif hasattr(user, 'raw_user_meta_data'):
-					user_meta = user.raw_user_meta_data or {}
+				if hasattr(user, 'user_metadata') and user.user_metadata:
+					user_meta = user.user_metadata
+				elif hasattr(user, 'raw_user_meta_data') and user.raw_user_meta_data:
+					user_meta = user.raw_user_meta_data
 				elif isinstance(user, dict):
 					user_meta = user.get('user_metadata', {}) or user.get('raw_user_meta_data', {})
+				
+				# Also try to get user directly if metadata is empty
+				if not user_meta:
+					user_id_temp = getattr(user, 'id', None) or (user.get('id') if isinstance(user, dict) else None)
+					if user_id_temp:
+						try:
+							user_detail = admin_client.auth.admin.get_user_by_id(user_id_temp)
+							if user_detail.user:
+								user_meta = getattr(user_detail.user, 'user_metadata', {}) or getattr(user_detail.user, 'raw_user_meta_data', {}) or {}
+						except:
+							pass
 				
 				is_gym = user_meta.get("is_gym_account") == True
 				user_email = getattr(user, 'email', None) or (user.get('email') if isinstance(user, dict) else 'unknown')
 				
-				if idx < 3:  # Only log first 3 to avoid spam
-					print(f"[ADMIN] User {user_email}: is_gym_account={is_gym}, metadata_keys={list(user_meta.keys())}")
+				if idx < 5:  # Log first 5 to see what's happening
+					print(f"[ADMIN] User {user_email}: is_gym_account={is_gym}, has_metadata={bool(user_meta)}, metadata_keys={list(user_meta.keys()) if user_meta else []}")
 				
 				if is_gym:
 					user_id = getattr(user, 'id', None) or (user.get('id') if isinstance(user, dict) else None)
@@ -2534,24 +2545,72 @@ def register_gym_account():
 		# Create gym account user
 		# IMPORTANT: New gym accounts are NOT verified by default - they need admin approval
 		# This prevents unauthorized access to gym data
-		user_response = admin_client.auth.admin.create_user({
-			"email": email,
-			"password": password,
-			"email_confirm": True,  # Auto-confirm email for gym accounts
-			"user_metadata": {
-				"is_gym_account": True,
-				"gym_name": gym_name.strip(),
-				"contact_name": contact_name.strip(),
-				"contact_phone": contact_phone.strip(),
-				"is_verified": False  # Must be verified by admin before accessing data
-			}
-		})
+		user_id = None
+		user_created = False
 		
-		if user_response.user:
+		try:
+			user_response = admin_client.auth.admin.create_user({
+				"email": email,
+				"password": password,
+				"email_confirm": True,  # Auto-confirm email for gym accounts
+				"user_metadata": {
+					"is_gym_account": True,
+					"gym_name": gym_name.strip(),
+					"contact_name": contact_name.strip(),
+					"contact_phone": contact_phone.strip(),
+					"is_verified": False  # Must be verified by admin before accessing data
+				}
+			})
+			
+			if user_response.user:
+				user_id = user_response.user.id
+				user_created = True
+				print(f"[GYM REGISTER] Successfully created gym account: user_id={user_id}")
+		except Exception as create_error:
+			print(f"[GYM REGISTER] Error during create_user: {create_error}")
+			# If user already exists, try to get it and update metadata
+			if "already been registered" in str(create_error) or "already exists" in str(create_error):
+				print(f"[GYM REGISTER] User already exists, trying to find and update...")
+				# Try to find existing user by email
+				try:
+					all_users = admin_client.auth.admin.list_users()
+					users_list = getattr(all_users, "data", None) or []
+					for u in users_list:
+						if u.email == email:
+							user_id = u.id
+							user_created = True
+							print(f"[GYM REGISTER] Found existing user: {user_id}")
+							break
+				except Exception as e:
+					print(f"[GYM REGISTER] Error finding existing user: {e}")
+			
+			# If we still don't have a user_id, return error
+			if not user_id:
+				return jsonify({"error": f"Failed to create gym account: {str(create_error)}"}), 500
+		
+		# If account was created, ensure metadata is set correctly
+		if user_id:
+			try:
+				# Update metadata to ensure it's set correctly
+				admin_client.auth.admin.update_user_by_id(user_id, {
+					"user_metadata": {
+						"is_gym_account": True,
+						"gym_name": gym_name.strip(),
+						"contact_name": contact_name.strip(),
+						"contact_phone": contact_phone.strip(),
+						"is_verified": False
+					}
+				})
+				print(f"[GYM REGISTER] Updated metadata for user {user_id}")
+			except Exception as update_error:
+				print(f"[GYM REGISTER] Warning: Could not update metadata: {update_error}")
+				# Continue anyway - account exists, metadata might be set from create_user
+		
+		if user_created and user_id:
 			return jsonify({
 				"success": True,
 				"message": "Gym account created successfully. Your account needs to be verified by an administrator before you can access dashboard data.",
-				"user_id": user_response.user.id,
+				"user_id": user_id,
 				"requires_verification": True
 			}), 201
 		else:
