@@ -195,6 +195,7 @@
 		</div>
 
 		<div id="error-message" class="error" style="display: none;"></div>
+		<div id="info-message" class="error" style="background: #e3f2fd; color: #1976d2; border-left: 4px solid #2196f3; display: none; margin-bottom: 20px;"></div>
 
 		<div class="admin-stats">
 			<div class="admin-stat-card">
@@ -311,8 +312,9 @@
 						}, 2000);
 					} else if (response.status === 403) {
 						const errorData = await response.json().catch(() => ({}));
-						showError('You do not have admin access. Make sure your User ID or Email is in ADMIN_USER_IDS or ADMIN_USER_EMAILS in Render. Error: ' + (errorData.error || 'Access denied'));
-						document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Access denied. Check your admin settings in Render.</div>';
+						const errorMsg = errorData.error || 'Access denied';
+						showError('❌ <strong>You do not have admin access.</strong><br><br>To fix this:<br>1. Get your User ID from Supabase Dashboard → Authentication → Users<br>2. Go to Render → Environment<br>3. Add: <code>ADMIN_USER_IDS</code> = your User ID<br>4. Save & Redeploy<br><br>Error: ' + errorMsg);
+						document.getElementById('gym-accounts-list').innerHTML = '<div class="loading" style="color: #c33;">Access denied. You need to add your User ID to ADMIN_USER_IDS in Render.</div>';
 					} else {
 						const errorData = await response.json().catch(() => ({}));
 						showError('Failed to load gym accounts: ' + (errorData.error || 'Unknown error'));
@@ -469,11 +471,14 @@
 
 		function showError(message) {
 			const errorEl = document.getElementById('error-message');
-			errorEl.textContent = message;
+			errorEl.innerHTML = message;
 			errorEl.style.display = 'block';
-			setTimeout(() => {
-				errorEl.style.display = 'none';
-			}, 5000);
+		}
+		
+		function showInfo(message) {
+			const infoEl = document.getElementById('info-message');
+			infoEl.innerHTML = message;
+			infoEl.style.display = 'block';
 		}
 
 		function escapeHtml(text) {
