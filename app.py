@@ -772,34 +772,40 @@ def list_gym_accounts():
 		gym_accounts = []
 		for idx, user in enumerate(users_list):
 			try:
-				# Try different ways to get metadata - Supabase can return it in different formats
-				user_meta = {}
-				if hasattr(user, 'user_metadata') and user.user_metadata:
-					user_meta = user.user_metadata
-				elif hasattr(user, 'raw_user_meta_data') and user.raw_user_meta_data:
-					user_meta = user.raw_user_meta_data
-				elif isinstance(user, dict):
-					user_meta = user.get('user_metadata', {}) or user.get('raw_user_meta_data', {})
-				
-				# Also try to get user directly if metadata is empty
-				if not user_meta:
-					user_id_temp = getattr(user, 'id', None) or (user.get('id') if isinstance(user, dict) else None)
-					if user_id_temp:
-						try:
-							user_detail = admin_client.auth.admin.get_user_by_id(user_id_temp)
-							if user_detail.user:
-								user_meta = getattr(user_detail.user, 'user_metadata', {}) or getattr(user_detail.user, 'raw_user_meta_data', {}) or {}
-						except:
-							pass
-				
-				is_gym = user_meta.get("is_gym_account") == True
+				# Get user ID and email first
+				user_id = getattr(user, 'id', None) or (user.get('id') if isinstance(user, dict) else None)
 				user_email = getattr(user, 'email', None) or (user.get('email') if isinstance(user, dict) else 'unknown')
 				
+				# IMPORTANT: list_users() may not return full metadata, so we fetch each user individually
+				# This ensures we get the complete user_metadata
+				user_meta = {}
+				if user_id:
+					try:
+						user_detail = admin_client.auth.admin.get_user_by_id(user_id)
+						if user_detail and hasattr(user_detail, 'user') and user_detail.user:
+							# Try all possible metadata locations
+							user_obj = user_detail.user
+							if hasattr(user_obj, 'user_metadata') and user_obj.user_metadata:
+								user_meta = user_obj.user_metadata
+							elif hasattr(user_obj, 'raw_user_meta_data') and user_obj.raw_user_meta_data:
+								user_meta = user_obj.raw_user_meta_data
+							elif isinstance(user_obj, dict):
+								user_meta = user_obj.get('user_metadata', {}) or user_obj.get('raw_user_meta_data', {})
+					except Exception as fetch_error:
+						# If get_user_by_id fails, try to get metadata from list_users result
+						if hasattr(user, 'user_metadata') and user.user_metadata:
+							user_meta = user.user_metadata
+						elif hasattr(user, 'raw_user_meta_data') and user.raw_user_meta_data:
+							user_meta = user.raw_user_meta_data
+						elif isinstance(user, dict):
+							user_meta = user.get('user_metadata', {}) or user.get('raw_user_meta_data', {})
+				
+				is_gym = user_meta.get("is_gym_account") == True
+				
 				if idx < 5:  # Log first 5 to see what's happening
-					print(f"[ADMIN] User {user_email}: is_gym_account={is_gym}, has_metadata={bool(user_meta)}, metadata_keys={list(user_meta.keys()) if user_meta else []}")
+					print(f"[ADMIN] User {user_email} (id={user_id}): is_gym_account={is_gym}, has_metadata={bool(user_meta)}, metadata_keys={list(user_meta.keys()) if user_meta else []}")
 				
 				if is_gym:
-					user_id = getattr(user, 'id', None) or (user.get('id') if isinstance(user, dict) else None)
 					created_at = getattr(user, 'created_at', None) or (user.get('created_at') if isinstance(user, dict) else None)
 					
 					gym_accounts.append({
