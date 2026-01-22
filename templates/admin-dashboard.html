@@ -271,7 +271,7 @@
 				if (error) {
 					console.error('[ADMIN] Session error:', error);
 					await supabase.auth.signOut().catch(() => {});
-					redirectToLogin('Error checking authentication');
+					window.location.replace('/login?redirect=/admin-dashboard');
 					return;
 				}
 				
