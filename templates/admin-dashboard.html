@@ -342,12 +342,18 @@
 
 		// Initialize Supabase
 		async function init() {
+			console.log('[ADMIN INIT] Starting initialization...');
+			console.log('[ADMIN INIT] SUPABASE_URL:', SUPABASE_URL);
+			console.log('[ADMIN INIT] window.supabase:', typeof window.supabase);
+			
 			if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
+				console.error('[ADMIN INIT] Supabase library not loaded');
 				showLoginError('Supabase library failed to load. Please refresh.');
 				return;
 			}
 			
 			supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+			console.log('[ADMIN INIT] Supabase client created:', !!supabase);
 			
 			// Check if already logged in
 			const { data: { session }, error } = await supabase.auth.getSession();
@@ -384,59 +390,85 @@
 		// Handle login form submission
 		async function handleLogin(event) {
 			event.preventDefault();
+			console.log('[ADMIN LOGIN] Form submitted');
 			
 			const email = document.getElementById('admin-email').value.trim();
 			const password = document.getElementById('admin-password').value;
 			const loginBtn = document.getElementById('login-btn');
+			
+			if (!email || !password) {
+				showLoginError('Please enter both email and password');
+				return;
+			}
+			
+			if (!supabase) {
+				console.error('[ADMIN LOGIN] Supabase not initialized');
+				showLoginError('Supabase not initialized. Please refresh the page.');
+				return;
+			}
 			
 			loginBtn.disabled = true;
 			loginBtn.textContent = 'Signing in...';
 			hideLoginError();
 			
 			try {
+				console.log('[ADMIN LOGIN] Attempting login for:', email);
 				const { data, error } = await supabase.auth.signInWithPassword({
 					email: email,
 					password: password
 				});
 				
 				if (error) {
+					console.error('[ADMIN LOGIN] Login error:', error);
 					showLoginError('Login failed: ' + error.message);
 					loginBtn.disabled = false;
 					loginBtn.textContent = 'Sign In';
 					return;
 				}
 				
-				if (data && data.user) {
-					// Check admin access
-					const testResponse = await fetch('/api/admin/gym-accounts', {
-						headers: {
-							'Authorization': `Bearer ${data.session.access_token}`
-						}
-					});
-					
-					if (testResponse.status === 403) {
-						await supabase.auth.signOut();
-						showLoginError('You do not have admin access. Make sure your User ID is in ADMIN_USER_IDS in Render.');
-						loginBtn.disabled = false;
-						loginBtn.textContent = 'Sign In';
-						return;
-					}
-					
-					if (!testResponse.ok) {
-						showLoginError('Failed to verify admin access. Please try again.');
-						loginBtn.disabled = false;
-						loginBtn.textContent = 'Sign In';
-						return;
-					}
-					
-					// Success - show dashboard
-					document.getElementById('login-container').style.display = 'none';
-					document.getElementById('admin-container').classList.add('authenticated');
-					loadGymAccounts();
+				if (!data || !data.user) {
+					console.error('[ADMIN LOGIN] No user data returned');
+					showLoginError('Login failed: No user data returned');
+					loginBtn.disabled = false;
+					loginBtn.textContent = 'Sign In';
+					return;
 				}
+				
+				console.log('[ADMIN LOGIN] Login successful, checking admin access...');
+				// Check admin access
+				const testResponse = await fetch('/api/admin/gym-accounts', {
+					headers: {
+						'Authorization': `Bearer ${data.session.access_token}`
+					}
+				});
+				
+				console.log('[ADMIN LOGIN] Admin check response status:', testResponse.status);
+				
+				if (testResponse.status === 403) {
+					await supabase.auth.signOut();
+					showLoginError('You do not have admin access. Make sure your email is in ADMIN_USER_EMAILS in Render.');
+					loginBtn.disabled = false;
+					loginBtn.textContent = 'Sign In';
+					return;
+				}
+				
+				if (!testResponse.ok) {
+					const errorText = await testResponse.text();
+					console.error('[ADMIN LOGIN] Admin check failed:', testResponse.status, errorText);
+					showLoginError('Failed to verify admin access. Please try again.');
+					loginBtn.disabled = false;
+					loginBtn.textContent = 'Sign In';
+					return;
+				}
+				
+				console.log('[ADMIN LOGIN] Admin access verified, showing dashboard');
+				// Success - show dashboard
+				document.getElementById('login-container').style.display = 'none';
+				document.getElementById('admin-container').classList.add('authenticated');
+				loadGymAccounts();
 			} catch (error) {
-				console.error('Login error:', error);
-				showLoginError('Login error: ' + error.message);
+				console.error('[ADMIN LOGIN] Exception:', error);
+				showLoginError('Login error: ' + (error.message || 'Unknown error'));
 				loginBtn.disabled = false;
 				loginBtn.textContent = 'Sign In';
 			}
