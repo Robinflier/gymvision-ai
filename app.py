@@ -757,11 +757,18 @@ def list_gym_accounts():
 		users_list = getattr(all_users, "data", None) or getattr(all_users, "users", None) or []
 		print(f"[ADMIN] Found {len(users_list)} total users")
 		
+		# Debug: print first few users to see their metadata
+		if users_list:
+			print(f"[ADMIN] First user sample: id={users_list[0].id}, email={users_list[0].email}, metadata={users_list[0].user_metadata}")
+		
 		gym_accounts = []
 		for user in users_list:
 			try:
-				user_meta = user.user_metadata or {}
-				if user_meta.get("is_gym_account") == True:
+				user_meta = getattr(user, 'user_metadata', None) or {}
+				is_gym = user_meta.get("is_gym_account") == True
+				print(f"[ADMIN] User {user.email}: is_gym_account={is_gym}, metadata={user_meta}")
+				
+				if is_gym:
 					gym_accounts.append({
 						"user_id": user.id,
 						"email": user.email,
@@ -770,10 +777,12 @@ def list_gym_accounts():
 						"contact_phone": user_meta.get("contact_phone", ""),
 						"is_verified": user_meta.get("is_verified", False) == True,
 						"is_premium": user_meta.get("is_premium", False) == True,
-						"created_at": user.created_at
+						"created_at": getattr(user, 'created_at', None)
 					})
 			except Exception as e:
 				print(f"[ADMIN] Error processing user {getattr(user, 'id', 'unknown')}: {e}")
+				import traceback
+				traceback.print_exc()
 				continue
 		
 		print(f"[ADMIN] Found {len(gym_accounts)} gym accounts")
