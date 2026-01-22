@@ -473,7 +473,15 @@
 			
 			try {
 				// TEMPORARILY DISABLED AUTH - call API without auth header
-				const response = await fetch('/api/admin/gym-accounts');
+				// Add timeout to prevent hanging
+				const controller = new AbortController();
+				const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+				
+				const response = await fetch('/api/admin/gym-accounts', {
+					signal: controller.signal
+				});
+				
+				clearTimeout(timeoutId);
 
 				if (!response.ok) {
 					let errorText = 'Unknown error';
@@ -509,8 +517,13 @@
 				
 				renderGymAccounts(accounts);
 			} catch (error) {
-				container.innerHTML = '<div class="loading" style="color: #ef4444; padding: 20px; background: #1a1a1b; border-radius: 8px; border: 1px solid #ef4444;">❌ Network Error: ' + error.message + '<br><br>Make sure the server is running and try again.</div>';
-				showError('Failed to load gym accounts: ' + error.message);
+				if (error.name === 'AbortError') {
+					container.innerHTML = '<div class="loading" style="color: #ef4444; padding: 20px; background: #1a1a1b; border-radius: 8px; border: 1px solid #ef4444;">❌ Request timeout. The server took too long to respond.<br><br>Please try refreshing the page.</div>';
+					showError('Request timeout - server took too long to respond');
+				} else {
+					container.innerHTML = '<div class="loading" style="color: #ef4444; padding: 20px; background: #1a1a1b; border-radius: 8px; border: 1px solid #ef4444;">❌ Network Error: ' + error.message + '<br><br>Make sure the server is running and try again.</div>';
+					showError('Failed to load gym accounts: ' + error.message);
+				}
 			}
 		}
 
