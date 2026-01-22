@@ -256,12 +256,18 @@
 			const { data: { session }, error } = await supabase.auth.getSession();
 			if (error) {
 				console.error('[ADMIN] Session error:', error);
-				showError('Error checking authentication. Please refresh the page.');
+				showError('Error checking authentication. Redirecting to login...');
+				setTimeout(() => {
+					window.location.href = '/login?redirect=/admin-panel';
+				}, 2000);
 				return;
 			}
 			if (!session || !session.user) {
-				showError('Please log in to access the admin panel. <a href="/login" style="color: #667eea; text-decoration: underline;">Go to login</a>');
-				document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Please log in first.</div>';
+				console.log('[ADMIN] No session found, redirecting to login');
+				showError('Please log in to access the admin panel. Redirecting...');
+				setTimeout(() => {
+					window.location.href = '/login?redirect=/admin-panel';
+				}, 2000);
 				return;
 			}
 			console.log('[ADMIN] Authenticated as:', session.user.email);
@@ -280,8 +286,12 @@
 				}
 				
 				if (!session || !session.user) {
-					showError('Please log in to access the admin panel. <a href="/login" style="color: #667eea; text-decoration: underline;">Go to login</a>');
-					document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Please log in first.</div>';
+					console.log('[ADMIN] No session in loadGymAccounts, redirecting');
+					showError('Please log in to access the admin panel. Redirecting...');
+					document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Redirecting to login...</div>';
+					setTimeout(() => {
+						window.location.href = '/login?redirect=/admin-panel';
+					}, 2000);
 					return;
 				}
 
@@ -294,14 +304,19 @@
 
 				if (!response.ok) {
 					if (response.status === 401) {
-						showError('Please log in to access the admin panel. <a href="/login" style="color: #667eea; text-decoration: underline;">Go to login</a>');
-						document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Please log in first.</div>';
+						showError('Please log in to access the admin panel. Redirecting to login...');
+						document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Redirecting to login...</div>';
+						setTimeout(() => {
+							window.location.href = '/login?redirect=/admin-panel';
+						}, 2000);
 					} else if (response.status === 403) {
-						showError('You do not have admin access. Make sure your User ID or Email is in ADMIN_USER_IDS or ADMIN_USER_EMAILS in Render.');
-						document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Access denied.</div>';
+						const errorData = await response.json().catch(() => ({}));
+						showError('You do not have admin access. Make sure your User ID or Email is in ADMIN_USER_IDS or ADMIN_USER_EMAILS in Render. Error: ' + (errorData.error || 'Access denied'));
+						document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Access denied. Check your admin settings in Render.</div>';
 					} else {
 						const errorData = await response.json().catch(() => ({}));
 						showError('Failed to load gym accounts: ' + (errorData.error || 'Unknown error'));
+						document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Error loading data.</div>';
 					}
 					return;
 				}
