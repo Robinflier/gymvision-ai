@@ -194,7 +194,7 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"dumbbell_fly": {"display": "Dumbbell Fly", "muscles": normalize_muscles(["Chest", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/JFm8KbhjibM", "image": "https://strengthlevel.com/images/illustrations/dumbbell-fly.png"},
 "cable_crossover": {"display": "Cable Crossover", "muscles": normalize_muscles(["Chest", "Shoulders", "Biceps"]), "video": "https://www.youtube.com/embed/hhruLxo9yZU", "image": "https://strengthlevel.com/images/illustrations/cable-crossover.png"},
 "pec_deck_machine": {"display": "Pec Deck Machine", "muscles": normalize_muscles(["Chest", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/FDay9wFe5uE", "image": "https://strengthlevel.com/images/illustrations/pec-deck.png"},
-	"chest_press_machine": {"display": "Chest Press Machine", "muscles": normalize_muscles(["Chest", "Triceps", "Shoulders"]), "video": "https://www.youtube.com/embed/65npK4Ijz1c", "image": "https://strengthlevel.com/images/illustrations/chest-press.png"},
+"chest_press_machine": {"display": "Chest Press Machine", "muscles": normalize_muscles(["Chest", "Triceps", "Shoulders"]), "video": "https://www.youtube.com/embed/65npK4Ijz1c", "image": "https://strengthlevel.com/images/illustrations/chest-press.png"},
 	"lying_chest_press_machine": {"display": "Lying Chest Press Machine", "muscles": normalize_muscles(["Chest", "Triceps", "Shoulders"]), "video": "https://www.youtube.com/embed/2ONfXehJEIM", "image": "/images/lyingchestpressmachine.jpg"},
 "push_up": {"display": "Push-Up", "muscles": normalize_muscles(["Chest", "Triceps", "Shoulders"]), "video": "https://www.youtube.com/embed/WDIpL0pjun0", "image": "https://strengthlevel.com/images/illustrations/push-up.png"},
 "incline_dumbbell_press": {"display": "Incline Dumbbell Press", "muscles": normalize_muscles(["Chest", "Shoulders", "Triceps"]), "video": "https://www.youtube.com/embed/jMQA3XtJSgo", "image": "https://strengthlevel.com/images/illustrations/incline-dumbbell-press.png"},
@@ -211,7 +211,7 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"close_grip_pulldown": {"display": "Close Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/IjoFCmLX7z0", "image": "https://strengthlevel.com/images/illustrations/close-grip-pulldown.png"},
 	"reverse_grip_pulldown": {"display": "Reverse Grip Pulldown", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/scy-QV06nuA", "image": "/images/reversegrippulldown.jpg"},
 	"straight_arm_pulldown": {"display": "Straight Arm Pulldown", "muscles": normalize_muscles(["Back", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/G9uNaXGTJ4w", "image": "https://strengthlevel.com/images/illustrations/straight-arm-pulldown.png"},
-	"seated_row": {"display": "Seated Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/UCXxvVItLoM", "image": "https://strengthlevel.com/images/illustrations/seated-row.png"},
+"seated_row": {"display": "Seated Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/UCXxvVItLoM", "image": "https://strengthlevel.com/images/illustrations/seated-row.png"},
 	"seated_machine_row": {"display": "Seated Machine Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/TeFo51Q_Nsc", "image": "/images/seatedmachinerow.jpg"},
 	"t_bar_row": {"display": "T-Bar Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/yPis7nlbqdY", "image": "https://strengthlevel.com/images/illustrations/t-bar-row.png"},
 	"chest_supported_t_bar_row": {"display": "Chest Supported T-Bar Row", "muscles": normalize_muscles(["Back", "Biceps", "-"]), "video": "https://www.youtube.com/embed/0UBRfiO4zDs", "image": "/images/chestsupportedtbarrow.jpg"},
@@ -643,6 +643,301 @@ def gym_register():
 def gym_dashboard():
 	"""Gym dashboard page."""
 	return render_template("gym-dashboard.html")
+
+
+@app.route("/admin-panel", methods=["GET"])
+def admin_panel():
+	"""Admin panel page for managing gym accounts."""
+	supabase_url = os.getenv("SUPABASE_URL") or ""
+	supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or ""
+	return render_template("admin-panel.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
+
+
+@app.route("/my-user-id", methods=["GET"])
+def my_user_id():
+	"""
+	Simple page to show the current user's ID.
+	Useful for finding your user ID to add to ADMIN_USER_IDS.
+	"""
+	supabase_url = os.getenv("SUPABASE_URL") or ""
+	supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or ""
+	return render_template("my-user-id.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
+
+
+def is_admin_user(user_id: str) -> bool:
+	"""
+	Check if a user is an admin.
+	Admins are defined by ADMIN_USER_IDS environment variable (comma-separated list of user IDs).
+	"""
+	if not SUPABASE_AVAILABLE:
+		return False
+	
+	admin_user_ids = os.getenv("ADMIN_USER_IDS", "").strip()
+	if not admin_user_ids:
+		return False
+	
+	admin_list = [uid.strip() for uid in admin_user_ids.split(",") if uid.strip()]
+	return user_id in admin_list
+
+
+@app.route("/api/admin/gym-accounts", methods=["GET", "OPTIONS"])
+def list_gym_accounts():
+	"""
+	List all gym accounts for admin panel.
+	Only accessible by admin users.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# Get Authorization header
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Authentication required"}), 401
+	
+	access_token = auth_header.replace("Bearer ", "").strip()
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+		
+		if not SUPABASE_URL or not SUPABASE_ANON_KEY or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
+		# Verify user
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+		
+		# Check if user is admin
+		if not is_admin_user(user_response.user.id):
+			return jsonify({"error": "Admin access required"}), 403
+		
+		# Get all gym accounts
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		all_users = admin_client.auth.admin.list_users()
+		users_list = getattr(all_users, "data", None) or getattr(all_users, "users", None) or []
+		
+		gym_accounts = []
+		for user in users_list:
+			user_meta = user.user_metadata or {}
+			if user_meta.get("is_gym_account") == True:
+				gym_accounts.append({
+					"user_id": user.id,
+					"email": user.email,
+					"gym_name": user_meta.get("gym_name", "Unknown"),
+					"contact_name": user_meta.get("contact_name", ""),
+					"contact_phone": user_meta.get("contact_phone", ""),
+					"is_verified": user_meta.get("is_verified", False) == True,
+					"is_premium": user_meta.get("is_premium", False) == True,
+					"created_at": user.created_at
+				})
+		
+		# Sort by created_at (newest first)
+		gym_accounts.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+		
+		return jsonify({"accounts": gym_accounts}), 200
+		
+	except Exception as e:
+		print(f"[ADMIN] Error listing gym accounts: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to list gym accounts: {str(e)}"}), 500
+
+
+@app.route("/api/admin/gym-accounts/<user_id>/approve", methods=["POST", "OPTIONS"])
+def approve_gym_account(user_id: str):
+	"""
+	Approve a gym account (set is_verified = true).
+	Only accessible by admin users.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# Get Authorization header
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Authentication required"}), 401
+	
+	access_token = auth_header.replace("Bearer ", "").strip()
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+		
+		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
+		# Verify user
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+		
+		# Check if user is admin
+		if not is_admin_user(user_response.user.id):
+			return jsonify({"error": "Admin access required"}), 403
+		
+		# Update gym account
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		user_to_update = admin_client.auth.admin.get_user_by_id(user_id)
+		
+		if not user_to_update.user:
+			return jsonify({"error": "Gym account not found"}), 404
+		
+		user_meta = user_to_update.user.user_metadata or {}
+		if user_meta.get("is_gym_account") != True:
+			return jsonify({"error": "User is not a gym account"}), 400
+		
+		# Update metadata
+		updated_metadata = {**user_meta, "is_verified": True}
+		admin_client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
+		
+		return jsonify({"success": True, "message": "Gym account approved"}), 200
+		
+	except Exception as e:
+		print(f"[ADMIN] Error approving gym account: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to approve gym account: {str(e)}"}), 500
+
+
+@app.route("/api/admin/gym-accounts/<user_id>/reject", methods=["POST", "OPTIONS"])
+def reject_gym_account(user_id: str):
+	"""
+	Reject a gym account (set is_verified = false).
+	Only accessible by admin users.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# Get Authorization header
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Authentication required"}), 401
+	
+	access_token = auth_header.replace("Bearer ", "").strip()
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+		
+		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
+		# Verify user
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+		
+		# Check if user is admin
+		if not is_admin_user(user_response.user.id):
+			return jsonify({"error": "Admin access required"}), 403
+		
+		# Update gym account
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		user_to_update = admin_client.auth.admin.get_user_by_id(user_id)
+		
+		if not user_to_update.user:
+			return jsonify({"error": "Gym account not found"}), 404
+		
+		user_meta = user_to_update.user.user_metadata or {}
+		if user_meta.get("is_gym_account") != True:
+			return jsonify({"error": "User is not a gym account"}), 400
+		
+		# Update metadata
+		updated_metadata = {**user_meta, "is_verified": False}
+		admin_client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
+		
+		return jsonify({"success": True, "message": "Gym account rejected"}), 200
+		
+	except Exception as e:
+		print(f"[ADMIN] Error rejecting gym account: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to reject gym account: {str(e)}"}), 500
+
+
+@app.route("/api/admin/gym-accounts/<user_id>/premium", methods=["POST", "OPTIONS"])
+def toggle_premium_gym_account(user_id: str):
+	"""
+	Toggle premium status for a gym account.
+	Only accessible by admin users.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# Get Authorization header
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Authentication required"}), 401
+	
+	access_token = auth_header.replace("Bearer ", "").strip()
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+		
+		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
+		# Verify user
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+		
+		# Check if user is admin
+		if not is_admin_user(user_response.user.id):
+			return jsonify({"error": "Admin access required"}), 403
+		
+		# Get request data
+		data = request.get_json() or {}
+		is_premium = data.get("is_premium", False) == True
+		
+		# Update gym account
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		user_to_update = admin_client.auth.admin.get_user_by_id(user_id)
+		
+		if not user_to_update.user:
+			return jsonify({"error": "Gym account not found"}), 404
+		
+		user_meta = user_to_update.user.user_metadata or {}
+		if user_meta.get("is_gym_account") != True:
+			return jsonify({"error": "User is not a gym account"}), 400
+		
+		# Update metadata
+		updated_metadata = {**user_meta, "is_premium": is_premium}
+		admin_client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
+		
+		return jsonify({"success": True, "message": f"Premium status {'enabled' if is_premium else 'disabled'}"}), 200
+		
+	except Exception as e:
+		print(f"[ADMIN] Error toggling premium: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to update premium status: {str(e)}"}), 500
 
 
 # /verify and /resend-code endpoints removed - using Supabase for email verification
@@ -2125,6 +2420,8 @@ def register_gym_account():
 				return jsonify({"error": "A gym account with this name already exists"}), 400
 		
 		# Create gym account user
+		# IMPORTANT: New gym accounts are NOT verified by default - they need admin approval
+		# This prevents unauthorized access to gym data
 		user_response = admin_client.auth.admin.create_user({
 			"email": email,
 			"password": password,
@@ -2133,15 +2430,17 @@ def register_gym_account():
 				"is_gym_account": True,
 				"gym_name": gym_name.strip(),
 				"contact_name": contact_name.strip(),
-				"contact_phone": contact_phone.strip()
+				"contact_phone": contact_phone.strip(),
+				"is_verified": False  # Must be verified by admin before accessing data
 			}
 		})
 		
 		if user_response.user:
 			return jsonify({
 				"success": True,
-				"message": "Gym account created successfully",
-				"user_id": user_response.user.id
+				"message": "Gym account created successfully. Your account needs to be verified by an administrator before you can access dashboard data.",
+				"user_id": user_response.user.id,
+				"requires_verification": True
 			}), 201
 		else:
 			return jsonify({"error": "Failed to create gym account"}), 500
@@ -2193,8 +2492,17 @@ def get_gym_dashboard():
 		if user_metadata.get("is_gym_account") != True:
 			return jsonify({"error": "This endpoint is only available for gym accounts"}), 403
 		
+		# SECURITY: Only verified gym accounts can access data
+		# This prevents unauthorized access - gym accounts must be verified by admin first
+		if user_metadata.get("is_verified") != True:
+			return jsonify({
+				"error": "Gym account not verified",
+				"message": "Your gym account needs to be verified by an administrator before you can access dashboard data. Please contact support."
+			}), 403
+		
 		gym_id = user_response.user.id
 		gym_name = user_metadata.get("gym_name", "Unknown")
+		is_premium = user_metadata.get("is_premium", False) == True  # Premium accounts get full data access
 		period = (request.args.get("period") or "week").lower().strip()
 		if period not in ("week", "month", "year", "all"):
 			period = "week"
@@ -2708,23 +3016,46 @@ def get_gym_dashboard():
 			kpi_total_workouts = 0
 			kpi_total_exercises = 0
 
+		# Build response based on premium status
+		# Basic accounts: Only get basic statistics (users, workouts, exercises counts)
+		# Premium accounts: Get full data including all charts and detailed analytics
+		statistics = {
+			"total_users": total_users,
+			"total_workouts": kpi_total_workouts,
+			"total_exercises": kpi_total_exercises,
+			"users_with_consent": users_with_consent,
+			"users_linked": users_linked,
+			"period": period,
+			"comparison": comparison_data
+		}
+		
+		if is_premium:
+			# Premium accounts get full access
+			statistics["recent_users"] = recent_users
+			statistics["monthly_growth"] = monthly_growth
+			statistics["charts"] = chart
+		else:
+			# Basic accounts get limited data
+			statistics["recent_users"] = []  # No recent users list
+			statistics["monthly_growth"] = {}  # No monthly growth
+			statistics["charts"] = {
+				"top_machines_by_sets": chart.get("top_machines_by_sets", [])[:5],  # Only top 5
+				"top_muscles_by_sets": chart.get("top_muscles_by_sets", [])[:5],  # Only top 5
+				"workouts_by_weekday": chart.get("workouts_by_weekday", []),  # Basic weekday chart
+				"workouts_by_hour": chart.get("workouts_by_hour", []),  # Basic hour chart
+				"workouts_by_day": [],  # No daily time series
+				"workouts_last_weeks": [],  # No weekly history
+				"volume_by_week": [],  # No volume tracking
+				"active_users_by_week": [],  # No active users tracking
+				"exercise_categories": []  # No category breakdown
+			}
+		
 		return jsonify({
 			"success": True,
 			"gym_id": gym_id,
 			"gym_name": gym_name,
-			"statistics": {
-				"total_users": total_users,
-				"total_workouts": kpi_total_workouts,
-				"total_exercises": kpi_total_exercises,
-				# kept for future UI use
-				"users_with_consent": users_with_consent,
-				"users_linked": users_linked,
-				"period": period,
-				"recent_users": recent_users,
-				"monthly_growth": monthly_growth,
-				"comparison": comparison_data,
-				"charts": chart
-			}
+			"is_premium": is_premium,
+			"statistics": statistics
 		}), 200
 		
 	except Exception as e:

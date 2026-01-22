@@ -146,10 +146,10 @@ function getLastExerciseData(exerciseKey, exerciseDisplay = null, isCustom = fal
 		return dateB - dateA;
 	});
 	
-	// For custom exercises, prioritize matching by display name (case-insensitive)
+	// For custom exercises, prioritize matching by display name (case-insensitive, trimmed)
 	// since the key changes each time
-	const searchKey = (exerciseKey || '').toLowerCase();
-	const searchDisplay = (exerciseDisplay || '').toLowerCase();
+	const searchKey = (exerciseKey || '').trim().toLowerCase();
+	const searchDisplay = (exerciseDisplay || '').trim().toLowerCase();
 	
 	console.log('[GET LAST DATA] Searching for:', { searchKey, searchDisplay, isCustom, totalWorkouts: sortedWorkouts.length });
 	
@@ -158,8 +158,8 @@ function getLastExerciseData(exerciseKey, exerciseDisplay = null, isCustom = fal
 		if (!workout.exercises || !Array.isArray(workout.exercises)) continue;
 		
 		const exercise = workout.exercises.find(ex => {
-			const exKey = (ex.key || '').toLowerCase();
-			const exDisplay = (ex.display || '').toLowerCase();
+			const exKey = (ex.key || '').trim().toLowerCase();
+			const exDisplay = (ex.display || '').trim().toLowerCase();
 			const exIsCustom = ex.isCustom === true;
 			
 			console.log('[GET LAST DATA] Checking exercise:', {
@@ -168,7 +168,9 @@ function getLastExerciseData(exerciseKey, exerciseDisplay = null, isCustom = fal
 				exIsCustom,
 				searchKey,
 				searchDisplay,
-				isCustom
+				isCustom,
+				rawDisplay: ex.display,
+				rawSearchDisplay: exerciseDisplay
 			});
 			
 			// For custom exercises, match primarily by display name (case-insensitive, trimmed)
@@ -213,14 +215,32 @@ function getLastExerciseData(exerciseKey, exerciseDisplay = null, isCustom = fal
 					};
 				}
 				// Regular weight/reps exercise - preserve actual values
-				// IMPORTANT: Keep as numbers, not strings, for proper comparison
-				const weight = set.weight != null && set.weight !== '' ? Number(set.weight) : '';
-				const reps = set.reps != null && set.reps !== '' ? Number(set.reps) : '';
+				// IMPORTANT: Handle both string and number types, and ensure proper conversion
+				const weightVal = set.weight != null && set.weight !== '' ? set.weight : '';
+				const repsVal = set.reps != null && set.reps !== '' ? set.reps : '';
 				
-				// Return the values if they are valid numbers (can have weight OR reps, or both)
+				// Convert to numbers if they're valid (handle both string "10" and number 10)
+				let weight = '';
+				let reps = '';
+				
+				if (weightVal !== '') {
+					const weightNum = typeof weightVal === 'number' ? weightVal : Number(weightVal);
+					if (!isNaN(weightNum) && isFinite(weightNum)) {
+						weight = weightNum;
+					}
+				}
+				
+				if (repsVal !== '') {
+					const repsNum = typeof repsVal === 'number' ? repsVal : Number(repsVal);
+					if (!isNaN(repsNum) && isFinite(repsNum)) {
+						reps = repsNum;
+					}
+				}
+				
+				// Return the values (can have weight OR reps, or both)
 				return {
-					weight: (weight !== '' && !isNaN(weight)) ? weight : '',
-					reps: (reps !== '' && !isNaN(reps)) ? reps : ''
+					weight: weight,
+					reps: reps
 				};
 			});
 			
@@ -1552,7 +1572,6 @@ async function loadGymDashboardData() {
 		renderGymMachinesChart('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
 		renderGymPeakTimes(charts);
 		renderGymMuscleFocus(charts.top_muscles_by_sets);
-		renderGymUsersLine('gym-dashboard-chart-users', charts.active_users_by_week || []);
 		renderGymCategories(charts.exercise_categories || []);
 
 		if (loadingEl) loadingEl.style.display = 'none';
@@ -5111,12 +5130,28 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 					}
 					
 					const backup = localBackupById[String(workout.id)] || null;
+					// Ensure exercises preserve isCustom flag from backup if missing in Supabase
+					let exercises = workout.exercises || [];
+					if (backup && backup.exercises && Array.isArray(backup.exercises)) {
+						exercises = exercises.map(ex => {
+							// Find matching exercise in backup by key or display
+							const backupEx = backup.exercises.find(be => 
+								(be.key && ex.key && be.key === ex.key) || 
+								(be.display && ex.display && be.display.trim().toLowerCase() === ex.display.trim().toLowerCase())
+							);
+							// Merge isCustom flag from backup if missing
+							if (backupEx && backupEx.isCustom === true && ex.isCustom !== true) {
+								return { ...ex, isCustom: true };
+							}
+							return ex;
+						});
+					}
 					return {
 						id: workout.id,
 						name: workout.name || 'Workout',
 						date: workoutDate, // For display/sorting
 						originalDate: workoutDate, // EXACT original date - NEVER TOUCH THIS
-						exercises: workout.exercises || [],
+						exercises: exercises,
 						duration: workout.duration || 0,
 						total_volume: workout.total_volume || 0,
 						// If Supabase doesn't have these columns yet (or they're null), fall back to local backup.

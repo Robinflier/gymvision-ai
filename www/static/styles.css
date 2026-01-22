@@ -434,10 +434,10 @@ body{
 .exercise-selector-search input{width:100%;background:#0f0f12;border:1px solid #2b2b34;border-radius:12px;padding:10px 14px;color:#fff;font-size:14px;font-weight:600}
 .exercise-selector-muscles-row{display:flex;flex-wrap:wrap;gap:6px;overflow-y:visible;margin-bottom:4px;align-items:center;justify-content:center}
 .exercise-selector-muscles{display:flex;flex-wrap:wrap;gap:6px;overflow-y:visible;justify-content:center}
-.exercise-selector-muscles button{background:#1b1b1f;border:1px solid #2c2c34;color:#dfe0e6;padding:4.75px 11.4px;border-radius:999px;font-size:11.875px;font-weight:600;cursor:pointer}
+.exercise-selector-muscles button{background:#1b1b1f;border:1px solid #2c2c34;color:#dfe0e6;padding:4px 11px;border-radius:999px;font-size:12.5px;font-weight:600;cursor:pointer}
 .exercise-selector-muscles button.active{background:var(--accent);border-color:var(--accent);color:#0b0b0d}
-.exercise-selector-muscles-row{margin-bottom:16px !important;flex-shrink:0}
-.exercise-selector-or{text-align:center;color:#888 !important;font-size:14px !important;margin:4px 0 4px 0 !important;font-weight:500 !important;padding:4px 0 !important;flex-shrink:0 !important;position:relative !important;z-index:10 !important;display:block !important;visibility:visible !important;opacity:1 !important;height:auto !important;background:transparent !important}
+.exercise-selector-muscles-row{margin-bottom:8px !important;flex-shrink:0}
+.exercise-selector-or{text-align:center;color:#888 !important;font-size:14px !important;margin:2px 0 4px 0 !important;font-weight:500 !important;padding:2px 0 !important;flex-shrink:0 !important;position:relative !important;z-index:10 !important;display:block !important;visibility:visible !important;opacity:1 !important;height:auto !important;background:transparent !important}
 .exercise-selector-ai-detect{margin-top:0 !important;margin-bottom:20px !important;display:flex !important;justify-content:center !important;padding:0 16px !important;flex-shrink:0 !important;position:relative !important;z-index:10 !important;width:100% !important;visibility:visible !important;opacity:1 !important;height:auto !important;background:transparent !important}
 .exercise-selector-ai-detect .btn{width:auto !important;min-width:140px;max-width:200px;padding:8px 16px;flex:none !important;position:relative}
 .exercise-selector-ai-detect .btn::before{content:'✦';position:absolute;left:20%;top:-18px;color:rgba(124,92,255,0.8);font-size:14px;animation:twinkle 2s ease-in-out infinite;text-shadow:0 0 8px rgba(124,92,255,0.6)}
@@ -1906,8 +1906,9 @@ body.custom-exercise-modal-open {
 }
 
 .exercise-selector-add-custom {
-	min-width: 38px !important;
-	font-size: 19px !important;
+	min-width: 39px !important;
+	height: auto !important;
+	font-size: 18px !important;
 	background: var(--accent) !important;
 	border: 1px solid var(--accent) !important;
 	color: #fff !important;
@@ -1915,7 +1916,7 @@ body.custom-exercise-modal-open {
 	align-items: center !important;
 	justify-content: center !important;
 	line-height: 1 !important;
-	padding: 4.75px !important;
+	padding: 4px 11px !important;
 }
 .exercise-selector-add-custom:hover {
 	background: #6d4dff !important;

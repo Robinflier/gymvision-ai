@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>My User ID</title>
+	<style>
+		body {
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+			max-width: 600px;
+			margin: 50px auto;
+			padding: 20px;
+			background: #f5f5f5;
+		}
+		.container {
+			background: white;
+			padding: 30px;
+			border-radius: 12px;
+			box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+		}
+		h1 {
+			color: #667eea;
+			margin-top: 0;
+		}
+		.user-id-box {
+			background: #f8f9fa;
+			border: 2px solid #667eea;
+			border-radius: 8px;
+			padding: 20px;
+			margin: 20px 0;
+			word-break: break-all;
+			font-family: 'Courier New', monospace;
+			font-size: 14px;
+			color: #333;
+		}
+		.copy-btn {
+			background: #667eea;
+			color: white;
+			border: none;
+			padding: 12px 24px;
+			border-radius: 6px;
+			font-size: 16px;
+			font-weight: 600;
+			cursor: pointer;
+			margin-top: 10px;
+			width: 100%;
+		}
+		.copy-btn:hover {
+			background: #5568d3;
+		}
+		.copy-btn:active {
+			transform: scale(0.98);
+		}
+		.instructions {
+			background: #e3f2fd;
+			border-left: 4px solid #2196f3;
+			padding: 15px;
+			margin: 20px 0;
+			border-radius: 4px;
+		}
+		.instructions h3 {
+			margin-top: 0;
+			color: #1976d2;
+		}
+		.instructions ol {
+			margin: 10px 0;
+			padding-left: 20px;
+		}
+		.instructions li {
+			margin: 8px 0;
+		}
+		.error {
+			background: #fee;
+			color: #c33;
+			padding: 15px;
+			border-radius: 6px;
+			margin: 20px 0;
+		}
+		.loading {
+			text-align: center;
+			padding: 20px;
+			color: #666;
+		}
+		.success {
+			background: #e8f5e9;
+			color: #2e7d32;
+			padding: 15px;
+			border-radius: 6px;
+			margin: 20px 0;
+			display: none;
+		}
+	</style>
+</head>
+<body>
+	<div class="container">
+		<h1>🔑 My User ID</h1>
+		<p>Use this page to find your user ID for admin access.</p>
+		
+		<div id="error-message" class="error" style="display: none;"></div>
+		<div id="success-message" class="success"></div>
+		
+		<div id="loading" class="loading">Loading your user ID...</div>
+		
+		<div id="user-id-container" style="display: none;">
+			<p><strong>Your User ID:</strong></p>
+			<div class="user-id-box" id="user-id-display">-</div>
+			<button class="copy-btn" onclick="copyUserId()">📋 Copy User ID</button>
+			
+			<div class="instructions">
+				<h3>How to add yourself as admin:</h3>
+				<ol>
+					<li>Copy your User ID above</li>
+					<li>Go to your Render dashboard</li>
+					<li>Navigate to your service → Environment</li>
+					<li>Add a new environment variable:
+						<ul>
+							<li><strong>Key:</strong> <code>ADMIN_USER_IDS</code></li>
+							<li><strong>Value:</strong> Paste your User ID here</li>
+						</ul>
+					</li>
+					<li>Save and redeploy your service</li>
+					<li>Then you can access <a href="/admin-panel">/admin-panel</a></li>
+				</ol>
+			</div>
+		</div>
+	</div>
+
+	<script>
+		const SUPABASE_URL = '{{ SUPABASE_URL }}';
+		const SUPABASE_ANON_KEY = '{{ SUPABASE_ANON_KEY }}';
+		
+		let supabase;
+
+		async function initSupabase() {
+			if (typeof window.supabase === 'undefined') {
+				const script = document.createElement('script');
+				script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
+				script.onload = () => {
+					supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+					loadUserId();
+				};
+				script.onerror = () => {
+					showError('Failed to load Supabase. Please refresh the page.');
+				};
+				document.head.appendChild(script);
+			} else {
+				supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+				loadUserId();
+			}
+		}
+
+		async function loadUserId() {
+			try {
+				const { data: { session }, error } = await supabase.auth.getSession();
+				
+				if (error) {
+					showError('Please log in first. <a href="/login">Go to login</a>');
+					return;
+				}
+				
+				if (!session || !session.user) {
+					showError('Please log in first. <a href="/login">Go to login</a>');
+					return;
+				}
+				
+				const userId = session.user.id;
+				document.getElementById('user-id-display').textContent = userId;
+				document.getElementById('loading').style.display = 'none';
+				document.getElementById('user-id-container').style.display = 'block';
+			} catch (error) {
+				console.error('Error loading user ID:', error);
+				showError('Failed to load user ID. Please try again.');
+			}
+		}
+
+		async function copyUserId() {
+			const userId = document.getElementById('user-id-display').textContent;
+			
+			try {
+				// Try modern clipboard API
+				await navigator.clipboard.writeText(userId);
+				showSuccess('✅ User ID copied to clipboard!');
+			} catch (err) {
+				// Fallback for older browsers
+				const textArea = document.createElement('textarea');
+				textArea.value = userId;
+				textArea.style.position = 'fixed';
+				textArea.style.opacity = '0';
+				document.body.appendChild(textArea);
+				textArea.select();
+				try {
+					document.execCommand('copy');
+					showSuccess('✅ User ID copied to clipboard!');
+				} catch (err) {
+					showError('Failed to copy. Please select and copy manually.');
+				}
+				document.body.removeChild(textArea);
+			}
+		}
+
+		function showError(message) {
+			const errorEl = document.getElementById('error-message');
+			errorEl.innerHTML = message;
+			errorEl.style.display = 'block';
+			document.getElementById('loading').style.display = 'none';
+		}
+
+		function showSuccess(message) {
+			const successEl = document.getElementById('success-message');
+			successEl.textContent = message;
+			successEl.style.display = 'block';
+			setTimeout(() => {
+				successEl.style.display = 'none';
+			}, 3000);
+		}
+
+		// Initialize
+		initSupabase();
+	</script>
+</body>
+</html>

@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Admin Panel - Gym Accounts</title>
+	<link rel="stylesheet" href="/static/styles.css">
+	<style>
+		.admin-container {
+			max-width: 1200px;
+			margin: 0 auto;
+			padding: 20px;
+		}
+		.admin-header {
+			background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+			color: white;
+			padding: 30px;
+			border-radius: 12px;
+			margin-bottom: 30px;
+		}
+		.admin-header h1 {
+			margin: 0 0 10px 0;
+			font-size: 28px;
+		}
+		.admin-stats {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+			gap: 20px;
+			margin-bottom: 30px;
+		}
+		.admin-stat-card {
+			background: white;
+			padding: 20px;
+			border-radius: 8px;
+			box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+		}
+		.admin-stat-card h3 {
+			margin: 0 0 10px 0;
+			color: #667eea;
+			font-size: 14px;
+			text-transform: uppercase;
+		}
+		.admin-stat-card .stat-value {
+			font-size: 32px;
+			font-weight: bold;
+			color: #333;
+		}
+		.gym-accounts-list {
+			background: white;
+			border-radius: 8px;
+			box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+			overflow: hidden;
+		}
+		.gym-account-item {
+			padding: 20px;
+			border-bottom: 1px solid #eee;
+			display: grid;
+			grid-template-columns: 1fr auto auto auto;
+			gap: 20px;
+			align-items: center;
+		}
+		.gym-account-item:last-child {
+			border-bottom: none;
+		}
+		.gym-account-info h3 {
+			margin: 0 0 5px 0;
+			color: #333;
+		}
+		.gym-account-info p {
+			margin: 5px 0;
+			color: #666;
+			font-size: 14px;
+		}
+		.gym-account-status {
+			display: flex;
+			flex-direction: column;
+			gap: 10px;
+		}
+		.status-badge {
+			padding: 6px 12px;
+			border-radius: 20px;
+			font-size: 12px;
+			font-weight: 600;
+			text-align: center;
+		}
+		.status-badge.verified {
+			background: #10b981;
+			color: white;
+		}
+		.status-badge.unverified {
+			background: #f59e0b;
+			color: white;
+		}
+		.status-badge.premium {
+			background: #8b5cf6;
+			color: white;
+		}
+		.status-badge.basic {
+			background: #6b7280;
+			color: white;
+		}
+		.admin-actions {
+			display: flex;
+			gap: 10px;
+		}
+		.btn {
+			padding: 8px 16px;
+			border: none;
+			border-radius: 6px;
+			cursor: pointer;
+			font-size: 14px;
+			font-weight: 600;
+			transition: all 0.2s;
+		}
+		.btn-primary {
+			background: #667eea;
+			color: white;
+		}
+		.btn-primary:hover {
+			background: #5568d3;
+		}
+		.btn-success {
+			background: #10b981;
+			color: white;
+		}
+		.btn-success:hover {
+			background: #059669;
+		}
+		.btn-danger {
+			background: #ef4444;
+			color: white;
+		}
+		.btn-danger:hover {
+			background: #dc2626;
+		}
+		.btn-secondary {
+			background: #6b7280;
+			color: white;
+		}
+		.btn-secondary:hover {
+			background: #4b5563;
+		}
+		.btn:disabled {
+			opacity: 0.5;
+			cursor: not-allowed;
+		}
+		.loading {
+			text-align: center;
+			padding: 40px;
+			color: #666;
+		}
+		.error {
+			background: #fee;
+			color: #c33;
+			padding: 15px;
+			border-radius: 6px;
+			margin-bottom: 20px;
+		}
+		.filter-tabs {
+			display: flex;
+			gap: 10px;
+			margin-bottom: 20px;
+		}
+		.filter-tab {
+			padding: 10px 20px;
+			background: white;
+			border: 2px solid #e5e7eb;
+			border-radius: 6px;
+			cursor: pointer;
+			font-weight: 600;
+			transition: all 0.2s;
+		}
+		.filter-tab.active {
+			background: #667eea;
+			color: white;
+			border-color: #667eea;
+		}
+		.checkbox-wrapper {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+		.checkbox-wrapper input[type="checkbox"] {
+			width: 20px;
+			height: 20px;
+			cursor: pointer;
+		}
+	</style>
+</head>
+<body>
+	<div class="admin-container">
+		<div class="admin-header">
+			<h1>🔐 Admin Panel</h1>
+			<p>Manage gym accounts and access permissions</p>
+		</div>
+
+		<div id="error-message" class="error" style="display: none;"></div>
+
+		<div class="admin-stats">
+			<div class="admin-stat-card">
+				<h3>Total Gym Accounts</h3>
+				<div class="stat-value" id="stat-total">-</div>
+			</div>
+			<div class="admin-stat-card">
+				<h3>Verified</h3>
+				<div class="stat-value" id="stat-verified">-</div>
+			</div>
+			<div class="admin-stat-card">
+				<h3>Unverified</h3>
+				<div class="stat-value" id="stat-unverified">-</div>
+			</div>
+			<div class="admin-stat-card">
+				<h3>Premium</h3>
+				<div class="stat-value" id="stat-premium">-</div>
+			</div>
+		</div>
+
+		<div class="filter-tabs">
+			<button class="filter-tab active" data-filter="all">All</button>
+			<button class="filter-tab" data-filter="unverified">Unverified</button>
+			<button class="filter-tab" data-filter="verified">Verified</button>
+			<button class="filter-tab" data-filter="premium">Premium</button>
+		</div>
+
+		<div class="gym-accounts-list" id="gym-accounts-list">
+			<div class="loading">Loading gym accounts...</div>
+		</div>
+	</div>
+
+	<script>
+		const SUPABASE_URL = '{{ SUPABASE_URL }}';
+		const SUPABASE_ANON_KEY = '{{ SUPABASE_ANON_KEY }}';
+		
+		let supabase;
+		let currentFilter = 'all';
+
+		async function initSupabase() {
+			if (typeof window.supabase === 'undefined') {
+				const script = document.createElement('script');
+				script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
+				script.onload = () => {
+					supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+					checkAuth();
+				};
+				script.onerror = () => {
+					showError('Failed to load Supabase. Please refresh the page.');
+				};
+				document.head.appendChild(script);
+			} else {
+				supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+				checkAuth();
+			}
+		}
+
+		async function checkAuth() {
+			const { data: { session } } = await supabase.auth.getSession();
+			if (!session) {
+				showError('Please log in to access the admin panel.');
+				return;
+			}
+			loadGymAccounts();
+		}
+
+		async function loadGymAccounts() {
+			try {
+				const response = await fetch('/api/admin/gym-accounts', {
+					headers: {
+						'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session.access_token}`
+					}
+				});
+
+				if (!response.ok) {
+					if (response.status === 403) {
+						showError('You do not have admin access.');
+					} else {
+						showError('Failed to load gym accounts.');
+					}
+					return;
+				}
+
+				const data = await response.json();
+				renderGymAccounts(data.accounts || []);
+				updateStats(data.accounts || []);
+			} catch (error) {
+				console.error('Error loading gym accounts:', error);
+				showError('Failed to load gym accounts.');
+			}
+		}
+
+		function updateStats(accounts) {
+			const total = accounts.length;
+			const verified = accounts.filter(a => a.is_verified).length;
+			const unverified = total - verified;
+			const premium = accounts.filter(a => a.is_premium).length;
+
+			document.getElementById('stat-total').textContent = total;
+			document.getElementById('stat-verified').textContent = verified;
+			document.getElementById('stat-unverified').textContent = unverified;
+			document.getElementById('stat-premium').textContent = premium;
+		}
+
+		function renderGymAccounts(accounts) {
+			const container = document.getElementById('gym-accounts-list');
+			
+			if (accounts.length === 0) {
+				container.innerHTML = '<div class="loading">No gym accounts found.</div>';
+				return;
+			}
+
+			// Filter accounts
+			let filtered = accounts;
+			if (currentFilter === 'unverified') {
+				filtered = accounts.filter(a => !a.is_verified);
+			} else if (currentFilter === 'verified') {
+				filtered = accounts.filter(a => a.is_verified);
+			} else if (currentFilter === 'premium') {
+				filtered = accounts.filter(a => a.is_premium);
+			}
+
+			container.innerHTML = filtered.map(account => `
+				<div class="gym-account-item">
+					<div class="gym-account-info">
+						<h3>${escapeHtml(account.gym_name || 'Unknown')}</h3>
+						<p><strong>Email:</strong> ${escapeHtml(account.email || 'N/A')}</p>
+						<p><strong>Contact:</strong> ${escapeHtml(account.contact_name || 'N/A')} ${account.contact_phone ? `(${escapeHtml(account.contact_phone)})` : ''}</p>
+						<p><strong>Created:</strong> ${formatDate(account.created_at)}</p>
+					</div>
+					<div class="gym-account-status">
+						<span class="status-badge ${account.is_verified ? 'verified' : 'unverified'}">
+							${account.is_verified ? '✓ Verified' : '⚠ Unverified'}
+						</span>
+						<span class="status-badge ${account.is_premium ? 'premium' : 'basic'}">
+							${account.is_premium ? '⭐ Premium' : 'Basic'}
+						</span>
+					</div>
+					<div class="admin-actions">
+						${!account.is_verified ? `
+							<button class="btn btn-success" onclick="approveGym('${account.user_id}')">Approve</button>
+						` : `
+							<button class="btn btn-danger" onclick="rejectGym('${account.user_id}')">Reject</button>
+						`}
+					</div>
+					<div class="admin-actions">
+						<div class="checkbox-wrapper">
+							<input type="checkbox" id="premium-${account.user_id}" ${account.is_premium ? 'checked' : ''} 
+								onchange="togglePremium('${account.user_id}', this.checked)">
+							<label for="premium-${account.user_id}">Premium Access</label>
+						</div>
+					</div>
+				</div>
+			`).join('');
+		}
+
+		async function approveGym(userId) {
+			try {
+				const response = await fetch(`/api/admin/gym-accounts/${userId}/approve`, {
+					method: 'POST',
+					headers: {
+						'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session.access_token}`,
+						'Content-Type': 'application/json'
+					}
+				});
+
+				if (!response.ok) {
+					showError('Failed to approve gym account.');
+					return;
+				}
+
+				loadGymAccounts();
+			} catch (error) {
+				console.error('Error approving gym:', error);
+				showError('Failed to approve gym account.');
+			}
+		}
+
+		async function rejectGym(userId) {
+			if (!confirm('Are you sure you want to reject this gym account? They will lose access to dashboard data.')) {
+				return;
+			}
+
+			try {
+				const response = await fetch(`/api/admin/gym-accounts/${userId}/reject`, {
+					method: 'POST',
+					headers: {
+						'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session.access_token}`,
+						'Content-Type': 'application/json'
+					}
+				});
+
+				if (!response.ok) {
+					showError('Failed to reject gym account.');
+					return;
+				}
+
+				loadGymAccounts();
+			} catch (error) {
+				console.error('Error rejecting gym:', error);
+				showError('Failed to reject gym account.');
+			}
+		}
+
+		async function togglePremium(userId, isPremium) {
+			try {
+				const response = await fetch(`/api/admin/gym-accounts/${userId}/premium`, {
+					method: 'POST',
+					headers: {
+						'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session.access_token}`,
+						'Content-Type': 'application/json'
+					},
+					body: JSON.stringify({ is_premium: isPremium })
+				});
+
+				if (!response.ok) {
+					showError('Failed to update premium status.');
+					loadGymAccounts(); // Reload to reset checkbox
+					return;
+				}
+
+				// Success - no need to reload, checkbox is already updated
+			} catch (error) {
+				console.error('Error toggling premium:', error);
+				showError('Failed to update premium status.');
+				loadGymAccounts(); // Reload to reset checkbox
+			}
+		}
+
+		function showError(message) {
+			const errorEl = document.getElementById('error-message');
+			errorEl.textContent = message;
+			errorEl.style.display = 'block';
+			setTimeout(() => {
+				errorEl.style.display = 'none';
+			}, 5000);
+		}
+
+		function escapeHtml(text) {
+			const div = document.createElement('div');
+			div.textContent = text;
+			return div.innerHTML;
+		}
+
+		function formatDate(dateString) {
+			if (!dateString) return 'N/A';
+			const date = new Date(dateString);
+			return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+		}
+
+		// Filter tabs
+		document.querySelectorAll('.filter-tab').forEach(tab => {
+			tab.addEventListener('click', () => {
+				document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+				tab.classList.add('active');
+				currentFilter = tab.dataset.filter;
+				loadGymAccounts();
+			});
+		});
+
+		// Initialize
+		initSupabase();
+	</script>
+</body>
+</html>

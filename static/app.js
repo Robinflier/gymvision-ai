@@ -1505,7 +1505,6 @@ async function loadGymDashboardData() {
 		renderGymMachinesChart('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
 		renderGymPeakTimes(charts);
 		renderGymMuscleFocus(charts.top_muscles_by_sets);
-		renderGymUsersLine('gym-dashboard-chart-users', charts.active_users_by_week || []);
 		renderGymCategories(charts.exercise_categories || []);
 
 		if (loadingEl) loadingEl.style.display = 'none';
