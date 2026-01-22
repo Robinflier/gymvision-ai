@@ -253,11 +253,18 @@
 		}
 
 		async function checkAuth() {
-			const { data: { session } } = await supabase.auth.getSession();
-			if (!session) {
-				showError('Please log in to access the admin panel.');
+			const { data: { session }, error } = await supabase.auth.getSession();
+			if (error) {
+				console.error('[ADMIN] Session error:', error);
+				showError('Error checking authentication. Please refresh the page.');
 				return;
 			}
+			if (!session || !session.user) {
+				showError('Please log in to access the admin panel. <a href="/login" style="color: #667eea; text-decoration: underline;">Go to login</a>');
+				document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Please log in first.</div>';
+				return;
+			}
+			console.log('[ADMIN] Authenticated as:', session.user.email);
 			loadGymAccounts();
 		}
 
