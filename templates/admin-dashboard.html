@@ -497,34 +497,51 @@
 			container.innerHTML = '<div class="loading">Loading gym accounts...</div>';
 			
 			try {
-				console.log('[ADMIN] Fetching gym accounts from /api/admin/gym-accounts');
 				// TEMPORARILY DISABLED AUTH - call API without auth header
 				const response = await fetch('/api/admin/gym-accounts');
-				console.log('[ADMIN] Response status:', response.status, response.statusText);
 
 				if (!response.ok) {
-					const errorText = await response.text();
-					console.error('[ADMIN] Failed to load gym accounts:', response.status, errorText);
-					container.innerHTML = '<div class="loading">Failed to load gym accounts (Status: ' + response.status + '). ' + errorText + '</div>';
+					let errorText = 'Unknown error';
+					try {
+						errorText = await response.text();
+					} catch (e) {
+						errorText = 'Status: ' + response.status;
+					}
+					container.innerHTML = '<div class="loading" style="color: #ef4444; padding: 20px; background: #1a1a1b; border-radius: 8px; border: 1px solid #ef4444;">❌ Error ' + response.status + ': ' + errorText + '</div>';
+					showError('Failed to load gym accounts: ' + errorText);
+					updateStats([]);
 					return;
 				}
 
-				const data = await response.json();
-				console.log('[ADMIN] Response data:', data);
-				console.log('[ADMIN] Loaded gym accounts:', data.accounts?.length || 0, 'accounts');
-				
-				if (!data.accounts) {
-					console.error('[ADMIN] No accounts field in response:', data);
-					container.innerHTML = '<div class="loading">No accounts field in response. Check console for details.</div>';
+				let data;
+				try {
+					data = await response.json();
+				} catch (e) {
+					container.innerHTML = '<div class="loading" style="color: #ef4444;">Failed to parse response. Check if server is running.</div>';
+					updateStats([]);
 					return;
 				}
 				
-				renderGymAccounts(data.accounts || []);
-				updateStats(data.accounts || []);
+				if (!data) {
+					container.innerHTML = '<div class="loading">No data returned from server.</div>';
+					updateStats([]);
+					return;
+				}
+				
+				const accounts = data.accounts || [];
+				
+				if (accounts.length === 0) {
+					container.innerHTML = '<div class="loading" style="padding: 40px; text-align: center; color: #888;">No gym accounts found.<br><br>Gym accounts will appear here after they register.</div>';
+					updateStats([]);
+					return;
+				}
+				
+				renderGymAccounts(accounts);
+				updateStats(accounts);
 			} catch (error) {
-				console.error('[ADMIN] Error loading gym accounts:', error);
-				console.error('[ADMIN] Error stack:', error.stack);
-				container.innerHTML = '<div class="loading">Error: ' + error.message + '</div>';
+				container.innerHTML = '<div class="loading" style="color: #ef4444; padding: 20px; background: #1a1a1b; border-radius: 8px; border: 1px solid #ef4444;">❌ Network Error: ' + error.message + '<br><br>Make sure the server is running and try again.</div>';
+				showError('Failed to load gym accounts: ' + error.message);
+				updateStats([]);
 			}
 		}
 
