@@ -546,6 +546,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 		return;
 	}
 
+		// If we're on login page with redirect, don't initialize main app
+		if (window.location.pathname === '/login') {
+			const urlParams = new URLSearchParams(window.location.search);
+			const redirect = urlParams.get('redirect');
+			if (redirect) {
+				console.log('[INIT] On login page with redirect - not initializing main app');
+				hideLoadingOverlay();
+				return; // Let login page handle the redirect
+			}
+		}
+		
 		// If this is a gym account, ALWAYS route to the in-app gym dashboard (prevents Command+R landing on user UI).
 		try {
 			const meta = initSession?.user?.user_metadata || {};
