@@ -125,51 +125,58 @@
 		</div>
 	</div>
 
+	<!-- Supabase library - MUST load before script -->
+	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 	<script>
-		const SUPABASE_URL = '{{ SUPABASE_URL }}';
-		const SUPABASE_ANON_KEY = '{{ SUPABASE_ANON_KEY }}';
+		// Public Supabase config (anon key - safe to expose)
+		const SUPABASE_URL = '{{ SUPABASE_URL }}' || 'https://jugdkqzhcbqbjbvktqlz.supabase.co';
+		const SUPABASE_ANON_KEY = '{{ SUPABASE_ANON_KEY }}' || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp1Z2RrcXpoY2JxYmpidmt0cWx6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODI2NzIsImV4cCI6MjA4MDI1ODY3Mn0.rqCqBK14sOZvsxNUhIHIxaOnVMvdnNOjx_0YIXy1VIY';
 		
 		let supabase;
 
 		async function initSupabase() {
-			if (typeof window.supabase === 'undefined') {
-				const script = document.createElement('script');
-				script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
-				script.onload = () => {
-					supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-					loadUserId();
-				};
-				script.onerror = () => {
-					showError('Failed to load Supabase. Please refresh the page.');
-				};
-				document.head.appendChild(script);
-			} else {
+			try {
+				// Check if Supabase is already loaded
+				if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
+					showError('Supabase library failed to load. Please refresh the page.');
+					return;
+				}
+				
 				supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 				loadUserId();
+			} catch (error) {
+				console.error('Error initializing Supabase:', error);
+				showError('Failed to initialize Supabase. Please refresh the page.');
 			}
 		}
 
 		async function loadUserId() {
 			try {
+				console.log('[MY USER ID] Checking session...');
 				const { data: { session }, error } = await supabase.auth.getSession();
 				
+				console.log('[MY USER ID] Session:', session ? 'found' : 'not found', 'Error:', error);
+				
 				if (error) {
-					showError('Please log in first. <a href="/login">Go to login</a>');
+					console.error('[MY USER ID] Session error:', error);
+					showError('Error checking session: ' + error.message + '. <a href="/login">Go to login</a>');
 					return;
 				}
 				
 				if (!session || !session.user) {
+					console.log('[MY USER ID] No session found');
 					showError('Please log in first. <a href="/login">Go to login</a>');
 					return;
 				}
 				
 				const userId = session.user.id;
+				console.log('[MY USER ID] User ID:', userId);
 				document.getElementById('user-id-display').textContent = userId;
 				document.getElementById('loading').style.display = 'none';
 				document.getElementById('user-id-container').style.display = 'block';
 			} catch (error) {
-				console.error('Error loading user ID:', error);
-				showError('Failed to load user ID. Please try again.');
+				console.error('[MY USER ID] Error loading user ID:', error);
+				showError('Failed to load user ID: ' + error.message + '. Please try again.');
 			}
 		}
 
