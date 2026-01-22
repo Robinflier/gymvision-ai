@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Admin - GymVision AI</title>
+	<style>
+		* {
+			margin: 0;
+			padding: 0;
+			box-sizing: border-box;
+		}
+		body {
+			background: #0f0f10;
+			color: #fff;
+			font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+			padding: 20px;
+		}
+		.header {
+			background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+			padding: 30px;
+			border-radius: 12px;
+			margin-bottom: 30px;
+		}
+		.header h1 {
+			font-size: 28px;
+			margin-bottom: 10px;
+		}
+		.account-item {
+			background: #1a1a1b;
+			border: 1px solid #2a2a2b;
+			border-radius: 8px;
+			padding: 20px;
+			margin-bottom: 15px;
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+		}
+		.account-info h3 {
+			margin-bottom: 8px;
+			color: #fff;
+		}
+		.account-info p {
+			color: #888;
+			margin: 4px 0;
+			font-size: 14px;
+		}
+		.actions {
+			display: flex;
+			gap: 10px;
+		}
+		.btn {
+			padding: 12px 24px;
+			border: none;
+			border-radius: 6px;
+			cursor: pointer;
+			font-size: 18px;
+			font-weight: 600;
+			min-width: 60px;
+		}
+		.btn-approve {
+			background: #10b981;
+			color: white;
+		}
+		.btn-approve:hover {
+			background: #059669;
+		}
+		.btn-reject {
+			background: #ef4444;
+			color: white;
+		}
+		.btn-reject:hover {
+			background: #dc2626;
+		}
+		.status {
+			padding: 6px 12px;
+			border-radius: 20px;
+			font-size: 12px;
+			font-weight: 600;
+			margin-right: 10px;
+		}
+		.status.verified {
+			background: #10b981;
+			color: white;
+		}
+		.status.unverified {
+			background: #f59e0b;
+			color: white;
+		}
+		.loading {
+			text-align: center;
+			padding: 40px;
+			color: #888;
+		}
+		.error {
+			background: #fee;
+			color: #c33;
+			padding: 15px;
+			border-radius: 6px;
+			margin-bottom: 20px;
+		}
+	</style>
+</head>
+<body>
+	<div class="header">
+		<h1>🔐 Admin Dashboard</h1>
+		<p>Approve or reject gym account requests</p>
+	</div>
+
+	<div id="error-message" class="error" style="display: none;"></div>
+	<div id="accounts-list" class="loading">Loading gym accounts...</div>
+
+	<script>
+		let accounts = [];
+
+		async function loadAccounts() {
+			const container = document.getElementById('accounts-list');
+			container.innerHTML = '<div class="loading">Loading gym accounts...</div>';
+
+			try {
+				const response = await fetch('/api/admin/gym-accounts');
+				
+				if (!response.ok) {
+					const errorText = await response.text();
+					container.innerHTML = '<div class="error">Error ' + response.status + ': ' + errorText + '</div>';
+					return;
+				}
+
+				const data = await response.json();
+				accounts = data.accounts || [];
+
+				if (accounts.length === 0) {
+					container.innerHTML = '<div class="loading">No gym accounts found.<br><br>Gym accounts will appear here after they register.</div>';
+					return;
+				}
+
+				renderAccounts();
+			} catch (error) {
+				container.innerHTML = '<div class="error">Error: ' + error.message + '</div>';
+			}
+		}
+
+		function renderAccounts() {
+			const container = document.getElementById('accounts-list');
+			container.innerHTML = accounts.map(account => `
+				<div class="account-item">
+					<div class="account-info">
+						<h3>${escapeHtml(account.gym_name || 'Unknown')}</h3>
+						<p><strong>Email:</strong> ${escapeHtml(account.email || 'N/A')}</p>
+						${account.contact_name ? `<p><strong>Contact:</strong> ${escapeHtml(account.contact_name)}${account.contact_phone ? ` (${escapeHtml(account.contact_phone)})` : ''}</p>` : ''}
+						<p><strong>Created:</strong> ${formatDate(account.created_at)}</p>
+					</div>
+					<div class="actions">
+						${account.is_verified ? '<span class="status verified">✓ Verified</span>' : '<span class="status unverified">⚠ Unverified</span>'}
+						${!account.is_verified ? `
+							<button class="btn btn-approve" onclick="approve('${account.user_id}')">✓ Approve</button>
+						` : ''}
+						<button class="btn btn-reject" onclick="reject('${account.user_id}')">✗ Reject</button>
+					</div>
+				</div>
+			`).join('');
+		}
+
+		async function approve(userId) {
+			if (!confirm('Approve this gym account?')) return;
+
+			try {
+				const response = await fetch(`/api/admin/gym-accounts/${userId}/approve`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' }
+				});
+
+				if (response.ok) {
+					loadAccounts();
+				} else {
+					alert('Failed to approve: ' + await response.text());
+				}
+			} catch (error) {
+				alert('Error: ' + error.message);
+			}
+		}
+
+		async function reject(userId) {
+			if (!confirm('Reject this gym account? They will lose access.')) return;
+
+			try {
+				const response = await fetch(`/api/admin/gym-accounts/${userId}/reject`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' }
+				});
+
+				if (response.ok) {
+					loadAccounts();
+				} else {
+					alert('Failed to reject: ' + await response.text());
+				}
+			} catch (error) {
+				alert('Error: ' + error.message);
+			}
+		}
+
+		function escapeHtml(text) {
+			const div = document.createElement('div');
+			div.textContent = text;
+			return div.innerHTML;
+		}
+
+		function formatDate(dateString) {
+			if (!dateString) return 'N/A';
+			const date = new Date(dateString);
+			return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+		}
+
+		// Load on page load
+		loadAccounts();
+	</script>
+</body>
+</html>

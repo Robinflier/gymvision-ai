@@ -653,9 +653,13 @@ def admin_dashboard():
 	We don't check auth server-side because Supabase sessions are client-side only.
 	The frontend JavaScript will handle authentication and show/hide the login form.
 	"""
-	supabase_url = os.getenv("SUPABASE_URL") or ""
-	supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or ""
-	return render_template("admin-dashboard.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
+	# Use simple version for now
+	return render_template("admin-simple.html")
+
+@app.route("/admin", methods=["GET"])
+def admin_simple():
+	"""Simple admin page - no auth, just show gym accounts"""
+	return render_template("admin-simple.html")
 
 
 def is_admin_user(user_id: str, user_email: str = None) -> bool:
