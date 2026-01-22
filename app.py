@@ -2573,26 +2573,90 @@ def register_gym_account():
 				user_created = True
 				print(f"[GYM REGISTER] Successfully created gym account: user_id={user_id}")
 		except Exception as create_error:
+			error_str = str(create_error)
 			print(f"[GYM REGISTER] Error during create_user: {create_error}")
-			# If user already exists, try to get it and update metadata
-			if "already been registered" in str(create_error) or "already exists" in str(create_error):
-				print(f"[GYM REGISTER] User already exists, trying to find and update...")
-				# Try to find existing user by email
-				try:
-					all_users = admin_client.auth.admin.list_users()
-					users_list = getattr(all_users, "data", None) or []
-					for u in users_list:
-						if u.email == email:
-							user_id = u.id
-							user_created = True
-							print(f"[GYM REGISTER] Found existing user: {user_id}")
-							break
-				except Exception as e:
-					print(f"[GYM REGISTER] Error finding existing user: {e}")
+			import traceback
+			traceback.print_exc()
 			
-			# If we still don't have a user_id, return error
-			if not user_id:
-				return jsonify({"error": f"Failed to create gym account: {str(create_error)}"}), 500
+			# Check if user already exists (by email)
+			user_exists = False
+			try:
+				all_users = admin_client.auth.admin.list_users()
+				users_list = getattr(all_users, "data", None) or []
+				for u in users_list:
+					if u.email == email:
+						user_id = u.id
+						user_exists = True
+						print(f"[GYM REGISTER] Found existing user with this email: {user_id}")
+						break
+			except Exception as e:
+				print(f"[GYM REGISTER] Error checking for existing user: {e}")
+			
+			# If user exists, try to update metadata
+			if user_exists and user_id:
+				try:
+					# Get current metadata
+					user_detail = admin_client.auth.admin.get_user_by_id(user_id)
+					current_meta = {}
+					if user_detail and hasattr(user_detail, 'user') and user_detail.user:
+						current_meta = getattr(user_detail.user, 'user_metadata', {}) or {}
+					
+					# Update metadata to mark as gym account
+					updated_meta = current_meta.copy()
+					updated_meta.update({
+						"is_gym_account": True,
+						"gym_name": gym_name.strip(),
+						"contact_name": contact_name.strip(),
+						"contact_phone": contact_phone.strip(),
+						"is_verified": False
+					})
+					
+					admin_client.auth.admin.update_user_by_id(user_id, {
+						"user_metadata": updated_meta
+					})
+					user_created = True
+					print(f"[GYM REGISTER] Updated existing user {user_id} to gym account")
+				except Exception as update_error:
+					print(f"[GYM REGISTER] Error updating existing user: {update_error}")
+					if "already been registered" in error_str or "already exists" in error_str:
+						return jsonify({"error": "An account with this email already exists. Please use a different email or try logging in."}), 400
+					else:
+						return jsonify({"error": f"Account exists but could not be updated: {str(update_error)}"}), 500
+			else:
+				# User doesn't exist and creation failed
+				if "already been registered" in error_str or "already exists" in error_str:
+					return jsonify({"error": "An account with this email already exists. Please use a different email or try logging in."}), 400
+				elif "Database error" in error_str:
+					# Database error - account might have been created anyway, check again
+					try:
+						all_users = admin_client.auth.admin.list_users()
+						users_list = getattr(all_users, "data", None) or []
+						for u in users_list:
+							if u.email == email:
+								user_id = u.id
+								user_created = True
+								print(f"[GYM REGISTER] Account was created despite error, found user: {user_id}")
+								# Try to update metadata
+								try:
+									admin_client.auth.admin.update_user_by_id(user_id, {
+										"user_metadata": {
+											"is_gym_account": True,
+											"gym_name": gym_name.strip(),
+											"contact_name": contact_name.strip(),
+											"contact_phone": contact_phone.strip(),
+											"is_verified": False
+										}
+									})
+								except:
+									pass
+								break
+					except:
+						pass
+					
+					if not user_created:
+						return jsonify({"error": "Failed to create gym account due to a database error. Please try again or contact support."}), 500
+				else:
+					return jsonify({"error": f"Failed to create gym account: {error_str}"}), 500
 		
 		# If account was created, ensure metadata is set correctly
 		if user_id:
