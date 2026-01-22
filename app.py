@@ -664,20 +664,32 @@ def my_user_id():
 	return render_template("my-user-id.html", SUPABASE_URL=supabase_url, SUPABASE_ANON_KEY=supabase_anon_key)
 
 
-def is_admin_user(user_id: str) -> bool:
+def is_admin_user(user_id: str, user_email: str = None) -> bool:
 	"""
 	Check if a user is an admin.
-	Admins are defined by ADMIN_USER_IDS environment variable (comma-separated list of user IDs).
+	Admins are defined by ADMIN_USER_IDS or ADMIN_USER_EMAILS environment variable.
+	ADMIN_USER_IDS: comma-separated list of user IDs
+	ADMIN_USER_EMAILS: comma-separated list of email addresses
 	"""
 	if not SUPABASE_AVAILABLE:
 		return False
 	
+	# Check by user ID
 	admin_user_ids = os.getenv("ADMIN_USER_IDS", "").strip()
-	if not admin_user_ids:
-		return False
+	if admin_user_ids:
+		admin_list = [uid.strip() for uid in admin_user_ids.split(",") if uid.strip()]
+		if user_id in admin_list:
+			return True
 	
-	admin_list = [uid.strip() for uid in admin_user_ids.split(",") if uid.strip()]
-	return user_id in admin_list
+	# Check by email (easier to set up)
+	if user_email:
+		admin_user_emails = os.getenv("ADMIN_USER_EMAILS", "").strip()
+		if admin_user_emails:
+			admin_email_list = [email.strip().lower() for email in admin_user_emails.split(",") if email.strip()]
+			if user_email.lower() in admin_email_list:
+				return True
+	
+	return False
 
 
 @app.route("/api/admin/gym-accounts", methods=["GET", "OPTIONS"])
@@ -714,8 +726,8 @@ def list_gym_accounts():
 		if not user_response.user:
 			return jsonify({"error": "Invalid token"}), 401
 		
-		# Check if user is admin
-		if not is_admin_user(user_response.user.id):
+		# Check if user is admin (by ID or email)
+		if not is_admin_user(user_response.user.id, user_response.user.email):
 			return jsonify({"error": "Admin access required"}), 403
 		
 		# Get all gym accounts
@@ -784,8 +796,8 @@ def approve_gym_account(user_id: str):
 		if not user_response.user:
 			return jsonify({"error": "Invalid token"}), 401
 		
-		# Check if user is admin
-		if not is_admin_user(user_response.user.id):
+		# Check if user is admin (by ID or email)
+		if not is_admin_user(user_response.user.id, user_response.user.email):
 			return jsonify({"error": "Admin access required"}), 403
 		
 		# Update gym account
@@ -846,8 +858,8 @@ def reject_gym_account(user_id: str):
 		if not user_response.user:
 			return jsonify({"error": "Invalid token"}), 401
 		
-		# Check if user is admin
-		if not is_admin_user(user_response.user.id):
+		# Check if user is admin (by ID or email)
+		if not is_admin_user(user_response.user.id, user_response.user.email):
 			return jsonify({"error": "Admin access required"}), 403
 		
 		# Update gym account
@@ -908,8 +920,8 @@ def toggle_premium_gym_account(user_id: str):
 		if not user_response.user:
 			return jsonify({"error": "Invalid token"}), 401
 		
-		# Check if user is admin
-		if not is_admin_user(user_response.user.id):
+		# Check if user is admin (by ID or email)
+		if not is_admin_user(user_response.user.id, user_response.user.email):
 			return jsonify({"error": "Admin access required"}), 403
 		
 		# Get request data
