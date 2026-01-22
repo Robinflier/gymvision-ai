@@ -3,9 +3,18 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>Admin Panel - Gym Accounts</title>
+	<title>Admin Dashboard - GymVision AI</title>
 	<link rel="stylesheet" href="/static/styles.css">
+	<!-- Supabase library - MUST load before script -->
+	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 	<style>
+		body {
+			background: #0f0f10;
+			color: #fff;
+			font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+			margin: 0;
+			padding: 0;
+		}
 		.admin-container {
 			max-width: 1200px;
 			margin: 0 auto;
@@ -29,10 +38,10 @@
 			margin-bottom: 30px;
 		}
 		.admin-stat-card {
-			background: white;
+			background: #1a1a1b;
 			padding: 20px;
 			border-radius: 8px;
-			box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+			border: 1px solid #2a2a2b;
 		}
 		.admin-stat-card h3 {
 			margin: 0 0 10px 0;
@@ -43,17 +52,17 @@
 		.admin-stat-card .stat-value {
 			font-size: 32px;
 			font-weight: bold;
-			color: #333;
+			color: #fff;
 		}
 		.gym-accounts-list {
-			background: white;
+			background: #1a1a1b;
 			border-radius: 8px;
-			box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+			border: 1px solid #2a2a2b;
 			overflow: hidden;
 		}
 		.gym-account-item {
 			padding: 20px;
-			border-bottom: 1px solid #eee;
+			border-bottom: 1px solid #2a2a2b;
 			display: grid;
 			grid-template-columns: 1fr auto auto auto;
 			gap: 20px;
@@ -64,11 +73,11 @@
 		}
 		.gym-account-info h3 {
 			margin: 0 0 5px 0;
-			color: #333;
+			color: #fff;
 		}
 		.gym-account-info p {
 			margin: 5px 0;
-			color: #666;
+			color: #888;
 			font-size: 14px;
 		}
 		.gym-account-status {
@@ -133,13 +142,6 @@
 		.btn-danger:hover {
 			background: #dc2626;
 		}
-		.btn-secondary {
-			background: #6b7280;
-			color: white;
-		}
-		.btn-secondary:hover {
-			background: #4b5563;
-		}
 		.btn:disabled {
 			opacity: 0.5;
 			cursor: not-allowed;
@@ -147,7 +149,7 @@
 		.loading {
 			text-align: center;
 			padding: 40px;
-			color: #666;
+			color: #888;
 		}
 		.error {
 			background: #fee;
@@ -163,11 +165,12 @@
 		}
 		.filter-tab {
 			padding: 10px 20px;
-			background: white;
-			border: 2px solid #e5e7eb;
+			background: #1a1a1b;
+			border: 2px solid #2a2a2b;
 			border-radius: 6px;
 			cursor: pointer;
 			font-weight: 600;
+			color: #fff;
 			transition: all 0.2s;
 		}
 		.filter-tab.active {
@@ -179,6 +182,7 @@
 			display: flex;
 			align-items: center;
 			gap: 8px;
+			color: #fff;
 		}
 		.checkbox-wrapper input[type="checkbox"] {
 			width: 20px;
@@ -186,18 +190,15 @@
 			cursor: pointer;
 		}
 	</style>
-	<!-- Supabase library - MUST load before script -->
-	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 	<div class="admin-container">
 		<div class="admin-header">
-			<h1>🔐 Admin Panel</h1>
+			<h1>🔐 Admin Dashboard</h1>
 			<p>Manage gym accounts and access permissions</p>
 		</div>
 
 		<div id="error-message" class="error" style="display: none;"></div>
-		<div id="info-message" class="error" style="background: #e3f2fd; color: #1976d2; border-left: 4px solid #2196f3; display: none; margin-bottom: 20px;"></div>
 
 		<div class="admin-stats">
 			<div class="admin-stat-card">
@@ -231,87 +232,61 @@
 	</div>
 
 	<script>
-		const SUPABASE_URL = '{{ SUPABASE_URL }}';
-		const SUPABASE_ANON_KEY = '{{ SUPABASE_ANON_KEY }}';
+		const SUPABASE_URL = '{{ SUPABASE_URL }}' || 'https://jugdkqzhcbqbjbvktqlz.supabase.co';
+		const SUPABASE_ANON_KEY = '{{ SUPABASE_ANON_KEY }}' || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp1Z2RrcXpoY2JxYmpidmt0cWx6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODI2NzIsImV4cCI6MjA4MDI1ODY3Mn0.rqCqBK14sOZvsxNUhIHIxaOnVMvdnNOjx_0YIXy1VIY';
 		
 		let supabase;
 		let currentFilter = 'all';
 
-		async function initSupabase() {
+		// Initialize Supabase and check auth
+		async function init() {
 			try {
 				// Check if Supabase is loaded
 				if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
 					showError('Supabase library failed to load. Please refresh the page.');
-					document.getElementById('gym-accounts-list').innerHTML = '<div class="loading" style="color: #c33;">Supabase not loaded. Please refresh.</div>';
 					return;
 				}
 				
-				// Create Supabase client
 				supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 				
-				if (!supabase || !supabase.auth) {
-					throw new Error('Supabase client created but auth is not available');
+				// Check authentication - REQUIRED
+				const { data: { session }, error } = await supabase.auth.getSession();
+				
+				if (error) {
+					console.error('[ADMIN] Session error:', error);
+					redirectToLogin('Error checking authentication');
+					return;
 				}
 				
-				console.log('[ADMIN] Supabase initialized successfully');
-				checkAuth();
-			} catch (error) {
-				console.error('[ADMIN] Error initializing Supabase:', error);
-				showError('Failed to initialize Supabase: ' + error.message + '. Please refresh the page.');
-				document.getElementById('gym-accounts-list').innerHTML = '<div class="loading" style="color: #c33;">Failed to load. Please refresh.</div>';
-			}
-		}
-
-		async function checkAuth() {
-			if (!supabase || !supabase.auth) {
-				showError('Supabase not initialized. Please refresh the page.');
-				return;
-			}
-			
-			try {
-				const { data: { session }, error } = await supabase.auth.getSession();
-			if (error) {
-				console.error('[ADMIN] Session error:', error);
-				showError('Error checking authentication. Redirecting to login...');
-				setTimeout(() => {
-					window.location.href = '/login?redirect=/admin-panel';
-				}, 2000);
-				return;
-			}
-			if (!session || !session.user) {
-				console.log('[ADMIN] No session found, redirecting to login');
-				showError('Please log in to access the admin panel. Redirecting...');
-				setTimeout(() => {
-					window.location.href = '/login?redirect=/admin-panel';
-				}, 2000);
-				return;
-			}
+				if (!session || !session.user) {
+					console.log('[ADMIN] No session found, redirecting to login');
+					redirectToLogin('Please log in to access the admin dashboard');
+					return;
+				}
+				
 				console.log('[ADMIN] Authenticated as:', session.user.email);
 				loadGymAccounts();
 			} catch (error) {
-				console.error('[ADMIN] Error in checkAuth:', error);
-				showError('Error checking authentication: ' + error.message);
+				console.error('[ADMIN] Error initializing:', error);
+				showError('Failed to initialize: ' + error.message);
+				setTimeout(() => redirectToLogin(), 2000);
 			}
+		}
+
+		function redirectToLogin(message) {
+			showError(message + '. Redirecting to login...');
+			document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Redirecting to login...</div>';
+			setTimeout(() => {
+				window.location.href = '/login?redirect=/admin-dashboard';
+			}, 1500);
 		}
 
 		async function loadGymAccounts() {
 			try {
 				const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 				
-				if (sessionError) {
-					console.error('[ADMIN] Session error:', sessionError);
-					showError('Error checking authentication. Please refresh the page.');
-					document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Authentication error.</div>';
-					return;
-				}
-				
-				if (!session || !session.user) {
-					console.log('[ADMIN] No session in loadGymAccounts, redirecting');
-					showError('Please log in to access the admin panel. Redirecting...');
-					document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Redirecting to login...</div>';
-					setTimeout(() => {
-						window.location.href = '/login?redirect=/admin-panel';
-					}, 2000);
+				if (sessionError || !session || !session.user) {
+					redirectToLogin('Session expired');
 					return;
 				}
 
@@ -324,20 +299,15 @@
 
 				if (!response.ok) {
 					if (response.status === 401) {
-						showError('Please log in to access the admin panel. Redirecting to login...');
-						document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Redirecting to login...</div>';
-						setTimeout(() => {
-							window.location.href = '/login?redirect=/admin-panel';
-						}, 2000);
+						redirectToLogin('Please log in to access the admin dashboard');
 					} else if (response.status === 403) {
 						const errorData = await response.json().catch(() => ({}));
-						const errorMsg = errorData.error || 'Access denied';
-						showError('❌ <strong>You do not have admin access.</strong><br><br>To fix this:<br>1. Get your User ID from Supabase Dashboard → Authentication → Users<br>2. Go to Render → Environment<br>3. Add: <code>ADMIN_USER_IDS</code> = your User ID<br>4. Save & Redeploy<br><br>Error: ' + errorMsg);
+						showError('❌ <strong>You do not have admin access.</strong><br><br>To fix this:<br>1. Get your User ID from Supabase Dashboard → Authentication → Users<br>2. Go to Render → Environment<br>3. Add: <code>ADMIN_USER_IDS</code> = your User ID<br>4. Save & Redeploy<br><br>Error: ' + (errorData.error || 'Access denied'));
 						document.getElementById('gym-accounts-list').innerHTML = '<div class="loading" style="color: #c33;">Access denied. You need to add your User ID to ADMIN_USER_IDS in Render.</div>';
 					} else {
 						const errorData = await response.json().catch(() => ({}));
 						showError('Failed to load gym accounts: ' + (errorData.error || 'Unknown error'));
-						document.getElementById('gym-accounts-list').innerHTML = '<div class="loading">Error loading data.</div>';
+						document.getElementById('gym-accounts-list').innerHTML = '<div class="loading" style="color: #c33;">Error loading data.</div>';
 					}
 					return;
 				}
@@ -417,16 +387,26 @@
 
 		async function approveGym(userId) {
 			try {
+				const { data: { session } } = await supabase.auth.getSession();
+				if (!session) {
+					redirectToLogin('Session expired');
+					return;
+				}
+
 				const response = await fetch(`/api/admin/gym-accounts/${userId}/approve`, {
 					method: 'POST',
 					headers: {
-						'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session.access_token}`,
+						'Authorization': `Bearer ${session.access_token}`,
 						'Content-Type': 'application/json'
 					}
 				});
 
 				if (!response.ok) {
-					showError('Failed to approve gym account.');
+					if (response.status === 401) {
+						redirectToLogin('Session expired');
+					} else {
+						showError('Failed to approve gym account.');
+					}
 					return;
 				}
 
@@ -443,16 +423,26 @@
 			}
 
 			try {
+				const { data: { session } } = await supabase.auth.getSession();
+				if (!session) {
+					redirectToLogin('Session expired');
+					return;
+				}
+
 				const response = await fetch(`/api/admin/gym-accounts/${userId}/reject`, {
 					method: 'POST',
 					headers: {
-						'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session.access_token}`,
+						'Authorization': `Bearer ${session.access_token}`,
 						'Content-Type': 'application/json'
 					}
 				});
 
 				if (!response.ok) {
-					showError('Failed to reject gym account.');
+					if (response.status === 401) {
+						redirectToLogin('Session expired');
+					} else {
+						showError('Failed to reject gym account.');
+					}
 					return;
 				}
 
@@ -465,22 +455,30 @@
 
 		async function togglePremium(userId, isPremium) {
 			try {
+				const { data: { session } } = await supabase.auth.getSession();
+				if (!session) {
+					redirectToLogin('Session expired');
+					return;
+				}
+
 				const response = await fetch(`/api/admin/gym-accounts/${userId}/premium`, {
 					method: 'POST',
 					headers: {
-						'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session.access_token}`,
+						'Authorization': `Bearer ${session.access_token}`,
 						'Content-Type': 'application/json'
 					},
 					body: JSON.stringify({ is_premium: isPremium })
 				});
 
 				if (!response.ok) {
-					showError('Failed to update premium status.');
-					loadGymAccounts(); // Reload to reset checkbox
+					if (response.status === 401) {
+						redirectToLogin('Session expired');
+					} else {
+						showError('Failed to update premium status.');
+						loadGymAccounts(); // Reload to reset checkbox
+					}
 					return;
 				}
-
-				// Success - no need to reload, checkbox is already updated
 			} catch (error) {
 				console.error('Error toggling premium:', error);
 				showError('Failed to update premium status.');
@@ -492,12 +490,6 @@
 			const errorEl = document.getElementById('error-message');
 			errorEl.innerHTML = message;
 			errorEl.style.display = 'block';
-		}
-		
-		function showInfo(message) {
-			const infoEl = document.getElementById('info-message');
-			infoEl.innerHTML = message;
-			infoEl.style.display = 'block';
 		}
 
 		function escapeHtml(text) {
@@ -522,8 +514,8 @@
 			});
 		});
 
-		// Initialize
-		initSupabase();
+		// Initialize on page load
+		init();
 	</script>
 </body>
 </html>
