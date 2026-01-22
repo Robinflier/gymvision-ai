@@ -2582,9 +2582,6 @@ def register_gym_account():
 	if request.method == "OPTIONS":
 		return jsonify({}), 200
 	return jsonify({"error": "This endpoint is deprecated. Use Supabase signUp instead."}), 410
-		
-		# Check if gym name already exists
-		all_users = admin_client.auth.admin.list_users()
 		# supabase-py v2 returns `.data`; older variants may return `.users`
 		users_list = getattr(all_users, "data", None)
 		if users_list is None:
