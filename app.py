@@ -2712,7 +2712,83 @@ def register_gym_account():
 					return jsonify({"error": f"Account exists but could not be updated: {str(update_error)}"}), 500
 			else:
 				# User doesn't exist and creation failed
+				# Try one more time to find the user (maybe it was created in the meantime)
 				if "already been registered" in error_str or "already exists" in error_str:
+					# User definitely exists, try to find it one more time and update metadata
+					print(f"[GYM REGISTER] User exists error, doing final check...")
+					try:
+						all_users = admin_client.auth.admin.list_users()
+						users_list = getattr(all_users, "data", None) or []
+						for u in users_list:
+							if u.email.lower() == email.lower():
+								user_id = u.id
+								print(f"[GYM REGISTER] Found user in final check: {user_id}, updating metadata...")
+								# Update metadata
+								try:
+									admin_client.auth.admin.update_user_by_id(user_id, {
+										"user_metadata": {
+											"is_gym_account": True,
+											"gym_name": gym_name.strip(),
+											"contact_name": contact_name.strip(),
+											"contact_phone": contact_phone.strip(),
+											"is_verified": False
+										}
+									})
+									print(f"[GYM REGISTER] ✅ Successfully updated metadata for existing user: {user_id}")
+									return jsonify({
+										"success": True,
+										"message": "Gym account created successfully. Your account needs to be verified by an administrator before you can access dashboard data.",
+										"user_id": user_id,
+										"requires_verification": True
+									}), 201
+								except Exception as final_update_error:
+									print(f"[GYM REGISTER] Error in final metadata update: {final_update_error}")
+									import traceback
+									traceback.print_exc()
+								break
+					except Exception as final_check_error:
+						print(f"[GYM REGISTER] Error in final check: {final_check_error}")
+					
+					return jsonify({"error": "An account with this email already exists. Please use a different email or try logging in."}), 400
+				elif "Database error" in error_str:
+					# Database error - account might have been created anyway, check one more time
+					print(f"[GYM REGISTER] Database error, doing final check if account was created...")
+					try:
+						all_users = admin_client.auth.admin.list_users()
+						users_list = getattr(all_users, "data", None) or []
+						for u in users_list:
+							if u.email.lower() == email.lower():
+								user_id = u.id
+								print(f"[GYM REGISTER] Account was created despite error: {user_id}, updating metadata...")
+								# Update metadata
+								try:
+									admin_client.auth.admin.update_user_by_id(user_id, {
+										"user_metadata": {
+											"is_gym_account": True,
+											"gym_name": gym_name.strip(),
+											"contact_name": contact_name.strip(),
+											"contact_phone": contact_phone.strip(),
+											"is_verified": False
+										}
+									})
+									print(f"[GYM REGISTER] ✅ Successfully updated metadata for user created despite error: {user_id}")
+									return jsonify({
+										"success": True,
+										"message": "Gym account created successfully. Your account needs to be verified by an administrator before you can access dashboard data.",
+										"user_id": user_id,
+										"requires_verification": True
+									}), 201
+								except Exception as final_update_error:
+									print(f"[GYM REGISTER] Error in final metadata update: {final_update_error}")
+									import traceback
+									traceback.print_exc()
+								break
+					except Exception as final_check_error:
+						print(f"[GYM REGISTER] Error in final check: {final_check_error}")
+					
+					return jsonify({"error": "Failed to create gym account due to a database error. This may be a temporary issue. Please try again in a few moments or contact support."}), 500
+				else:
+					return jsonify({"error": f"Failed to create gym account: {error_str}"}), 500
 					# This shouldn't happen if we checked above, but just in case
 					return jsonify({"error": "An account with this email already exists. Please use a different email or try logging in."}), 400
 				elif "Database error" in error_str:
