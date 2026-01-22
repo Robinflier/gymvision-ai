@@ -349,21 +349,8 @@
 			document.getElementById('admin-container').style.display = 'block';
 			document.getElementById('admin-container').classList.add('authenticated');
 			
-			// Load gym accounts
-			try {
-				const response = await fetch('/api/admin/gym-accounts');
-				if (response.ok) {
-					const data = await response.json();
-					renderGymAccounts(data.accounts || []);
-					updateStats(data.accounts || []);
-				} else {
-					const errorText = await response.text();
-					showError('Failed to load gym accounts: ' + errorText);
-				}
-			} catch (error) {
-				console.error('[ADMIN] Error loading gym accounts:', error);
-				showError('Cannot load gym accounts: ' + error.message);
-			}
+			// Load gym accounts immediately
+			loadGymAccounts();
 			
 			/* ORIGINAL AUTH CODE - DISABLED
 			if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
@@ -506,40 +493,27 @@
 		}
 
 		async function loadGymAccounts() {
+			const container = document.getElementById('gym-accounts-list');
+			container.innerHTML = '<div class="loading">Loading gym accounts...</div>';
+			
 			try {
-				const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-				
-				if (sessionError || !session || !session.user) {
-					document.getElementById('login-container').style.display = 'flex';
-					document.getElementById('admin-container').style.display = 'none';
-					return;
-				}
-
-				const response = await fetch('/api/admin/gym-accounts', {
-					headers: {
-						'Authorization': `Bearer ${session.access_token}`
-					}
-				});
+				// TEMPORARILY DISABLED AUTH - call API without auth header
+				const response = await fetch('/api/admin/gym-accounts');
 
 				if (!response.ok) {
-					if (response.status === 401 || response.status === 403) {
-						await supabase.auth.signOut();
-						document.getElementById('login-container').style.display = 'flex';
-						document.getElementById('admin-container').style.display = 'none';
-						showLoginError('Session expired or access denied. Please log in again.');
-					} else {
-						const errorData = await response.json().catch(() => ({}));
-						showError('Failed to load gym accounts: ' + (errorData.error || 'Unknown error'));
-					}
+					const errorText = await response.text();
+					console.error('[ADMIN] Failed to load gym accounts:', response.status, errorText);
+					container.innerHTML = '<div class="loading">Failed to load gym accounts. Please try again.</div>';
 					return;
 				}
 
 				const data = await response.json();
+				console.log('[ADMIN] Loaded gym accounts:', data.accounts?.length || 0);
 				renderGymAccounts(data.accounts || []);
 				updateStats(data.accounts || []);
 			} catch (error) {
 				console.error('[ADMIN] Error loading gym accounts:', error);
-				showError('Failed to load gym accounts: ' + error.message);
+				container.innerHTML = '<div class="loading">Error: ' + error.message + '</div>';
 			}
 		}
 
@@ -609,17 +583,10 @@
 
 		async function approveGym(userId) {
 			try {
-				const { data: { session } } = await supabase.auth.getSession();
-				if (!session) {
-					document.getElementById('login-container').style.display = 'flex';
-					document.getElementById('admin-container').style.display = 'none';
-					return;
-				}
-
+				// TEMPORARILY DISABLED AUTH - call API without auth header
 				const response = await fetch(`/api/admin/gym-accounts/${userId}/approve`, {
 					method: 'POST',
 					headers: {
-						'Authorization': `Bearer ${session.access_token}`,
 						'Content-Type': 'application/json'
 					}
 				});
@@ -647,17 +614,10 @@
 			}
 
 			try {
-				const { data: { session } } = await supabase.auth.getSession();
-				if (!session) {
-					document.getElementById('login-container').style.display = 'flex';
-					document.getElementById('admin-container').style.display = 'none';
-					return;
-				}
-
+				// TEMPORARILY DISABLED AUTH - call API without auth header
 				const response = await fetch(`/api/admin/gym-accounts/${userId}/reject`, {
 					method: 'POST',
 					headers: {
-						'Authorization': `Bearer ${session.access_token}`,
 						'Content-Type': 'application/json'
 					}
 				});
@@ -681,17 +641,10 @@
 
 		async function togglePremium(userId, isPremium) {
 			try {
-				const { data: { session } } = await supabase.auth.getSession();
-				if (!session) {
-					document.getElementById('login-container').style.display = 'flex';
-					document.getElementById('admin-container').style.display = 'none';
-					return;
-				}
-
+				// TEMPORARILY DISABLED AUTH - call API without auth header
 				const response = await fetch(`/api/admin/gym-accounts/${userId}/premium`, {
 					method: 'POST',
 					headers: {
-						'Authorization': `Bearer ${session.access_token}`,
 						'Content-Type': 'application/json'
 					},
 					body: JSON.stringify({ is_premium: isPremium })
