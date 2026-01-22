@@ -699,12 +699,11 @@ def list_gym_accounts():
 		return jsonify({"error": "Supabase not available"}), 500
 	
 	# TEMPORARILY DISABLED AUTH FOR TESTING
-	# Get Authorization header
-	auth_header = request.headers.get("Authorization")
-	# Skip auth check temporarily
 	skip_auth = True  # TEMPORARY
 	
 	if not skip_auth:
+		# Get Authorization header
+		auth_header = request.headers.get("Authorization")
 		if not auth_header or not auth_header.startswith("Bearer "):
 			return jsonify({"error": "Authentication required"}), 401
 		
@@ -728,8 +727,17 @@ def list_gym_accounts():
 			# Check if user is admin (by ID or email)
 			if not is_admin_user(user_response.user.id, user_response.user.email):
 				return jsonify({"error": "Admin access required"}), 403
+		except Exception as e:
+			return jsonify({"error": "Authentication error: " + str(e)}), 401
+	
+	# Get all gym accounts (always execute, even when skip_auth is True)
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 		
-		# Get all gym accounts
+		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 		all_users = admin_client.auth.admin.list_users()
 		users_list = getattr(all_users, "data", None) or getattr(all_users, "users", None) or []
