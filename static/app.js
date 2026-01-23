@@ -144,16 +144,16 @@ function getLastExerciseData(exerciseKey, exerciseDisplay = null, isCustom = fal
 	
 	// For custom exercises, prioritize matching by display name (case-insensitive)
 	// since the key changes each time
-	const searchKey = (exerciseKey || '').toLowerCase();
-	const searchDisplay = (exerciseDisplay || '').toLowerCase();
+	const searchKey = (exerciseKey || '').toLowerCase().trim();
+	const searchDisplay = (exerciseDisplay || '').toLowerCase().trim();
 	
 	// Find the first workout that has this exercise
 	for (const workout of sortedWorkouts) {
 		if (!workout.exercises || !Array.isArray(workout.exercises)) continue;
 		
 		const exercise = workout.exercises.find(ex => {
-			const exKey = (ex.key || '').toLowerCase();
-			const exDisplay = (ex.display || '').toLowerCase();
+			const exKey = (ex.key || '').toLowerCase().trim();
+			const exDisplay = (ex.display || '').toLowerCase().trim();
 			const exIsCustom = ex.isCustom === true;
 			
 			console.log('[GET LAST DATA] Checking exercise:', {
@@ -166,12 +166,35 @@ function getLastExerciseData(exerciseKey, exerciseDisplay = null, isCustom = fal
 			});
 			
 			// For custom exercises, match primarily by display name (case-insensitive, trimmed)
+			// Also check if either exercise is custom - if so, match by display name
 			if (isCustom || exIsCustom) {
-				const displayMatch = searchDisplay && exDisplay === searchDisplay;
+				// Trim and normalize whitespace for better matching
+				const normalizedSearchDisplay = searchDisplay.replace(/\s+/g, ' ').trim();
+				const normalizedExDisplay = exDisplay.replace(/\s+/g, ' ').trim();
+				
+				// Match if display names are the same (after normalization)
+				const displayMatch = normalizedSearchDisplay && normalizedExDisplay && normalizedExDisplay === normalizedSearchDisplay;
+				
 				if (displayMatch) {
-					console.log('[GET LAST DATA] ✅ Matched custom exercise by display:', exDisplay);
+					console.log('[GET LAST DATA] ✅ Matched custom exercise by display:', {
+						search: normalizedSearchDisplay,
+						found: normalizedExDisplay,
+						isCustom: isCustom,
+						exIsCustom: exIsCustom
+					});
 					return true;
 				}
+				
+				// If we're looking for a custom exercise but this one isn't custom, skip it
+				if (isCustom && !exIsCustom) {
+					return false;
+				}
+				
+				// If this is a custom exercise but we're not looking for one, skip it
+				if (!isCustom && exIsCustom) {
+					return false;
+				}
+				
 				// Don't try other matching for custom exercises - they must match by display name
 				return false;
 			}
