@@ -1057,28 +1057,36 @@ function initRegisterForm() {
 			return;
 		}
 		
-		// Gym registration uses backend endpoint (service role) so we can set is_gym_account metadata
+		// Gym registration: Use Supabase signUp directly with metadata (like gym-register.html)
 		if (role === 'gym') {
-			const apiUrl = getApiUrl('/api/gym/register');
-			const response = await fetch(apiUrl, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					gym_name: gymName,
-					email,
-					password,
-					contact_name: contactName,
-					contact_phone: contactPhone
-				})
+			// Create user account via Supabase signUp with metadata directly
+			const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
+				email,
+				password,
+				options: {
+					data: {
+						is_gym_account: true,
+						gym_name: gymName,
+						contact_name: contactName,
+						contact_phone: contactPhone,
+						is_verified: false
+					}
+				}
 			});
-			const data = await response.json().catch(() => ({}));
-			if (!response.ok) {
-				const msg = data?.error || 'Registration failed';
+			
+			if (signUpError) {
+				let errorMessage = signUpError.message;
+				if (signUpError.message.includes('already registered') || signUpError.message.includes('already exists')) {
+					errorMessage = 'This email is already registered. Please sign in instead.';
+				} else if (signUpError.message.includes('Password')) {
+					errorMessage = 'Password must be at least 6 characters';
+				}
+				
 				if (errorEl) {
-					errorEl.textContent = msg;
+					errorEl.textContent = errorMessage;
 					errorEl.classList.add('show');
 				} else {
-					alert(msg);
+					alert(errorMessage);
 				}
 				if (submitBtn) {
 					submitBtn.disabled = false;
@@ -1086,13 +1094,13 @@ function initRegisterForm() {
 				}
 				return;
 			}
-
-			// Auto-login and redirect to dashboard
-			const { data: loginData, error: loginError } = await supabaseClient.auth.signInWithPassword({ email, password });
-			if (loginError) {
+			
+			if (!signUpData || !signUpData.user || !signUpData.user.id) {
 				if (errorEl) {
-					errorEl.textContent = loginError.message || 'Failed to sign in';
+					errorEl.textContent = 'Account creation failed. Please try again.';
 					errorEl.classList.add('show');
+				} else {
+					alert('Account creation failed. Please try again.');
 				}
 				if (submitBtn) {
 					submitBtn.disabled = false;
@@ -1100,22 +1108,41 @@ function initRegisterForm() {
 				}
 				return;
 			}
-
-			const isGymAccount = loginData?.user?.user_metadata?.is_gym_account === true;
-			if (!isGymAccount) {
-				try { await supabaseClient.auth.signOut(); } catch (e) {}
-				if (errorEl) {
-					errorEl.textContent = 'This account was created as a user account. Please try again.';
-					errorEl.classList.add('show');
+			
+			// Double-check: Also update via backend to ensure metadata is set correctly
+			try {
+				const updateResponse = await fetch(getApiUrl('/api/gym/update-metadata'), {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						user_id: signUpData.user.id,
+						gym_name: gymName,
+						contact_name: contactName,
+						contact_phone: contactPhone
+					})
+				});
+				
+				const updateData = await updateResponse.json().catch(() => ({}));
+				if (!updateResponse.ok) {
+					console.warn('[GYM REGISTER] Backend metadata update failed, but account was created with metadata:', updateData.error);
 				}
-				if (submitBtn) {
-					submitBtn.disabled = false;
-					submitBtn.textContent = 'Create Gym Account';
-				}
-				return;
+			} catch (updateError) {
+				console.warn('[GYM REGISTER] Backend metadata update error (non-critical):', updateError);
 			}
-
-			openGymPortal('/gym-dashboard');
+			
+			// Registration successful - show success message
+			if (errorEl) {
+				errorEl.textContent = 'Gym account created successfully! Your account needs to be verified by an administrator before you can access the dashboard.';
+				errorEl.style.background = '#10b981';
+				errorEl.classList.add('show');
+			} else {
+				alert('Gym account created successfully! Your account needs to be verified by an administrator.');
+			}
+			
+			// Redirect to login after a moment
+			setTimeout(() => {
+				window.location.href = '/gym-login';
+			}, 2000);
 			return;
 		}
 		
