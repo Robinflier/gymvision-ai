@@ -4133,6 +4133,12 @@ async function addExerciseToWorkout(exercise) {
 		
 		// For custom exercises, use display name for matching (key changes every time)
 		const searchKey = isCustom ? exerciseData.display : (exerciseData.key || exerciseData.display);
+		console.log('[ADD EXERCISE] Calling getLastExerciseData with:', {
+			searchKey: searchKey,
+			display: exerciseData.display,
+			isCustom: isCustom,
+			displayTrimmed: (exerciseData.display || '').trim()
+		});
 		const lastSets = getLastExerciseData(
 			searchKey,
 			exerciseData.display,
