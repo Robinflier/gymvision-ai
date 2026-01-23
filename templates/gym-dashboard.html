@@ -248,6 +248,21 @@
 					return;
 				}
 				
+				// SECURITY: Check if gym account is verified
+				// Only verified gym accounts can access dashboard data
+				if (userMetadata.is_verified !== true) {
+					loadingEl.style.display = 'none';
+					errorEl.innerHTML = `
+						<strong>Gym account not verified</strong><br>
+						Your gym account needs to be verified by an administrator before you can access dashboard data.<br>
+						Please wait for approval or contact support if you have questions.
+					`;
+					errorEl.style.display = 'block';
+					errorEl.style.background = '#f59e0b';
+					errorEl.style.color = '#fff';
+					return;
+				}
+				
 				// Set gym name
 				document.getElementById('gym-name').textContent = userMetadata.gym_name || 'Gym Dashboard';
 				
