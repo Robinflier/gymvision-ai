@@ -1355,6 +1355,8 @@ async function showLoginScreen() {
 			initLoginForm();
 			initRegisterLink();
 			initAuthRoleToggle();
+			// Ensure forgot password link exists
+			ensureForgotPasswordLink();
 		}, 150);
 	}
 }
