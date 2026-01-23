@@ -3282,17 +3282,34 @@ def get_gym_dashboard():
 							muscle_sets[primary] = muscle_sets.get(primary, 0) + sets_n
 						
 						# Count Cardio vs Strength sets
+						# First, check if the exercise itself is cardio based on metadata
+						ex_key = ex.get("key") or ""
+						ex_muscles = _exercise_muscles(ex) or []
+						is_exercise_cardio = False
+						if ex_key and ex_key in MACHINE_METADATA:
+							meta_muscles = MACHINE_METADATA[ex_key].get("muscles") or []
+							# Check if "Cardio" is in the muscles list
+							is_exercise_cardio = any(m.lower() == "cardio" for m in meta_muscles if isinstance(m, str))
+						elif ex_muscles:
+							# Check if "Cardio" is in the exercise's muscles
+							is_exercise_cardio = any(m.lower() == "cardio" for m in ex_muscles if isinstance(m, str))
+						
 						sets_list = ex.get("sets") or []
 						if isinstance(sets_list, list):
 							for s in sets_list:
 								if not isinstance(s, dict):
 									continue
-								# Check if it's cardio (has min/sec/km/cal) or strength (has weight/reps)
-								has_cardio = any(s.get(k) not in ("", None) for k in ["min", "sec", "km", "cal"])
-								has_strength = s.get("weight") not in ("", None) and s.get("reps") not in ("", None)
-								if has_cardio:
+								# Check if it's cardio (has min/sec/km/cal) OR exercise is marked as cardio
+								has_cardio_fields = any(s.get(k) not in ("", None) for k in ["min", "sec", "km", "cal"])
+								has_strength_fields = s.get("weight") not in ("", None) and s.get("reps") not in ("", None)
+								
+								# If exercise is marked as cardio, count as cardio
+								if is_exercise_cardio:
 									cardio_sets += 1
-								elif has_strength:
+								# Otherwise, check set fields
+								elif has_cardio_fields:
+									cardio_sets += 1
+								elif has_strength_fields:
 									strength_sets += 1
 					
 					# Add volume to week
