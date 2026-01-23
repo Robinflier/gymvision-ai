@@ -8431,11 +8431,15 @@ function deleteCustomExercise(exerciseKey, exerciseDisplay) {
 		const selector = document.getElementById('exercise-selector');
 		if (selector && !selector.classList.contains('hidden')) {
 			const searchInput = document.getElementById('exercise-selector-search');
-			const selectedMuscle = document.querySelector('#exercise-selector-muscles button.active')?.textContent;
+			const selectedMuscleBtn = document.querySelector('#exercise-selector-muscles button.active');
+			const selectedMuscle = selectedMuscleBtn?.textContent;
 			const muscle = selectedMuscle === 'All' ? null : selectedMuscle;
+			
 			// Re-filter exercises to update the list
-			if (typeof filterExercises === 'function') {
-				filterExercises(searchInput?.value || '', muscle);
+			// filterExercises is defined inside initExerciseSelector, so we need to trigger it via the search input
+			if (searchInput) {
+				// Trigger input event to re-filter
+				searchInput.dispatchEvent(new Event('input'));
 			}
 		}
 	} catch (e) {
