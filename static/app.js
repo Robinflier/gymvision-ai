@@ -3173,7 +3173,7 @@ function initExerciseSelector() {
 	}
 	
 	// Muscle filters
-	const muscles = ['All', 'Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Abs'];
+	const muscles = ['All', 'Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Abs', 'Forearms', 'Cardio'];
 	if (musclesContainer) {
 		// Clear container first to prevent duplicates when initExerciseSelector is called multiple times
 		musclesContainer.innerHTML = '';
