@@ -1361,6 +1361,33 @@ async function showLoginScreen() {
 	}
 }
 
+// Ensure forgot password link exists (fallback if HTML doesn't have it)
+function ensureForgotPasswordLink() {
+	const loginForm = document.getElementById('login-form');
+	const passwordField = document.getElementById('login-password');
+	const forgotLink = document.getElementById('forgot-password-link');
+	
+	if (!loginForm || !passwordField) return;
+	
+	// If link doesn't exist, create it
+	if (!forgotLink) {
+		const linkDiv = document.createElement('div');
+		linkDiv.style.cssText = 'text-align: right; margin-bottom: 10px; margin-top: -5px;';
+		const link = document.createElement('a');
+		link.href = '#';
+		link.id = 'forgot-password-link';
+		link.style.cssText = 'color: #8b5cf6; text-decoration: none; font-size: 14px; font-weight: 500; display: inline-block; padding: 4px 0;';
+		link.textContent = 'Forgot password?';
+		link.addEventListener('click', (e) => {
+			e.preventDefault();
+			const modal = document.getElementById('forgot-password-modal');
+			if (modal) modal.style.display = 'flex';
+		});
+		linkDiv.appendChild(link);
+		passwordField.parentElement.insertBefore(linkDiv, passwordField.parentElement.lastElementChild);
+	}
+}
+
 // ======================
 // 🧑‍💼 USER vs 🏢 GYM AUTH MODE (in-app)
 // ======================
