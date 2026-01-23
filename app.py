@@ -3525,7 +3525,7 @@ def get_gym_dashboard():
 				"workouts_last_weeks": [],  # No weekly history
 				"volume_by_week": [],  # No volume tracking
 				"active_users_by_week": [],  # No active users tracking
-				"exercise_categories": []  # No category breakdown
+				"exercise_categories": chart.get("exercise_categories", [])  # Include weights/cardio ratio for all accounts
 			}
 		
 		return jsonify({
