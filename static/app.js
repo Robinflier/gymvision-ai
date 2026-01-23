@@ -3332,6 +3332,28 @@ function initExerciseSelector() {
 			};
 			resultsContainer.appendChild(item);
 		});
+		
+		// Add "Add Custom Exercise" button at the end
+		const addCustomBtn = document.createElement('button');
+		addCustomBtn.className = 'exercise-selector-item';
+		addCustomBtn.style.cssText = 'margin-top: 12px; background: rgba(124,92,255,0.15); border: 1px solid rgba(124,92,255,0.3); border-radius: 12px; padding: 16px; text-align: center; color: #7c5cff; font-weight: 600; font-size: 15px; cursor: pointer;';
+		addCustomBtn.innerHTML = `
+			<div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+				<span style="font-size: 20px;">+</span>
+				<span>Add Custom Exercise</span>
+			</div>
+		`;
+		addCustomBtn.onclick = () => {
+			// Open custom exercise modal
+			const customModal = document.getElementById('custom-exercise-modal');
+			if (customModal) {
+				customModal.classList.remove('hidden');
+				// Close exercise selector
+				if (selector) selector.classList.add('hidden');
+				document.body.classList.remove('selector-open');
+			}
+		};
+		resultsContainer.appendChild(addCustomBtn);
 	}
 
 	// Expose filter for external callers (e.g. when opening selector)
