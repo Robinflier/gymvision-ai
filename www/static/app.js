@@ -1117,13 +1117,13 @@ function initRegisterForm() {
 		if (role === 'gym') {
 			// Create user account via Supabase signUp with metadata directly
 			const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
-				email,
-				password,
+					email,
+					password,
 				options: {
 					data: {
 						is_gym_account: true,
 						gym_name: gymName,
-						contact_name: contactName,
+					contact_name: contactName,
 						contact_phone: contactPhone,
 						is_verified: false
 					}
@@ -1150,7 +1150,7 @@ function initRegisterForm() {
 				}
 				return;
 			}
-			
+
 			if (!signUpData || !signUpData.user || !signUpData.user.id) {
 				if (errorEl) {
 					errorEl.textContent = 'Account creation failed. Please try again.';
@@ -1164,7 +1164,7 @@ function initRegisterForm() {
 				}
 				return;
 			}
-			
+
 			// Double-check: Also update via backend to ensure metadata is set correctly
 			try {
 				const updateResponse = await fetch(getApiUrl('/api/gym/update-metadata'), {
@@ -1187,10 +1187,10 @@ function initRegisterForm() {
 			}
 			
 			// Registration successful - show success message
-			if (errorEl) {
+				if (errorEl) {
 				errorEl.textContent = 'Gym account created successfully! Your account needs to be verified by an administrator before you can access the dashboard.';
 				errorEl.style.background = '#10b981';
-				errorEl.classList.add('show');
+					errorEl.classList.add('show');
 			} else {
 				alert('Gym account created successfully! Your account needs to be verified by an administrator.');
 			}
@@ -3304,23 +3304,48 @@ function initExerciseSelector() {
 				const logoPath = getApiUrl('/static/logo.png');
 				imageHtml = `<div class="exercise-selector-item-image" style="background:#ffffff;border-radius:50%;display:flex;align-items:center;justify-content:center;padding:8px;"><img src="${logoPath}" alt="GymVision AI" style="width:100%;height:100%;object-fit:contain;" /></div>`;
 			} else {
-				const imageSrc = getExerciseImageSource(ex);
-				const initial = (ex.display || ex.key || '?').charAt(0).toUpperCase();
+			const imageSrc = getExerciseImageSource(ex);
+			const initial = (ex.display || ex.key || '?').charAt(0).toUpperCase();
 				imageHtml = imageSrc
-					? `<img class="exercise-selector-item-image" src="${imageSrc}" alt="${ex.display || ex.key || 'Exercise'}" />`
+						? `<img class="exercise-selector-item-image" src="${imageSrc}" alt="${ex.display || ex.key || 'Exercise'}" />`
 					: `<div class="exercise-selector-item-image" style="background:rgba(124,92,255,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;">${initial}</div>`;
 			}
 			
+			// Add delete button for custom exercises
+			const deleteButtonHtml = ex.isCustom === true 
+				? `<button class="exercise-selector-delete-btn" data-exercise-key="${escapeHtmlAttr(ex.key)}" data-exercise-display="${escapeHtmlAttr(ex.display)}" style="background:rgba(255,59,48,0.2);border:1px solid rgba(255,59,48,0.4);border-radius:6px;padding:4px 6px;cursor:pointer;flex-shrink:0;margin-left:auto;display:flex;align-items:center;justify-content:center;z-index:10;" title="Delete custom exercise">
+					<img src="${getApiUrl('/static/close.png')}" alt="Delete" style="width:12px;height:12px;filter:brightness(0) invert(1);" />
+				</button>`
+				: '';
+			
 			item.innerHTML = `
-				<div class="exercise-selector-item-main">
+				<div class="exercise-selector-item-main" style="display:flex;align-items:center;gap:8px;width:100%;position:relative;">
 					${imageHtml}
-				<div class="exercise-selector-item-content">
+				<div class="exercise-selector-item-content" style="flex:1;">
 					<div style="font-weight: 600;">${ex.display}</div>
 					${ex.muscles && ex.muscles.length > 0 ? `<span>${[...new Set(ex.muscles)].join(', ')}</span>` : ''}
 					</div>
+					${deleteButtonHtml}
 				</div>
 			`;
-			item.onclick = () => {
+			
+			// Add click handler for delete button
+			if (ex.isCustom === true) {
+				const deleteBtn = item.querySelector('.exercise-selector-delete-btn');
+				if (deleteBtn) {
+					deleteBtn.addEventListener('click', (e) => {
+						e.stopPropagation();
+						e.preventDefault();
+						deleteCustomExercise(ex.key, ex.display);
+					});
+				}
+			}
+			
+			item.onclick = (e) => {
+				// Don't trigger selection if delete button was clicked
+				if (e.target.closest('.exercise-selector-delete-btn')) {
+					return;
+				}
 				const ctx = window.exerciseSelectorContext || null;
 				const labelLower = (ex.display || ex.key || '').toLowerCase().trim();
 				
@@ -8378,6 +8403,49 @@ function getCustomExercises() {
 		return [];
 	}
 }
+
+// Delete custom exercise
+function deleteCustomExercise(exerciseKey, exerciseDisplay) {
+	if (!confirm(`Are you sure you want to delete "${exerciseDisplay}"?`)) {
+		return;
+	}
+	
+	try {
+		// Remove from localStorage
+		const customExercises = getCustomExercises();
+		const filtered = customExercises.filter(ex => 
+			ex.key !== exerciseKey && 
+			!(ex.isCustom && ex.display === exerciseDisplay)
+		);
+		localStorage.setItem('custom-exercises', JSON.stringify(filtered));
+		
+		// Remove from allExercises
+		allExercises = allExercises.filter(ex => 
+			ex.key !== exerciseKey && 
+			!(ex.isCustom && ex.display === exerciseDisplay)
+		);
+		
+		console.log('[CUSTOM EXERCISE] Deleted:', exerciseDisplay);
+		
+		// Refresh the exercise selector if it's open
+		const selector = document.getElementById('exercise-selector');
+		if (selector && !selector.classList.contains('hidden')) {
+			const searchInput = document.getElementById('exercise-selector-search');
+			const selectedMuscle = document.querySelector('#exercise-selector-muscles button.active')?.textContent;
+			const muscle = selectedMuscle === 'All' ? null : selectedMuscle;
+			// Re-filter exercises to update the list
+			if (typeof filterExercises === 'function') {
+				filterExercises(searchInput?.value || '', muscle);
+			}
+		}
+	} catch (e) {
+		console.error('[CUSTOM EXERCISE] Error deleting:', e);
+		alert('Failed to delete exercise. Please try again.');
+	}
+}
+
+// Make deleteCustomExercise globally accessible
+window.deleteCustomExercise = deleteCustomExercise;
 
 function loadStreak() {
 	// Calculate streak from actual workouts
