@@ -3297,13 +3297,23 @@ function initExerciseSelector() {
 		filtered.forEach(ex => {
 			const item = document.createElement('button');
 			item.className = 'exercise-selector-item';
-			const imageSrc = getExerciseImageSource(ex);
-			const initial = (ex.display || ex.key || '?').charAt(0).toUpperCase();
+			
+			// For custom exercises, use logo with white background
+			let imageHtml = '';
+			if (ex.isCustom === true) {
+				const logoPath = getApiUrl('/static/logo.png');
+				imageHtml = `<div class="exercise-selector-item-image" style="background:#ffffff;border-radius:50%;display:flex;align-items:center;justify-content:center;padding:8px;"><img src="${logoPath}" alt="GymVision AI" style="width:100%;height:100%;object-fit:contain;" /></div>`;
+			} else {
+				const imageSrc = getExerciseImageSource(ex);
+				const initial = (ex.display || ex.key || '?').charAt(0).toUpperCase();
+				imageHtml = imageSrc
+					? `<img class="exercise-selector-item-image" src="${imageSrc}" alt="${ex.display || ex.key || 'Exercise'}" />`
+					: `<div class="exercise-selector-item-image" style="background:rgba(124,92,255,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;">${initial}</div>`;
+			}
+			
 			item.innerHTML = `
 				<div class="exercise-selector-item-main">
-					${imageSrc
-						? `<img class="exercise-selector-item-image" src="${imageSrc}" alt="${ex.display || ex.key || 'Exercise'}" />`
-						: `<div class="exercise-selector-item-image" style="background:rgba(124,92,255,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;">${initial}</div>`}
+					${imageHtml}
 				<div class="exercise-selector-item-content">
 					<div style="font-weight: 600;">${ex.display}</div>
 					${ex.muscles && ex.muscles.length > 0 ? `<span>${[...new Set(ex.muscles)].join(', ')}</span>` : ''}
@@ -4145,6 +4155,10 @@ function hydrateExerciseFromMetadata(exercise) {
 
 function renderExerciseInfoButton(exercise) {
 	if (!exercise) return '';
+	// Don't show info button for custom exercises
+	if (exercise.isCustom === true) {
+		return '';
+	}
 	let videoUrl = exercise.video;
 	if (!videoUrl) {
 		const meta = findExerciseMetadata(exercise);
@@ -5281,6 +5295,16 @@ function getExerciseAvatar(exercise, fallbackText = 'W') {
 }
 
 function buildExerciseThumb(exercise, size = 'large') {
+	// For custom exercises, use logo with white background
+	if (exercise?.isCustom === true) {
+		const logoPath = getApiUrl('/static/logo.png');
+		return `
+			<div class="workout-exercise-thumb ${size}" style="background: #ffffff; display: flex; align-items: center; justify-content: center; padding: 4px;">
+				<img src="${logoPath}" alt="GymVision AI" draggable="false" style="width: 100%; height: 100%; object-fit: contain;" />
+			</div>
+		`;
+	}
+	
 	const label = (exercise?.display || exercise?.key || 'E').charAt(0).toUpperCase();
 	const candidates = getExerciseImageCandidates(exercise);
 	const imageSrc = candidates.shift();
