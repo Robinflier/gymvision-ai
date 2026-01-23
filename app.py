@@ -6,6 +6,7 @@ import sqlite3
 import time
 import urllib.parse
 import urllib.request
+import requests
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -745,58 +746,60 @@ def list_gym_accounts():
 			return jsonify({"accounts": []}), 200
 		
 		print("[ADMIN] Fetching gym accounts from Supabase...")
-		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 		
-		# Try to get users, but if it fails or hangs, just return empty list
+		# Use direct REST API call instead of Python client (more reliable)
+		users_list = []
+		
 		try:
-			all_users = admin_client.auth.admin.list_users()
-			print(f"[ADMIN] list_users() response type: {type(all_users)}")
-			print(f"[ADMIN] list_users() response attributes: {dir(all_users)}")
+			# Direct REST API call to Supabase Admin API
+			auth_url = f"{SUPABASE_URL}/auth/v1/admin/users"
+			headers = {
+				"apikey": SUPABASE_SERVICE_ROLE_KEY,
+				"Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+				"Content-Type": "application/json"
+			}
 			
-			# Try different ways to access the users list
-			users_list = []
-			if hasattr(all_users, 'users'):
-				users_list = all_users.users
-				print(f"[ADMIN] Found users via .users attribute: {len(users_list)}")
-			elif hasattr(all_users, 'data'):
-				users_list = all_users.data
-				print(f"[ADMIN] Found users via .data attribute: {len(users_list)}")
-			elif isinstance(all_users, dict):
-				users_list = all_users.get('users', []) or all_users.get('data', [])
-				print(f"[ADMIN] Found users via dict access: {len(users_list)}")
+			print(f"[ADMIN] Calling Supabase REST API: {auth_url}")
+			response = requests.get(auth_url, headers=headers, timeout=10)
+			
+			if response.status_code == 200:
+				data = response.json()
+				# Supabase returns users in a 'users' array
+				users_list = data.get('users', [])
+				print(f"[ADMIN] REST API returned {len(users_list)} users")
 			else:
-				# Try to convert to list if it's iterable
-				try:
-					users_list = list(all_users) if all_users else []
-					print(f"[ADMIN] Found users via list conversion: {len(users_list)}")
-				except:
-					pass
-			
-			# If still empty, try calling with page parameter
-			if not users_list:
-				print("[ADMIN] Trying list_users() with page parameter...")
-				try:
-					all_users_paged = admin_client.auth.admin.list_users(page=1, per_page=1000)
-					if hasattr(all_users_paged, 'users'):
-						users_list = all_users_paged.users
-					elif hasattr(all_users_paged, 'data'):
-						users_list = all_users_paged.data
-					print(f"[ADMIN] Found {len(users_list)} users with pagination")
-				except Exception as page_error:
-					print(f"[ADMIN] Pagination also failed: {page_error}")
-			
+				print(f"[ADMIN] REST API error: {response.status_code} - {response.text}")
+				# Fallback to Python client
+				print("[ADMIN] Falling back to Python client...")
+				admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+				all_users = admin_client.auth.admin.list_users()
+				
+				# Try to extract users from response
+				if hasattr(all_users, 'users'):
+					users_list = all_users.users
+				elif hasattr(all_users, 'data'):
+					users_list = all_users.data
+				elif isinstance(all_users, dict):
+					users_list = all_users.get('users', []) or all_users.get('data', [])
+				
+		except requests.exceptions.RequestException as e:
+			print(f"[ADMIN] REST API request failed: {e}")
+			# Fallback to Python client
+			try:
+				admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+				all_users = admin_client.auth.admin.list_users()
+				if hasattr(all_users, 'users'):
+					users_list = all_users.users
+				elif hasattr(all_users, 'data'):
+					users_list = all_users.data
+			except Exception as client_error:
+				print(f"[ADMIN] Python client also failed: {client_error}")
+				return jsonify({"accounts": []}), 200
 		except Exception as e:
-			print(f"[ADMIN] Error calling list_users(): {e} - returning empty list")
+			print(f"[ADMIN] Error fetching users: {e}")
 			import traceback
 			traceback.print_exc()
 			return jsonify({"accounts": []}), 200
-		
-		if not users_list:
-			print("[ADMIN] WARNING: users_list is empty or None")
-			print("[ADMIN] This could mean:")
-			print("[ADMIN]   1. No users exist in Supabase")
-			print("[ADMIN]   2. Service role key doesn't have permission")
-			print("[ADMIN]   3. list_users() API has changed")
 		
 		print(f"[ADMIN] Found {len(users_list)} total users")
 		
