@@ -2358,8 +2358,13 @@ def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = Non
 		if gym_place_id:
 			data_to_upsert["gym_place_id"] = gym_place_id
 		
-		if gym_id:
+		# If consent is revoked, remove gym_id to unlink user from gym dashboard
+		# This ensures their data is no longer visible on the gym dashboard
+		if has_consent and gym_id:
 			data_to_upsert["gym_id"] = gym_id
+		elif not has_consent:
+			# When consent is revoked, remove gym_id to unlink from gym
+			data_to_upsert["gym_id"] = None
 		
 		if consent_given_at:
 			data_to_upsert["consent_given_at"] = consent_given_at.isoformat()
@@ -3190,9 +3195,13 @@ def get_gym_dashboard():
 				for w in all_workouts:
 					# Filter to workouts that were actually saved with this gym (snapshot on the workout).
 					w_gym = (w.get("gym_name") or "").lower().strip()
-					# If the gym_name column isn't present / wasn't saved, we can still use it
-					# if the user is linked to this gym via gym_analytics (already filtered by consent_user_ids)
-					# But if gym_name IS present and doesn't match, skip it
+					
+					# CRITICAL: Only use workouts where gym_name is actually set (not "gym -" or empty)
+					# Skip workouts without a gym name or with "gym -"
+					if not w_gym or w_gym == "-" or w_gym == "gym -":
+						continue
+					
+					# If gym_name is present, it must match the target gym
 					if w_gym and target_gym and w_gym != target_gym:
 						continue
 
@@ -3389,10 +3398,11 @@ def get_gym_dashboard():
 					except Exception as e:
 						print(f"[GYM DASHBOARD] Error fetching yesterday workouts: {e}")
 				
-				# Filter to workouts with matching gym
+				# Filter to workouts with matching gym (only workouts with gym_name set, not "gym -" or empty)
 				yesterday_workouts_filtered = [
 					w for w in yesterday_workouts
 					if (w.get("gym_name") or "").lower().strip() == target_gym
+					and (w.get("gym_name") or "").lower().strip() not in ("", "-", "gym -")
 				]
 				comparison_data["yesterday"]["workouts"] = len(yesterday_workouts_filtered)
 				comparison_data["yesterday"]["exercises"] = sum([
@@ -3408,6 +3418,7 @@ def get_gym_dashboard():
 						w for w in all_workouts
 						if last_week_start <= w.get("date", "") <= last_week_end
 						and (w.get("gym_name") or "").lower().strip() == target_gym
+						and (w.get("gym_name") or "").lower().strip() not in ("", "-", "gym -")
 					]
 					comparison_data["last_week"]["workouts"] = len(last_week_workouts)
 					comparison_data["last_week"]["exercises"] = sum([len(w.get("exercises") or []) for w in last_week_workouts])
@@ -3420,6 +3431,7 @@ def get_gym_dashboard():
 						w for w in all_workouts
 						if last_month_start <= w.get("date", "") <= last_month_end
 						and (w.get("gym_name") or "").lower().strip() == target_gym
+						and (w.get("gym_name") or "").lower().strip() not in ("", "-", "gym -")
 					]
 					comparison_data["last_month"]["workouts"] = len(last_month_workouts)
 					comparison_data["last_month"]["exercises"] = sum([len(w.get("exercises") or []) for w in last_month_workouts])
