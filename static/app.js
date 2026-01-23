@@ -3190,6 +3190,23 @@ function initExerciseSelector() {
 			};
 			musclesContainer.appendChild(btn);
 		});
+		
+		// Add "Add Custom Exercise" button as a filter button
+		const addCustomBtn = document.createElement('button');
+		addCustomBtn.textContent = '+ Custom';
+		addCustomBtn.className = '';
+		addCustomBtn.style.cssText = 'background: rgba(124,92,255,0.15); border: 1px solid rgba(124,92,255,0.3); color: #7c5cff; font-weight: 600;';
+		addCustomBtn.onclick = () => {
+			// Open custom exercise modal
+			const customModal = document.getElementById('custom-exercise-modal');
+			if (customModal) {
+				customModal.classList.remove('hidden');
+				// Close exercise selector
+				if (selector) selector.classList.add('hidden');
+				document.body.classList.remove('selector-open');
+			}
+		};
+		musclesContainer.appendChild(addCustomBtn);
 	}
 	
 	if (searchInput) {
@@ -3332,28 +3349,6 @@ function initExerciseSelector() {
 			};
 			resultsContainer.appendChild(item);
 		});
-		
-		// Add "Add Custom Exercise" button at the end
-		const addCustomBtn = document.createElement('button');
-		addCustomBtn.className = 'exercise-selector-item';
-		addCustomBtn.style.cssText = 'margin-top: 12px; background: rgba(124,92,255,0.15); border: 1px solid rgba(124,92,255,0.3); border-radius: 12px; padding: 16px; text-align: center; color: #7c5cff; font-weight: 600; font-size: 15px; cursor: pointer;';
-		addCustomBtn.innerHTML = `
-			<div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
-				<span style="font-size: 20px;">+</span>
-				<span>Add Custom Exercise</span>
-			</div>
-		`;
-		addCustomBtn.onclick = () => {
-			// Open custom exercise modal
-			const customModal = document.getElementById('custom-exercise-modal');
-			if (customModal) {
-				customModal.classList.remove('hidden');
-				// Close exercise selector
-				if (selector) selector.classList.add('hidden');
-				document.body.classList.remove('selector-open');
-			}
-		};
-		resultsContainer.appendChild(addCustomBtn);
 	}
 
 	// Expose filter for external callers (e.g. when opening selector)
@@ -3364,8 +3359,98 @@ function initExerciseSelector() {
 	// Mark as initialized to prevent duplicate initialization
 	exerciseSelectorInitialized = true;
 	
-	// Mark as initialized to prevent duplicate initialization
-	exerciseSelectorInitialized = true;
+	// Initialize custom exercise modal
+	initCustomExerciseModal();
+}
+
+// Initialize custom exercise modal
+function initCustomExerciseModal() {
+	const customModal = document.getElementById('custom-exercise-modal');
+	const closeBtn = document.getElementById('custom-exercise-close');
+	const cancelBtn = document.getElementById('custom-exercise-cancel');
+	const addBtn = document.getElementById('custom-exercise-add');
+	const exerciseNameInput = document.getElementById('custom-exercise-name');
+	const muscleSelect = document.getElementById('custom-exercise-muscle');
+	const typeButtons = document.querySelectorAll('.custom-exercise-type-btn');
+	const muscleField = document.getElementById('custom-exercise-muscle-field');
+	
+	if (!customModal) return;
+	
+	let selectedType = 'weight-reps'; // Default
+	
+	// Close modal handlers
+	const closeModal = () => {
+		customModal.classList.add('hidden');
+		if (exerciseNameInput) exerciseNameInput.value = '';
+		if (muscleSelect) muscleSelect.value = '';
+		// Reset type to default
+		selectedType = 'weight-reps';
+		typeButtons.forEach(btn => {
+			btn.classList.remove('active');
+			if (btn.dataset.type === 'weight-reps') btn.classList.add('active');
+		});
+		// Show muscle field by default
+		if (muscleField) muscleField.style.display = '';
+	};
+	
+	if (closeBtn) {
+		closeBtn.addEventListener('click', closeModal);
+	}
+	
+	if (cancelBtn) {
+		cancelBtn.addEventListener('click', closeModal);
+	}
+	
+	// Close on backdrop click
+	const backdrop = customModal.querySelector('.custom-exercise-backdrop');
+	if (backdrop) {
+		backdrop.addEventListener('click', closeModal);
+	}
+	
+	// Type selection
+	if (typeButtons.length > 0) {
+		typeButtons.forEach(btn => {
+			btn.addEventListener('click', () => {
+				typeButtons.forEach(b => b.classList.remove('active'));
+				btn.classList.add('active');
+				selectedType = btn.dataset.type || 'weight-reps';
+				
+				// Hide muscle field for cardio
+				if (muscleField) {
+					muscleField.style.display = selectedType === 'cardio' ? 'none' : '';
+				}
+			});
+		});
+	}
+	
+	// Add to workout button
+	if (addBtn) {
+		addBtn.addEventListener('click', () => {
+			const exerciseName = exerciseNameInput?.value?.trim();
+			if (!exerciseName) {
+				alert('Please enter an exercise name');
+				return;
+			}
+			
+			// Create custom exercise object
+			const customExercise = {
+				key: `custom_${Date.now()}`,
+				display: exerciseName,
+				isCustom: true,
+				muscles: selectedType === 'cardio' ? ['Cardio'] : (muscleSelect?.value ? [muscleSelect.value] : []),
+				isCardio: selectedType === 'cardio',
+				isBodyweight: selectedType === 'bodyweight'
+			};
+			
+			// Add to workout
+			if (currentTab === 'workout-builder') {
+				addExerciseToWorkout(customExercise);
+			}
+			
+			// Close modal
+			closeModal();
+		});
+	}
 }
 
 function showExerciseRefinementsInSelector(refinementOptions, selectorEl) {
