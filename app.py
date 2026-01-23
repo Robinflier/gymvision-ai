@@ -3190,10 +3190,10 @@ def get_gym_dashboard():
 				for w in all_workouts:
 					# Filter to workouts that were actually saved with this gym (snapshot on the workout).
 					w_gym = (w.get("gym_name") or "").lower().strip()
-					# If the gym_name column isn't present / wasn't saved, skip (otherwise we'd be mixing gyms).
-					if not w_gym:
-						continue
-					if target_gym and w_gym != target_gym:
+					# If the gym_name column isn't present / wasn't saved, we can still use it
+					# if the user is linked to this gym via gym_analytics (already filtered by consent_user_ids)
+					# But if gym_name IS present and doesn't match, skip it
+					if w_gym and target_gym and w_gym != target_gym:
 						continue
 
 					total_workouts += 1
@@ -3338,13 +3338,16 @@ def get_gym_dashboard():
 				
 				# Exercise categories (Cardio vs Strength)
 				total_category_sets = cardio_sets + strength_sets
+				print(f"[GYM DASHBOARD] Exercise categories: cardio_sets={cardio_sets}, strength_sets={strength_sets}, total={total_category_sets}")
 				if total_category_sets > 0:
 					chart["exercise_categories"] = [
 						{"label": "Strength", "value": strength_sets},
 						{"label": "Cardio", "value": cardio_sets}
 					]
+					print(f"[GYM DASHBOARD] Exercise categories data: {chart['exercise_categories']}")
 				else:
 					chart["exercise_categories"] = []
+					print(f"[GYM DASHBOARD] No exercise categories data (total_sets=0)")
 				# Daily time series for line chart (X = days)
 				try:
 					end_d = datetime.utcnow().date()
