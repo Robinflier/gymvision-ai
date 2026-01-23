@@ -2648,6 +2648,59 @@ def sync_gym_data():
 		return jsonify({"error": f"Failed to sync gym data: {str(e)}"}), 500
 
 
+@app.route("/api/gym/delete-account", methods=["POST", "OPTIONS"])
+def delete_gym_account():
+	"""
+	Delete a gym account.
+	Only the account owner can delete their own account.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# Get Authorization header
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Authentication required"}), 401
+	
+	access_token = auth_header.replace("Bearer ", "").strip()
+	if not access_token:
+		return jsonify({"error": "Missing access token"}), 401
+	
+	try:
+		# Verify user and get user info
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+		
+		user_id = user_response.user.id
+		user_meta = user_response.user.user_metadata or {}
+		
+		# Verify this is a gym account
+		if user_meta.get("is_gym_account") != True:
+			return jsonify({"error": "This endpoint is only for gym accounts"}), 403
+		
+		# Use service role key to delete the user
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		
+		# Delete user from Supabase
+		delete_response = admin_client.auth.admin.delete_user(user_id)
+		
+		print(f"[GYM DELETE] Account deleted: {user_id}")
+		
+		return jsonify({"success": True, "message": "Gym account deleted successfully"}), 200
+		
+	except Exception as e:
+		print(f"[GYM DELETE] Error deleting gym account: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to delete account: {str(e)}"}), 500
+
+
 @app.route("/api/gym/update-metadata", methods=["POST", "OPTIONS"])
 def update_gym_metadata():
 	"""

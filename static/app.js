@@ -1436,11 +1436,38 @@ function ensureForgotPasswordLink() {
 		link.textContent = 'Forgot password?';
 		link.addEventListener('click', (e) => {
 			e.preventDefault();
+			e.stopPropagation();
 			const modal = document.getElementById('forgot-password-modal');
-			if (modal) modal.style.display = 'flex';
+			if (modal) {
+				modal.style.display = 'flex';
+				// Focus on email input
+				const emailInput = document.getElementById('forgot-email');
+				if (emailInput) {
+					setTimeout(() => emailInput.focus(), 100);
+				}
+			}
 		});
 		linkDiv.appendChild(link);
-		passwordField.parentElement.insertBefore(linkDiv, passwordField.parentElement.lastElementChild);
+		// Insert after password field's parent (auth-form-group)
+		passwordField.parentElement.appendChild(linkDiv);
+	}
+	
+	// Also ensure event listener is attached if link already exists
+	if (forgotLink && !forgotLink.dataset.listenerAttached) {
+		forgotLink.dataset.listenerAttached = 'true';
+		forgotLink.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			const modal = document.getElementById('forgot-password-modal');
+			if (modal) {
+				modal.style.display = 'flex';
+				// Focus on email input
+				const emailInput = document.getElementById('forgot-email');
+				if (emailInput) {
+					setTimeout(() => emailInput.focus(), 100);
+				}
+			}
+		});
 	}
 }
 
@@ -1540,6 +1567,56 @@ async function showGymDashboardScreen() {
 		logoutBtn.addEventListener('click', async () => {
 			try { if (supabaseClient) await supabaseClient.auth.signOut(); } catch (e) {}
 			showLoginScreen();
+		});
+	}
+
+	// Delete account button
+	const deleteAccountBtn = document.getElementById('gym-dashboard-delete-account');
+	if (deleteAccountBtn && !deleteAccountBtn.dataset.bound) {
+		deleteAccountBtn.dataset.bound = 'true';
+		deleteAccountBtn.addEventListener('click', async () => {
+			if (!confirm('Are you sure you want to delete your gym account? This action cannot be undone and all your data will be permanently deleted.')) {
+				return;
+			}
+			
+			// Double confirmation
+			if (!confirm('This is your last chance. Are you absolutely sure you want to delete your gym account?')) {
+				return;
+			}
+
+			try {
+				if (!supabaseClient) await initSupabase();
+				const { data: { session } } = await supabaseClient.auth.getSession();
+				if (!session) {
+					alert('You must be logged in to delete your account');
+					return;
+				}
+
+				// Call backend API to delete account
+				const apiUrl = getApiUrl('/api/gym/delete-account');
+				const response = await fetch(apiUrl, {
+					method: 'POST',
+					headers: {
+						'Authorization': `Bearer ${session.access_token}`,
+						'Content-Type': 'application/json'
+					}
+				});
+
+				const data = await response.json();
+				
+				if (!response.ok) {
+					alert('Failed to delete account: ' + (data.error || 'Unknown error'));
+					return;
+				}
+
+				// Sign out and redirect to login
+				await supabaseClient.auth.signOut();
+				alert('Your gym account has been deleted.');
+				showLoginScreen();
+			} catch (error) {
+				console.error('Error deleting account:', error);
+				alert('An error occurred while deleting your account. Please try again.');
+			}
 		});
 	}
 
@@ -3313,7 +3390,7 @@ function initExerciseSelector() {
 			
 			// Add delete button for custom exercises
 			const deleteButtonHtml = ex.isCustom === true 
-				? `<button class="exercise-selector-delete-btn" data-exercise-key="${escapeHtmlAttr(ex.key)}" data-exercise-display="${escapeHtmlAttr(ex.display)}" style="background:rgba(255,59,48,0.2);border:1px solid rgba(255,59,48,0.4);border-radius:6px;padding:4px 6px;cursor:pointer;flex-shrink:0;margin-left:auto;display:flex;align-items:center;justify-content:center;z-index:10;" title="Delete custom exercise">
+				? `<button class="exercise-selector-delete-btn" data-exercise-key="${escapeHtmlAttr(ex.key)}" data-exercise-display="${escapeHtmlAttr(ex.display)}" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:4px 6px;cursor:pointer;flex-shrink:0;margin-left:auto;display:flex;align-items:center;justify-content:center;z-index:10;" title="Delete custom exercise">
 					<img src="${getApiUrl('/static/close.png')}" alt="Delete" style="width:12px;height:12px;filter:brightness(0) invert(1);" />
 				</button>`
 				: '';
@@ -5614,6 +5691,11 @@ function formatVolume(volumeKg) {
 }
 
 async function deleteWorkout(id) {
+	// Ask for confirmation before deleting
+	if (!confirm('Are you sure you want to delete this workout?')) {
+		return;
+	}
+	
 	if (!supabaseClient) {
 		await initSupabase();
 	}
