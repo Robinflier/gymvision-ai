@@ -142,6 +142,63 @@
 		.auth-error.show {
 			display: block;
 		}
+		.auth-success {
+			background: #10b981;
+			color: #fff;
+			padding: 12px;
+			border-radius: 8px;
+			margin-bottom: 20px;
+			font-size: 14px;
+			display: none;
+		}
+		.auth-success.show {
+			display: block;
+		}
+		.forgot-password-modal {
+			display: none;
+			position: fixed;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			background: rgba(0, 0, 0, 0.8);
+			z-index: 10000;
+			align-items: center;
+			justify-content: center;
+		}
+		.forgot-password-modal.show {
+			display: flex;
+		}
+		.forgot-password-content {
+			background: #1a1a1b;
+			border-radius: 16px;
+			padding: 30px;
+			width: 90%;
+			max-width: 400px;
+			border: 1px solid #333;
+		}
+		.forgot-password-content h3 {
+			color: #fff;
+			font-size: 20px;
+			margin-bottom: 16px;
+		}
+		.forgot-password-content p {
+			color: #888;
+			font-size: 14px;
+			margin-bottom: 20px;
+		}
+		.forgot-password-close {
+			background: transparent;
+			border: none;
+			color: #888;
+			font-size: 24px;
+			cursor: pointer;
+			float: right;
+			line-height: 1;
+		}
+		.forgot-password-close:hover {
+			color: #fff;
+		}
 	</style>
 </head>
 <body>
@@ -155,6 +212,7 @@
 			<p class="auth-subtitle">Sign in to continue</p>
 			
 			<div class="auth-error" id="error-message"></div>
+			<div class="auth-success" id="success-message"></div>
 			
 			<form id="login-form">
 				<div class="auth-form-group">
@@ -164,6 +222,9 @@
 				<div class="auth-form-group">
 					<label class="auth-label" for="password">Password</label>
 					<input type="password" id="password" class="auth-input" placeholder="••••••••" required autocomplete="current-password">
+				</div>
+				<div style="text-align: right; margin-bottom: 10px;">
+					<a href="#" id="forgot-password-link" style="color: #8b5cf6; text-decoration: none; font-size: 14px; font-weight: 500;">Forgot password?</a>
 				</div>
 				<button type="submit" class="auth-button" id="submit-btn">Sign In</button>
 			</form>
@@ -175,8 +236,128 @@
 		</div>
 	</div>
 	
+	<!-- Forgot Password Modal -->
+	<div id="forgot-password-modal" class="forgot-password-modal">
+		<div class="forgot-password-content">
+			<button class="forgot-password-close" id="close-forgot-modal">&times;</button>
+			<h3>Reset Password</h3>
+			<p>Enter your email address and we'll send you a link to reset your password.</p>
+			<div class="auth-error" id="forgot-error-message" style="display: none;"></div>
+			<div class="auth-success" id="forgot-success-message" style="display: none;"></div>
+			<form id="forgot-password-form">
+				<div class="auth-form-group">
+					<label class="auth-label" for="forgot-email">Email</label>
+					<input type="email" id="forgot-email" class="auth-input" placeholder="your@email.com" required autocomplete="email">
+				</div>
+				<button type="submit" class="auth-button" id="forgot-submit-btn">Send Reset Link</button>
+			</form>
+		</div>
+	</div>
+	
 	<!-- Main app.js handles all authentication -->
 	<script src="/static/app.js"></script>
+	<script>
+		// Forgot Password functionality
+		document.addEventListener('DOMContentLoaded', () => {
+			const forgotLink = document.getElementById('forgot-password-link');
+			const forgotModal = document.getElementById('forgot-password-modal');
+			const closeModal = document.getElementById('close-forgot-modal');
+			const forgotForm = document.getElementById('forgot-password-form');
+			const forgotError = document.getElementById('forgot-error-message');
+			const forgotSuccess = document.getElementById('forgot-success-message');
+			const forgotSubmitBtn = document.getElementById('forgot-submit-btn');
+			
+			// Open modal
+			if (forgotLink) {
+				forgotLink.addEventListener('click', (e) => {
+					e.preventDefault();
+					forgotModal.classList.add('show');
+				});
+			}
+			
+			// Close modal
+			if (closeModal) {
+				closeModal.addEventListener('click', () => {
+					forgotModal.classList.remove('show');
+					forgotError.style.display = 'none';
+					forgotSuccess.style.display = 'none';
+					forgotForm.reset();
+				});
+			}
+			
+			// Close on backdrop click
+			forgotModal.addEventListener('click', (e) => {
+				if (e.target === forgotModal) {
+					forgotModal.classList.remove('show');
+					forgotError.style.display = 'none';
+					forgotSuccess.style.display = 'none';
+					forgotForm.reset();
+				}
+			});
+			
+			// Handle form submission
+			if (forgotForm) {
+				forgotForm.addEventListener('submit', async (e) => {
+					e.preventDefault();
+					
+					const email = document.getElementById('forgot-email').value.trim();
+					if (!email) {
+						forgotError.textContent = 'Please enter your email address';
+						forgotError.style.display = 'block';
+						forgotSuccess.style.display = 'none';
+						return;
+					}
+					
+					forgotSubmitBtn.disabled = true;
+					forgotSubmitBtn.textContent = 'Sending...';
+					forgotError.style.display = 'none';
+					forgotSuccess.style.display = 'none';
+					
+					try {
+						// Initialize Supabase if needed
+						if (typeof window.createClient === 'undefined') {
+							throw new Error('Supabase not loaded. Please refresh the page.');
+						}
+						
+						if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) {
+							throw new Error('Supabase configuration missing');
+						}
+						
+						const sb = window.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+						
+						// Send password reset email
+						const { data, error } = await sb.auth.resetPasswordForEmail(email, {
+							redirectTo: `${window.location.origin}/reset-password`
+						});
+						
+						if (error) {
+							throw new Error(error.message);
+						}
+						
+						// Success
+						forgotSuccess.textContent = 'Password reset email sent! Check your inbox and click the link to reset your password.';
+						forgotSuccess.style.display = 'block';
+						forgotError.style.display = 'none';
+						
+						// Close modal after 3 seconds
+						setTimeout(() => {
+							forgotModal.classList.remove('show');
+							forgotSuccess.style.display = 'none';
+							forgotForm.reset();
+						}, 3000);
+						
+					} catch (error) {
+						forgotError.textContent = error.message || 'Failed to send reset email. Please try again.';
+						forgotError.style.display = 'block';
+						forgotSuccess.style.display = 'none';
+					} finally {
+						forgotSubmitBtn.disabled = false;
+						forgotSubmitBtn.textContent = 'Send Reset Link';
+					}
+				});
+			}
+		});
+	</script>
 </body>
 </html>
 

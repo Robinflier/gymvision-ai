@@ -640,6 +640,12 @@ def gym_register():
 	return render_template("gym-register.html")
 
 
+@app.route("/reset-password", methods=["GET"])
+def reset_password():
+	"""Password reset page - user arrives here from email link."""
+	return render_template("reset-password.html")
+
+
 @app.route("/gym-dashboard", methods=["GET"])
 def gym_dashboard():
 	"""Gym dashboard page."""
