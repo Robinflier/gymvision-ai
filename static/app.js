@@ -274,6 +274,39 @@ function isBodyweightExercise(exercise) {
 	       display.includes('leg raise') || display.includes('knee raise');
 }
 
+function isCardioExercise(exercise) {
+	// Check if exercise is marked as cardio
+	if (exercise.isCardio === true) {
+		return true;
+	}
+	
+	// Check if muscles include "Cardio"
+	if (exercise.muscles && Array.isArray(exercise.muscles)) {
+		const hasCardio = exercise.muscles.some(m => 
+			(m || '').toLowerCase() === 'cardio'
+		);
+		if (hasCardio) return true;
+	}
+	
+	// Check by key/display name for common cardio exercises
+	const key = (exercise.key || '').toLowerCase();
+	const display = (exercise.display || '').toLowerCase();
+	
+	const cardioKeywords = [
+		'running', 'walking', 'jogging', 'sprint', 'treadmill',
+		'stairmaster', 'stair master', 'stair climber',
+		'rowing', 'rower', 'rowing machine',
+		'bike', 'cycling', 'hometrainer', 'home trainer', 'stationary bike',
+		'elliptical', 'elliptical machine',
+		'ski', 'ski erg', 'skierg',
+		'cardio', 'aerobic'
+	];
+	
+	return cardioKeywords.some(keyword => 
+		key.includes(keyword) || display.includes(keyword)
+	);
+}
+
 // Helper function to fetch user from backend with Authorization header
 async function getUserCredits() {
 	/**Get user credits from backend.*/
