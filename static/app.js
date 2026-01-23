@@ -3466,14 +3466,25 @@ function initCustomExerciseModal() {
 			}
 			
 			// Create custom exercise object
+			// Use display name as key for custom exercises (more stable than timestamp)
+			const displaySlug = exerciseName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
 			const customExercise = {
-				key: `custom_${Date.now()}`,
+				key: `custom_${displaySlug}`,
 				display: exerciseName,
 				isCustom: true,
 				muscles: selectedType === 'cardio' ? ['Cardio'] : (muscleSelect?.value ? [muscleSelect.value] : []),
 				isCardio: selectedType === 'cardio',
 				isBodyweight: selectedType === 'bodyweight'
 			};
+			
+			// Save custom exercise to localStorage
+			saveCustomExercise(customExercise);
+			
+			// Add to allExercises if not already present
+			if (!allExercises.find(ex => ex.key === customExercise.key || 
+				(ex.isCustom && ex.display === customExercise.display))) {
+				allExercises.push(customExercise);
+			}
 			
 			// Add to workout
 			if (currentTab === 'workout-builder') {
@@ -8253,10 +8264,14 @@ async function loadExercises() {
 			// Don't show login screen for exercises - they're needed for workout builder
 			// Just return empty array
 			allExercises = [];
+			// Still load custom exercises from localStorage
+			loadCustomExercises();
 			return;
 		}
 	} else {
 		allExercises = [];
+		// Still load custom exercises from localStorage
+		loadCustomExercises();
 		return;
 	}
 	try {
@@ -8267,10 +8282,76 @@ async function loadExercises() {
 		}
 		const data = await res.json();
 		allExercises = data.exercises || [];
+		
+		// Load custom exercises and merge them
+		loadCustomExercises();
+		
 		console.log(`[DEBUG] Loaded ${allExercises.length} exercises`);
 	} catch (e) {
 		console.error('Failed to load exercises:', e);
 		allExercises = []; // Set empty array on error
+		// Still load custom exercises from localStorage
+		loadCustomExercises();
+	}
+}
+
+// Save custom exercise to localStorage
+function saveCustomExercise(exercise) {
+	try {
+		const customExercises = getCustomExercises();
+		// Check if exercise already exists (by key or display name for custom exercises)
+		const existingIndex = customExercises.findIndex(ex => 
+			ex.key === exercise.key || 
+			(ex.isCustom && ex.display === exercise.display)
+		);
+		
+		if (existingIndex >= 0) {
+			// Update existing
+			customExercises[existingIndex] = exercise;
+		} else {
+			// Add new
+			customExercises.push(exercise);
+		}
+		
+		localStorage.setItem('custom-exercises', JSON.stringify(customExercises));
+		console.log('[CUSTOM EXERCISE] Saved:', exercise.display);
+	} catch (e) {
+		console.error('[CUSTOM EXERCISE] Error saving:', e);
+	}
+}
+
+// Load custom exercises from localStorage
+function loadCustomExercises() {
+	try {
+		const customExercises = getCustomExercises();
+		
+		// Merge custom exercises into allExercises
+		customExercises.forEach(customEx => {
+			// Check if already exists (by key or display name for custom exercises)
+			const exists = allExercises.find(ex => 
+				ex.key === customEx.key || 
+				(ex.isCustom && ex.display === customEx.display)
+			);
+			
+			if (!exists) {
+				allExercises.push(customEx);
+			}
+		});
+		
+		console.log(`[CUSTOM EXERCISE] Loaded ${customExercises.length} custom exercises`);
+	} catch (e) {
+		console.error('[CUSTOM EXERCISE] Error loading:', e);
+	}
+}
+
+// Get custom exercises from localStorage
+function getCustomExercises() {
+	try {
+		const stored = localStorage.getItem('custom-exercises');
+		return stored ? JSON.parse(stored) : [];
+	} catch (e) {
+		console.error('[CUSTOM EXERCISE] Error parsing stored exercises:', e);
+		return [];
 	}
 }
 
