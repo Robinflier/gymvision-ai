@@ -955,9 +955,51 @@ def approve_gym_account(user_id: str):
 		if user_meta.get("is_gym_account") != True:
 			return jsonify({"error": "User is not a gym account"}), 400
 		
-		# Update metadata
+		# Update metadata - set is_verified to True
 		updated_metadata = {**user_meta, "is_verified": True}
-		admin_client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
+		
+		print(f"[ADMIN APPROVE] Updating user {user_id} metadata: is_verified=True")
+		
+		# Use direct REST API call for more reliable updates
+		try:
+			auth_url = f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}"
+			headers = {
+				"apikey": SUPABASE_SERVICE_ROLE_KEY,
+				"Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+				"Content-Type": "application/json"
+			}
+			
+			update_data = {"user_metadata": updated_metadata}
+			response = requests.put(auth_url, headers=headers, json=update_data, timeout=10)
+			
+			if response.status_code == 200:
+				print(f"[ADMIN APPROVE] REST API update successful for user {user_id}")
+			else:
+				print(f"[ADMIN APPROVE] REST API error: {response.status_code} - {response.text}")
+				# Fallback to Python client
+				update_response = admin_client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
+				if hasattr(update_response, 'error') and update_response.error:
+					print(f"[ADMIN APPROVE] Python client also failed: {update_response.error}")
+					return jsonify({"error": f"Failed to update metadata: {update_response.error}"}), 500
+		except requests.exceptions.RequestException as e:
+			print(f"[ADMIN APPROVE] REST API request failed: {e}")
+			# Fallback to Python client
+			update_response = admin_client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
+			if hasattr(update_response, 'error') and update_response.error:
+				print(f"[ADMIN APPROVE] Python client also failed: {update_response.error}")
+				return jsonify({"error": f"Failed to update metadata: {update_response.error}"}), 500
+		
+		# Verify the update worked
+		try:
+			verify_user = admin_client.auth.admin.get_user_by_id(user_id)
+			if verify_user and verify_user.user:
+				verify_meta = verify_user.user.user_metadata or {}
+				if verify_meta.get("is_verified") != True:
+					print(f"[ADMIN APPROVE] WARNING: Metadata update may have failed. is_verified is still: {verify_meta.get('is_verified')}")
+				else:
+					print(f"[ADMIN APPROVE] Successfully approved gym account {user_id}")
+		except Exception as verify_error:
+			print(f"[ADMIN APPROVE] Error verifying update: {verify_error}")
 		
 		return jsonify({"success": True, "message": "Gym account approved"}), 200
 		
@@ -1031,9 +1073,51 @@ def reject_gym_account(user_id: str):
 		if user_meta.get("is_gym_account") != True:
 			return jsonify({"error": "User is not a gym account"}), 400
 		
-		# Update metadata
+		# Update metadata - set is_verified to False
 		updated_metadata = {**user_meta, "is_verified": False}
-		admin_client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
+		
+		print(f"[ADMIN REJECT] Updating user {user_id} metadata: is_verified=False")
+		
+		# Use direct REST API call for more reliable updates
+		try:
+			auth_url = f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}"
+			headers = {
+				"apikey": SUPABASE_SERVICE_ROLE_KEY,
+				"Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+				"Content-Type": "application/json"
+			}
+			
+			update_data = {"user_metadata": updated_metadata}
+			response = requests.put(auth_url, headers=headers, json=update_data, timeout=10)
+			
+			if response.status_code == 200:
+				print(f"[ADMIN REJECT] REST API update successful for user {user_id}")
+			else:
+				print(f"[ADMIN REJECT] REST API error: {response.status_code} - {response.text}")
+				# Fallback to Python client
+				update_response = admin_client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
+				if hasattr(update_response, 'error') and update_response.error:
+					print(f"[ADMIN REJECT] Python client also failed: {update_response.error}")
+					return jsonify({"error": f"Failed to update metadata: {update_response.error}"}), 500
+		except requests.exceptions.RequestException as e:
+			print(f"[ADMIN REJECT] REST API request failed: {e}")
+			# Fallback to Python client
+			update_response = admin_client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
+			if hasattr(update_response, 'error') and update_response.error:
+				print(f"[ADMIN REJECT] Python client also failed: {update_response.error}")
+				return jsonify({"error": f"Failed to update metadata: {update_response.error}"}), 500
+		
+		# Verify the update worked
+		try:
+			verify_user = admin_client.auth.admin.get_user_by_id(user_id)
+			if verify_user and verify_user.user:
+				verify_meta = verify_user.user.user_metadata or {}
+				if verify_meta.get("is_verified") != False:
+					print(f"[ADMIN REJECT] WARNING: Metadata update may have failed. is_verified is still: {verify_meta.get('is_verified')}")
+				else:
+					print(f"[ADMIN REJECT] Successfully rejected gym account {user_id}")
+		except Exception as verify_error:
+			print(f"[ADMIN REJECT] Error verifying update: {verify_error}")
 		
 		return jsonify({"success": True, "message": "Gym account rejected"}), 200
 		
