@@ -860,6 +860,13 @@ def list_gym_accounts():
 							print(f"[ADMIN]   is_gym_account value: {user_meta.get('is_gym_account')} (type: {type(user_meta.get('is_gym_account'))})")
 				
 				if is_gym:
+					# Only show gym accounts that are not rejected
+					# Rejected accounts should not appear in the admin list
+					is_rejected = user_meta.get("is_rejected", False) == True
+					if is_rejected:
+						# Skip rejected accounts - they should not appear in the list
+						continue
+					
 					created_at = getattr(user, 'created_at', None) or (user.get('created_at') if isinstance(user, dict) else None)
 					
 					gym_accounts.append({
@@ -1073,10 +1080,10 @@ def reject_gym_account(user_id: str):
 		if user_meta.get("is_gym_account") != True:
 			return jsonify({"error": "User is not a gym account"}), 400
 		
-		# Update metadata - set is_verified to False
-		updated_metadata = {**user_meta, "is_verified": False}
+		# Update metadata - mark as rejected (this will remove it from the admin list)
+		updated_metadata = {**user_meta, "is_verified": False, "is_rejected": True}
 		
-		print(f"[ADMIN REJECT] Updating user {user_id} metadata: is_verified=False")
+		print(f"[ADMIN REJECT] Updating user {user_id} metadata: is_verified=False, is_rejected=True")
 		
 		# Use direct REST API call for more reliable updates
 		try:
