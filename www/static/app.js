@@ -1091,13 +1091,21 @@ function initRegisterForm() {
 			return;
 		}
 		
-		// Gym registration: Step 1 - Create user via Supabase signUp (like normal users)
-		// Step 2 - Update metadata via backend endpoint
+		// Gym registration: Use Supabase signUp directly with metadata
 		if (role === 'gym') {
-			// Step 1: Create user account (this always works, no database errors)
+			// Create user account via Supabase signUp with metadata directly
 			const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
 				email,
-				password
+				password,
+				options: {
+					data: {
+						is_gym_account: true,
+						gym_name: gymName,
+						contact_name: contactName,
+						contact_phone: contactPhone,
+						is_verified: false
+					}
+				}
 			});
 			
 			if (signUpError) {
