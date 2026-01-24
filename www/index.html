@@ -1117,20 +1117,11 @@
 						let redirectUrl;
 						// In app context, window.location.origin might be "capacitor://localhost"
 						// So we always use BACKEND_URL which is explicitly set
-						const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
-						
-						// For web browser, we could use window.location.origin, but for consistency
-						// we use the same backend URL in both contexts
-						const isNative = window.Capacitor && window.Capacitor.isNativePlatform();
-						if (isNative) {
-							// In app: always use backend URL
-							redirectUrl = `${backendUrl}/reset-password`;
-						} else {
-							// In browser: use origin if available, otherwise backend URL
-							redirectUrl = window.location.origin 
-								? `${window.location.origin}/reset-password`
-								: `${backendUrl}/reset-password`;
-						}
+					const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
+					
+					// Always use the backend URL for consistency - this must match exactly
+					// what's configured in Supabase redirect URLs
+					redirectUrl = `${backendUrl}/reset-password`;
 						
 						console.log('[FORGOT PASSWORD] Using redirect URL:', redirectUrl);
 						console.log('[FORGOT PASSWORD] Is native platform:', isNative);

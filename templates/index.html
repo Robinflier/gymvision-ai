@@ -1120,25 +1120,11 @@
 						
 						const sb = window.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 						
-						// Determine redirect URL - ALWAYS use backend URL for consistency
-						// This ensures the same URL is used in browser and Xcode/app
-						let redirectUrl;
-						// In app context, window.location.origin might be "capacitor://localhost"
-						// So we always use BACKEND_URL which is explicitly set
-						const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
-						
-						// For web browser, we could use window.location.origin, but for consistency
-						// we use the same backend URL in both contexts
-						const isNative = window.Capacitor && window.Capacitor.isNativePlatform();
-						if (isNative) {
-							// In app: always use backend URL
-							redirectUrl = `${backendUrl}/reset-password`;
-						} else {
-							// In browser: use origin if available, otherwise backend URL
-							redirectUrl = window.location.origin 
-								? `${window.location.origin}/reset-password`
-								: `${backendUrl}/reset-password`;
-						}
+					// Determine redirect URL - ALWAYS use backend URL for consistency
+					// This ensures the same URL is used in browser and Xcode/app
+					// and matches exactly what's configured in Supabase redirect URLs
+					const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
+					const redirectUrl = `${backendUrl}/reset-password`;
 						
 						console.log('[FORGOT PASSWORD] Using redirect URL:', redirectUrl);
 						console.log('[FORGOT PASSWORD] Is native platform:', isNative);
