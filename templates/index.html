@@ -1123,9 +1123,11 @@
 						// Determine redirect URL - use deep link for Capacitor/iOS, otherwise use origin
 						let redirectUrl;
 						if (window.Capacitor && window.Capacitor.isNativePlatform()) {
-							// For iOS/Android: use deep link or backend URL
-							const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
-							redirectUrl = `${backendUrl}/reset-password`;
+							// For iOS/Android: use custom URL scheme for deep linking
+							// This allows the app to open directly when link is clicked
+							redirectUrl = 'gymvision://reset-password';
+							// Fallback: also provide web URL in case app is not installed
+							console.log('[FORGOT PASSWORD] Using deep link URL scheme for app');
 						} else {
 							// For web browser: use origin
 							redirectUrl = `${window.location.origin}/reset-password`;

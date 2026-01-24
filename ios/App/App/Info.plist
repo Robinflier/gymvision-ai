@@ -47,5 +47,17 @@
 	<string>We need photo library access to select exercise images</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.gymvision.ai</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>gymvision</string>
+				<string>gymvisionai</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

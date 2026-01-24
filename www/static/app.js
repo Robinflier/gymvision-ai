@@ -560,7 +560,33 @@ document.addEventListener('DOMContentLoaded', async () => {
 		if (window.Capacitor && window.Capacitor.isNativePlatform()) {
 			console.log('[INIT] Waiting for Capacitor to be ready...');
 			await new Promise(resolve => setTimeout(resolve, 200));
+			
+			// Handle deep links (for password reset, etc.)
+			try {
+				const { App } = window.Capacitor.Plugins;
+				if (App) {
+					App.addListener('appUrlOpen', (data) => {
+						console.log('[DEEP LINK] App opened with URL:', data.url);
+						handleDeepLink(data.url);
+					});
+					
+					// Also check if app was opened with a URL on launch
+					App.getLaunchUrl().then(({ url }) => {
+						if (url) {
+							console.log('[DEEP LINK] App launched with URL:', url);
+							handleDeepLink(url);
+						}
+					}).catch(() => {
+						// No launch URL, that's fine
+					});
+				}
+			} catch (e) {
+				console.warn('[DEEP LINK] Could not set up deep link listener:', e);
+			}
 		}
+		
+		// Also handle URL changes in browser/app
+		handleCurrentUrl();
 		
 		// IMMEDIATE: Force WebView focus (iOS fix)
 		forceWebViewFocus();
@@ -868,6 +894,57 @@ document.addEventListener('DOMContentLoaded', async () => {
 		document.body.appendChild(errorMsg);
 	}
 });
+
+// ======================
+// 🔗 DEEP LINK HANDLING
+// ======================
+function handleDeepLink(url) {
+	console.log('[DEEP LINK] Handling URL:', url);
+	
+	try {
+		const urlObj = new URL(url);
+		const path = urlObj.pathname;
+		const hash = urlObj.hash.substring(1); // Remove #
+		const hashParams = new URLSearchParams(hash);
+		
+		// Check if this is a password reset link
+		if (path.includes('/reset-password') || hashParams.has('access_token')) {
+			console.log('[DEEP LINK] Password reset link detected');
+			// Navigate to reset password page
+			window.location.href = '/reset-password' + (hash ? '#' + hash : '');
+			return;
+		}
+		
+		// Handle other deep links here if needed
+	} catch (e) {
+		console.error('[DEEP LINK] Error parsing URL:', e);
+		// If URL parsing fails, try to extract hash directly
+		const hashMatch = url.match(/#(.+)/);
+		if (hashMatch) {
+			const hash = hashMatch[1];
+			const hashParams = new URLSearchParams(hash);
+			if (hashParams.has('access_token') && hashParams.get('type') === 'recovery') {
+				console.log('[DEEP LINK] Password reset token found in hash');
+				window.location.href = '/reset-password#' + hash;
+			}
+		}
+	}
+}
+
+function handleCurrentUrl() {
+	// Check if current URL is a deep link (e.g., password reset)
+	const hash = window.location.hash.substring(1);
+	if (hash) {
+		const hashParams = new URLSearchParams(hash);
+		if (hashParams.has('access_token') && hashParams.get('type') === 'recovery') {
+			console.log('[DEEP LINK] Password reset token detected in current URL');
+			// Navigate to reset password page if not already there
+			if (!window.location.pathname.includes('/reset-password')) {
+				window.location.href = '/reset-password' + window.location.hash;
+			}
+		}
+	}
+}
 
 // ======================
 // 🔑 LOGIN LOGIC
