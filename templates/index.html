@@ -1046,16 +1046,24 @@
 			
 			if (!forgotLink || !forgotModal) return; // Elements not found, skip
 			
-			// Open modal
-			forgotLink.addEventListener('click', (e) => {
-				e.preventDefault();
-				e.stopPropagation();
+			// Open modal - use both click and touchstart for better iOS support
+			const openModal = (e) => {
+				if (e) {
+					e.preventDefault();
+					e.stopPropagation();
+				}
 				forgotModal.style.display = 'flex';
 				// Focus on email input
 				const emailInput = document.getElementById('forgot-email');
 				if (emailInput) {
 					setTimeout(() => emailInput.focus(), 100);
 				}
+			};
+			
+			forgotLink.addEventListener('click', openModal);
+			forgotLink.addEventListener('touchend', (e) => {
+				e.preventDefault();
+				openModal(e);
 			});
 			
 			// Close modal
@@ -1112,14 +1120,42 @@
 						
 						const sb = window.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 						
+						// Determine redirect URL - use deep link for Capacitor/iOS, otherwise use origin
+						let redirectUrl;
+						if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+							// For iOS/Android: use deep link or backend URL
+							const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
+							redirectUrl = `${backendUrl}/reset-password`;
+						} else {
+							// For web browser: use origin
+							redirectUrl = `${window.location.origin}/reset-password`;
+						}
+						
+						console.log('[FORGOT PASSWORD] Sending reset email to:', email);
+						console.log('[FORGOT PASSWORD] Redirect URL:', redirectUrl);
+						console.log('[FORGOT PASSWORD] Supabase URL:', window.SUPABASE_URL);
+						
 						// Send password reset email
 						const { data, error } = await sb.auth.resetPasswordForEmail(email, {
-							redirectTo: `${window.location.origin}/reset-password`
+							redirectTo: redirectUrl,
+							emailRedirectTo: redirectUrl
 						});
 						
 						if (error) {
-							throw new Error(error.message);
+							console.error('[FORGOT PASSWORD] Error:', error);
+							// Provide more helpful error messages
+							let errorMsg = error.message || 'Failed to send reset email';
+							if (error.message && error.message.includes('rate limit')) {
+								errorMsg = 'Too many requests. Please wait a few minutes and try again.';
+							} else if (error.message && error.message.includes('not found')) {
+								errorMsg = 'No account found with this email address.';
+							} else if (error.message && error.message.includes('email')) {
+								errorMsg = 'Invalid email address. Please check and try again.';
+							}
+							throw new Error(errorMsg);
 						}
+						
+						console.log('[FORGOT PASSWORD] Success! Email sent:', data);
 						
 						// Success
 						if (forgotSuccess) {

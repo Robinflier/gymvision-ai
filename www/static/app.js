@@ -1434,9 +1434,11 @@ function ensureForgotPasswordLink() {
 		link.id = 'forgot-password-link';
 		link.style.cssText = 'color: #8b5cf6; text-decoration: none; font-size: 14px; font-weight: 500; display: inline-block; padding: 4px 0;';
 		link.textContent = 'Forgot password?';
-		link.addEventListener('click', (e) => {
-			e.preventDefault();
-			e.stopPropagation();
+		const openModal = (e) => {
+			if (e) {
+				e.preventDefault();
+				e.stopPropagation();
+			}
 			const modal = document.getElementById('forgot-password-modal');
 			if (modal) {
 				modal.style.display = 'flex';
@@ -1446,6 +1448,11 @@ function ensureForgotPasswordLink() {
 					setTimeout(() => emailInput.focus(), 100);
 				}
 			}
+		};
+		link.addEventListener('click', openModal);
+		link.addEventListener('touchend', (e) => {
+			e.preventDefault();
+			openModal(e);
 		});
 		linkDiv.appendChild(link);
 		// Insert after password field's parent (auth-form-group)
@@ -1455,9 +1462,11 @@ function ensureForgotPasswordLink() {
 	// Also ensure event listener is attached if link already exists
 	if (forgotLink && !forgotLink.dataset.listenerAttached) {
 		forgotLink.dataset.listenerAttached = 'true';
-		forgotLink.addEventListener('click', (e) => {
-			e.preventDefault();
-			e.stopPropagation();
+		const openModal = (e) => {
+			if (e) {
+				e.preventDefault();
+				e.stopPropagation();
+			}
 			const modal = document.getElementById('forgot-password-modal');
 			if (modal) {
 				modal.style.display = 'flex';
@@ -1467,6 +1476,11 @@ function ensureForgotPasswordLink() {
 					setTimeout(() => emailInput.focus(), 100);
 				}
 			}
+		};
+		forgotLink.addEventListener('click', openModal);
+		forgotLink.addEventListener('touchend', (e) => {
+			e.preventDefault();
+			openModal(e);
 		});
 	}
 }
