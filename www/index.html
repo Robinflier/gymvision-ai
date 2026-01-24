@@ -1124,7 +1124,7 @@
 					redirectUrl = `${backendUrl}/reset-password`;
 						
 						console.log('[FORGOT PASSWORD] Using redirect URL:', redirectUrl);
-						console.log('[FORGOT PASSWORD] Is native platform:', isNative);
+						console.log('[FORGOT PASSWORD] Is native platform:', window.Capacitor && window.Capacitor.isNativePlatform());
 						console.log('[FORGOT PASSWORD] window.location.origin:', window.location.origin);
 						console.log('[FORGOT PASSWORD] BACKEND_URL:', window.BACKEND_URL);
 						
