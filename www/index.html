@@ -801,6 +801,9 @@
 						<div class="auth-form-group">
 							<label class="auth-label" for="login-password">Password</label>
 							<input type="password" id="login-password" class="auth-input" placeholder="••••••••" required autocomplete="current-password">
+							<div style="text-align: right; margin-top: 8px;">
+								<a href="#" id="forgot-password-link" style="color: #8b5cf6; text-decoration: none; font-size: 14px; font-weight: 500; display: inline-block; padding: 4px 0;">Forgot password?</a>
+							</div>
 						</div>
 						<button type="submit" class="auth-button" id="login-submit-btn">Sign In</button>
 					</form>
@@ -1003,5 +1006,192 @@
 			</div>
 		</div>
 	</div>
+
+	<!-- Forgot Password Modal -->
+	<div id="forgot-password-modal" class="forgot-password-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8); z-index: 10000; align-items: center; justify-content: center;">
+		<div class="forgot-password-content" style="background: #1a1a1b; border-radius: 16px; padding: 30px; width: 90%; max-width: 400px; border: 1px solid #333;">
+			<button class="forgot-password-close" id="close-forgot-modal" style="background: transparent; border: none; color: #888; font-size: 24px; cursor: pointer; float: right; line-height: 1;">&times;</button>
+			<h3 style="color: #fff; font-size: 20px; margin-bottom: 16px;">Reset Password</h3>
+			<p style="color: #888; font-size: 14px; margin-bottom: 20px;">Enter your email address and we'll send you a link to reset your password.</p>
+			<div class="auth-error" id="forgot-error-message" style="display: none;"></div>
+			<div class="auth-success" id="forgot-success-message" style="display: none; background: #10b981; color: #fff; padding: 12px; border-radius: 8px; margin-bottom: 20px; font-size: 14px;"></div>
+			<form id="forgot-password-form">
+				<div class="auth-form-group">
+					<label class="auth-label" for="forgot-email">Email</label>
+					<input type="email" id="forgot-email" class="auth-input" placeholder="your@email.com" required autocomplete="email">
+				</div>
+				<button type="submit" class="auth-button" id="forgot-submit-btn">Send Reset Link</button>
+			</form>
+		</div>
+	</div>
+	
+	<script>
+		// Forgot Password functionality
+		document.addEventListener('DOMContentLoaded', () => {
+			const forgotLink = document.getElementById('forgot-password-link');
+			const forgotModal = document.getElementById('forgot-password-modal');
+			const closeModal = document.getElementById('close-forgot-modal');
+			const forgotForm = document.getElementById('forgot-password-form');
+			const forgotError = document.getElementById('forgot-error-message');
+			const forgotSuccess = document.getElementById('forgot-success-message');
+			const forgotSubmitBtn = document.getElementById('forgot-submit-btn');
+			
+			if (!forgotLink || !forgotModal) return; // Elements not found, skip
+			
+			// Open modal - use both click and touchstart for better iOS support
+			const openModal = (e) => {
+				if (e) {
+					e.preventDefault();
+					e.stopPropagation();
+				}
+				forgotModal.style.display = 'flex';
+				// Focus on email input
+				const emailInput = document.getElementById('forgot-email');
+				if (emailInput) {
+					setTimeout(() => emailInput.focus(), 100);
+				}
+			};
+			
+			forgotLink.addEventListener('click', openModal);
+			forgotLink.addEventListener('touchend', (e) => {
+				e.preventDefault();
+				openModal(e);
+			});
+			
+			// Close modal
+			if (closeModal) {
+				closeModal.addEventListener('click', () => {
+					forgotModal.style.display = 'none';
+					if (forgotError) forgotError.style.display = 'none';
+					if (forgotSuccess) forgotSuccess.style.display = 'none';
+					if (forgotForm) forgotForm.reset();
+				});
+			}
+			
+			// Close on backdrop click
+			forgotModal.addEventListener('click', (e) => {
+				if (e.target === forgotModal) {
+					forgotModal.style.display = 'none';
+					if (forgotError) forgotError.style.display = 'none';
+					if (forgotSuccess) forgotSuccess.style.display = 'none';
+					if (forgotForm) forgotForm.reset();
+				}
+			});
+			
+			// Handle form submission
+			if (forgotForm) {
+				forgotForm.addEventListener('submit', async (e) => {
+					e.preventDefault();
+					
+					const email = document.getElementById('forgot-email').value.trim();
+					if (!email) {
+						if (forgotError) {
+							forgotError.textContent = 'Please enter your email address';
+							forgotError.style.display = 'block';
+						}
+						if (forgotSuccess) forgotSuccess.style.display = 'none';
+						return;
+					}
+					
+					if (forgotSubmitBtn) {
+						forgotSubmitBtn.disabled = true;
+						forgotSubmitBtn.textContent = 'Sending...';
+					}
+					if (forgotError) forgotError.style.display = 'none';
+					if (forgotSuccess) forgotSuccess.style.display = 'none';
+					
+					try {
+						// Initialize Supabase if needed
+						if (typeof window.createClient === 'undefined') {
+							throw new Error('Supabase not loaded. Please refresh the page.');
+						}
+						
+						if (!window.SUPABASE_URL || !window.SUPABASE_ANON_KEY) {
+							throw new Error('Supabase configuration missing');
+						}
+						
+						const sb = window.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+						
+						// Determine redirect URL - ALWAYS use backend URL for consistency
+						// This ensures the same URL is used in browser and Xcode/app
+						let redirectUrl;
+						// In app context, window.location.origin might be "capacitor://localhost"
+						// So we always use BACKEND_URL which is explicitly set
+						const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
+						
+						// For web browser, we could use window.location.origin, but for consistency
+						// we use the same backend URL in both contexts
+						const isNative = window.Capacitor && window.Capacitor.isNativePlatform();
+						if (isNative) {
+							// In app: always use backend URL
+							redirectUrl = `${backendUrl}/reset-password`;
+						} else {
+							// In browser: use origin if available, otherwise backend URL
+							redirectUrl = window.location.origin 
+								? `${window.location.origin}/reset-password`
+								: `${backendUrl}/reset-password`;
+						}
+						
+						console.log('[FORGOT PASSWORD] Using redirect URL:', redirectUrl);
+						console.log('[FORGOT PASSWORD] Is native platform:', isNative);
+						console.log('[FORGOT PASSWORD] window.location.origin:', window.location.origin);
+						console.log('[FORGOT PASSWORD] BACKEND_URL:', window.BACKEND_URL);
+						
+						console.log('[FORGOT PASSWORD] Sending reset email to:', email);
+						console.log('[FORGOT PASSWORD] Redirect URL:', redirectUrl);
+						console.log('[FORGOT PASSWORD] Supabase URL:', window.SUPABASE_URL);
+						
+						// Send password reset email
+						const { data, error } = await sb.auth.resetPasswordForEmail(email, {
+							redirectTo: redirectUrl,
+							emailRedirectTo: redirectUrl
+						});
+						
+						if (error) {
+							console.error('[FORGOT PASSWORD] Error:', error);
+							// Provide more helpful error messages
+							let errorMsg = error.message || 'Failed to send reset email';
+							if (error.message && error.message.includes('rate limit')) {
+								errorMsg = 'Too many requests. Please wait a few minutes and try again.';
+							} else if (error.message && error.message.includes('not found')) {
+								errorMsg = 'No account found with this email address.';
+							} else if (error.message && error.message.includes('email')) {
+								errorMsg = 'Invalid email address. Please check and try again.';
+							}
+							throw new Error(errorMsg);
+						}
+						
+						console.log('[FORGOT PASSWORD] Success! Email sent:', data);
+						
+						// Success
+						if (forgotSuccess) {
+							forgotSuccess.textContent = 'Password reset email sent! Check your inbox and click the link to reset your password.';
+							forgotSuccess.style.display = 'block';
+						}
+						if (forgotError) forgotError.style.display = 'none';
+						
+						// Close modal after 3 seconds
+						setTimeout(() => {
+							forgotModal.style.display = 'none';
+							if (forgotSuccess) forgotSuccess.style.display = 'none';
+							if (forgotForm) forgotForm.reset();
+						}, 3000);
+						
+					} catch (error) {
+						if (forgotError) {
+							forgotError.textContent = error.message || 'Failed to send reset email. Please try again.';
+							forgotError.style.display = 'block';
+						}
+						if (forgotSuccess) forgotSuccess.style.display = 'none';
+					} finally {
+						if (forgotSubmitBtn) {
+							forgotSubmitBtn.disabled = false;
+							forgotSubmitBtn.textContent = 'Send Reset Link';
+						}
+					}
+				});
+			}
+		});
+	</script>
 </body>
 </html>
