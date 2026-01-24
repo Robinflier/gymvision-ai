@@ -591,6 +591,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 		// IMMEDIATE: Force WebView focus (iOS fix)
 		forceWebViewFocus();
 		
+		// CRITICAL: Check if we're on reset-password page BEFORE checking session
+		// Password reset doesn't need a session - it uses tokens in the URL hash
+		const isResetPasswordPage = window.location.pathname.includes('/reset-password');
+		const hash = window.location.hash.substring(1);
+		const hashParams = new URLSearchParams(hash);
+		const hasResetToken = hashParams.has('access_token') && hashParams.get('type') === 'recovery';
+		
+		if (isResetPasswordPage || hasResetToken) {
+			console.log('[INIT] On reset password page - skipping main app init');
+			hideLoadingOverlay();
+			// Don't initialize main app - let reset-password.html handle it
+			return;
+		}
+		
 		// Initialize Supabase
 		await initSupabase();
 		console.log('[INIT] Supabase initialized:', !!supabaseClient);
@@ -940,9 +954,25 @@ function handleCurrentUrl() {
 			console.log('[DEEP LINK] Password reset token detected in current URL');
 			// Navigate to reset password page if not already there
 			if (!window.location.pathname.includes('/reset-password')) {
-				window.location.href = '/reset-password' + window.location.hash;
+				console.log('[DEEP LINK] Navigating to reset-password page');
+				// Use full path to ensure it works in app context
+				const resetUrl = window.location.pathname === '/' 
+					? '/reset-password' + window.location.hash
+					: window.location.pathname.replace(/\/$/, '') + '/reset-password' + window.location.hash;
+				window.location.href = resetUrl;
 			}
 		}
+	}
+	
+	// Also check if we're already on reset-password but with hash in query params
+	const urlParams = new URLSearchParams(window.location.search);
+	if (urlParams.has('access_token') && urlParams.get('type') === 'recovery') {
+		console.log('[DEEP LINK] Password reset token in query params, converting to hash');
+		const accessToken = urlParams.get('access_token');
+		const type = urlParams.get('type');
+		const refreshToken = urlParams.get('refresh_token') || '';
+		// Convert to hash format
+		window.location.href = '/reset-password#access_token=' + accessToken + '&type=' + type + (refreshToken ? '&refresh_token=' + refreshToken : '');
 	}
 }
 

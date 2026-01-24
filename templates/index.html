@@ -1121,20 +1121,15 @@
 						const sb = window.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 						
 						// Determine redirect URL - use backend URL for both web and app
-						// The app will handle the deep link routing when opened
+						// Supabase will send the user to this URL with tokens in the hash
 						let redirectUrl;
-						const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
+						const backendUrl = window.BACKEND_URL || window.location.origin || 'https://gymvision-ai.onrender.com';
 						
-						if (window.Capacitor && window.Capacitor.isNativePlatform()) {
-							// For iOS/Android: use backend URL, app will intercept and handle
-							// The app's deep link handler will catch this and route correctly
-							redirectUrl = `${backendUrl}/reset-password`;
-							console.log('[FORGOT PASSWORD] Using backend URL for app:', redirectUrl);
-						} else {
-							// For web browser: use origin
-							redirectUrl = `${window.location.origin}/reset-password`;
-							console.log('[FORGOT PASSWORD] Using origin URL for web:', redirectUrl);
-						}
+						// Always use the backend URL - it works for both web and app
+						// The app will intercept the URL when opened and handle it correctly
+						redirectUrl = `${backendUrl}/reset-password`;
+						console.log('[FORGOT PASSWORD] Using redirect URL:', redirectUrl);
+						console.log('[FORGOT PASSWORD] Is native platform:', window.Capacitor?.isNativePlatform());
 						
 						console.log('[FORGOT PASSWORD] Sending reset email to:', email);
 						console.log('[FORGOT PASSWORD] Redirect URL:', redirectUrl);
