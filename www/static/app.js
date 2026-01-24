@@ -1464,6 +1464,15 @@ async function getUser() {
 
 // Helper: Show login screen (content switching, not redirect)
 async function showLoginScreen() {
+	// Update URL to /login for consistency (works in both browser and app)
+	// This ensures the URL is the same whether in browser or Xcode
+	if (window.location.pathname !== '/login') {
+		// Use history.pushState to update URL without reload
+		// This works in both browser and Capacitor app
+		window.history.pushState({}, '', '/login');
+		console.log('[LOGIN] Updated URL to /login');
+	}
+	
 	// Clear all app state
 	currentWorkout = null;
 	editingWorkoutId = null;
