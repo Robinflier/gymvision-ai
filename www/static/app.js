@@ -626,12 +626,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 			hasSession = false;
 		}
 		
-		// If no session, check if we're on login page
+		// If no session, check if we're on login or reset-password page
 		if (!hasSession) {
 			console.log('[INIT] No session');
 			// If we're already on login page, don't interfere - let login page handle it
 			if (window.location.pathname === '/login') {
 				console.log('[INIT] Already on login page - letting it handle auth');
+				hideLoadingOverlay();
+				return;
+			}
+			// If we're on reset-password page, don't interfere - let reset-password page handle it
+			if (window.location.pathname.includes('/reset-password')) {
+				console.log('[INIT] Already on reset-password page - letting it handle auth');
 				hideLoadingOverlay();
 				return;
 			}
@@ -1464,6 +1470,12 @@ async function getUser() {
 
 // Helper: Show login screen (content switching, not redirect)
 async function showLoginScreen() {
+	// Don't show login screen if we're on reset-password page
+	if (window.location.pathname.includes('/reset-password')) {
+		console.log('[LOGIN] Skipping login screen - on reset-password page');
+		return;
+	}
+	
 	// Update URL to /login for consistency (works in both browser and app)
 	// This ensures the URL is the same whether in browser or Xcode
 	if (window.location.pathname !== '/login') {
