@@ -3397,11 +3397,35 @@ def get_gym_dashboard():
 				kpi_total_exercises = total_exercises
 				
 				# Calculate previous period comparisons for workouts and exercises
-				# Yesterday: we need to get ALL workouts (not filtered by period) to count yesterday's workouts
-				# Because all_workouts is already filtered by the current period, we need to query separately for yesterday
+				# For "yesterday" comparison, we need to compare TODAY vs YESTERDAY (not total period)
+				today_date = datetime.utcnow().date().isoformat()
 				yesterday_date = (datetime.utcnow() - timedelta(days=1)).date().isoformat()
 				
-				# Query workouts from yesterday specifically (not filtered by current period)
+				# Get TODAY's workouts and exercises for comparison
+				today_workouts = []
+				for i in range(0, len(consent_user_ids), 50):
+					chunk = consent_user_ids[i:i+50]
+					try:
+						q = admin_client.table("workouts") \
+							.select("user_id,date,exercises,gym_name") \
+							.in_("user_id", chunk) \
+							.eq("date", today_date)
+						res = q.execute()
+						if res.data:
+							today_workouts.extend(res.data)
+					except Exception as e:
+						print(f"[GYM DASHBOARD] Error fetching today workouts: {e}")
+				
+				# Filter today's workouts to matching gym
+				today_workouts_filtered = [
+					w for w in today_workouts
+					if (w.get("gym_name") or "").lower().strip() == target_gym
+					and (w.get("gym_name") or "").lower().strip() not in ("", "-", "gym -")
+				]
+				today_workouts_count = len(today_workouts_filtered)
+				today_exercises_count = sum([len(w.get("exercises") or []) for w in today_workouts_filtered])
+				
+				# Get YESTERDAY's workouts and exercises for comparison
 				yesterday_workouts = []
 				for i in range(0, len(consent_user_ids), 50):
 					chunk = consent_user_ids[i:i+50]
@@ -3416,7 +3440,7 @@ def get_gym_dashboard():
 					except Exception as e:
 						print(f"[GYM DASHBOARD] Error fetching yesterday workouts: {e}")
 				
-				# Filter to workouts with matching gym (only workouts with gym_name set, not "gym -" or empty)
+				# Filter yesterday's workouts to matching gym
 				yesterday_workouts_filtered = [
 					w for w in yesterday_workouts
 					if (w.get("gym_name") or "").lower().strip() == target_gym
@@ -3427,6 +3451,14 @@ def get_gym_dashboard():
 					len(w.get("exercises") or [])
 					for w in yesterday_workouts_filtered
 				])
+				
+				# Store today's counts for "yesterday" comparison
+				# We'll use these when the comparison is "yesterday"
+				today_counts = {
+					"workouts": today_workouts_count,
+					"exercises": today_exercises_count
+				}
+				print(f"[GYM DASHBOARD] Today vs Yesterday: today={today_workouts_count} workouts ({today_exercises_count} exercises), yesterday={comparison_data['yesterday']['workouts']} workouts ({comparison_data['yesterday']['exercises']} exercises)")
 				
 				# Last week: same period but 7 days ago
 				if lookback_days:
@@ -3536,6 +3568,27 @@ def get_gym_dashboard():
 			"period": period,
 			"comparison": comparison_data
 		}
+		
+		# Add today's counts for "yesterday" comparison (if available)
+		if 'today_counts' in locals():
+			statistics["today_counts"] = today_counts
+			# Also calculate today's users count (users created today)
+			today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+			today_users_count = 0
+			if analytics_all.data:
+				for u in analytics_all.data:
+					if not u.get("user_id"):
+						continue
+					user_id = u.get("user_id")
+					if user_id in user_creation_dates:
+						try:
+							created_str = user_creation_dates[user_id].replace('Z', '+00:00')
+							created = datetime.fromisoformat(created_str)
+							if created >= today_start:
+								today_users_count += 1
+						except:
+							pass
+			statistics["today_counts"]["users"] = today_users_count
 		
 		if is_premium:
 			# Premium accounts get full access
