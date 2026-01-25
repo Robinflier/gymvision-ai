@@ -1715,7 +1715,7 @@ async function loadGymDashboardData() {
 
 		// Initialize comparison toggle and render comparisons
 		initGymComparisonToggle();
-		updateGymComparisonLabels(stats.comparison || {});
+		updateGymComparisonLabels(stats.comparison || {}, stats.today_counts);
 
 		// Charts
 		const charts = stats.charts || {};
@@ -1782,14 +1782,27 @@ function initGymComparisonToggle() {
 	updateGymComparisonUI();
 }
 
-function updateGymComparisonLabels(comparisonData) {
+function updateGymComparisonLabels(comparisonData, todayCounts) {
 	const comparison = getGymComparison();
 	const comp = comparisonData[comparison] || {};
-	const stats = {
+	
+	// For "yesterday" comparison, use today's counts instead of total period counts
+	// This ensures we compare today vs yesterday, not total period vs yesterday
+	let stats = {
 		users: parseInt(document.getElementById('gym-dashboard-total-users')?.textContent || '0'),
 		workouts: parseInt(document.getElementById('gym-dashboard-total-workouts')?.textContent || '0'),
 		exercises: parseInt(document.getElementById('gym-dashboard-total-exercises')?.textContent || '0')
 	};
+	
+	// Override with today's counts if comparison is "yesterday" and today_counts is available
+	if (comparison === 'yesterday' && todayCounts) {
+		stats = {
+			users: todayCounts.users || stats.users,
+			workouts: todayCounts.workouts || stats.workouts,
+			exercises: todayCounts.exercises || stats.exercises
+		};
+	}
+	
 	const prev = {
 		users: comp.users || 0,
 		workouts: comp.workouts || 0,
@@ -1803,8 +1816,8 @@ function updateGymComparisonLabels(comparisonData) {
 			if (current === 0) {
 				el.innerHTML = '<span class="gym-comparison-neutral">—</span>';
 			} else {
-				// New data (was 0, now > 0) - show as +100%
-				el.innerHTML = '<span class="gym-comparison-positive">+100% ↑</span>';
+				// New data (was 0, now > 0) - show as "New" instead of +100%
+				el.innerHTML = '<span class="gym-comparison-positive">New ↑</span>';
 			}
 			return;
 		}
