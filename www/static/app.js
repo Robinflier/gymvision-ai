@@ -1717,12 +1717,12 @@ async function showGymDashboardScreen() {
 	if (deleteAccountBtn && !deleteAccountBtn.dataset.bound) {
 		deleteAccountBtn.dataset.bound = 'true';
 		deleteAccountBtn.addEventListener('click', async () => {
-			if (!confirm('Are you sure you want to delete your gym account? This action cannot be undone and all your data will be permanently deleted.')) {
+			if (!confirm('Are you sure you want to delete your gym account? This action cannot be undone. All your account data, analytics data, and any linked user data will be permanently deleted.')) {
 				return;
 			}
 			
 			// Double confirmation
-			if (!confirm('This is your last chance. Are you absolutely sure you want to delete your gym account?')) {
+			if (!confirm('This is your last chance. Are you absolutely sure you want to permanently delete your gym account and all associated data? This cannot be reversed.')) {
 				return;
 			}
 
