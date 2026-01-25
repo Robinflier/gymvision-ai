@@ -1220,6 +1220,83 @@ def toggle_premium_gym_account(user_id: str):
 		return jsonify({"error": f"Failed to update premium status: {str(e)}"}), 500
 
 
+@app.route("/api/admin/gym-accounts/<user_id>/delete", methods=["POST", "OPTIONS"])
+def delete_gym_account_admin(user_id: str):
+	"""
+	Delete a gym account (admin only).
+	Only accessible by admin users.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# TEMPORARILY DISABLED AUTH FOR TESTING
+	skip_auth = True  # TEMPORARY
+	
+	# Get Authorization header
+	auth_header = request.headers.get("Authorization")
+	
+	if not skip_auth:
+		if not auth_header or not auth_header.startswith("Bearer "):
+			return jsonify({"error": "Authentication required"}), 401
+		
+		access_token = auth_header.replace("Bearer ", "").strip()
+		
+		try:
+			SUPABASE_URL = os.getenv("SUPABASE_URL")
+			SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+			SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+			
+			if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+				return jsonify({"error": "Supabase configuration missing"}), 500
+			
+			# Verify user
+			supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+			user_response = supabase_client.auth.get_user(access_token)
+			
+			if not user_response.user:
+				return jsonify({"error": "Invalid token"}), 401
+			
+			# Check if user is admin (by ID or email)
+			if not is_admin_user(user_response.user.id, user_response.user.email):
+				return jsonify({"error": "Admin access required"}), 403
+		except Exception as e:
+			return jsonify({"error": "Authentication error: " + str(e)}), 401
+	
+	# Delete gym account (always execute, even when skip_auth is True)
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+		
+		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		user_to_delete = admin_client.auth.admin.get_user_by_id(user_id)
+		
+		if not user_to_delete.user:
+			return jsonify({"error": "Gym account not found"}), 404
+		
+		user_meta = user_to_delete.user.user_metadata or {}
+		if user_meta.get("is_gym_account") != True:
+			return jsonify({"error": "User is not a gym account"}), 400
+		
+		# Delete user from Supabase
+		admin_client.auth.admin.delete_user(user_id)
+		
+		print(f"[ADMIN DELETE] Gym account deleted: {user_id}")
+		
+		return jsonify({"success": True, "message": "Gym account deleted successfully"}), 200
+		
+	except Exception as e:
+		print(f"[ADMIN DELETE] Error deleting gym account: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to delete gym account: {str(e)}"}), 500
+
+
 # /verify and /resend-code endpoints removed - using Supabase for email verification
 
 

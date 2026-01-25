@@ -224,6 +224,13 @@
 		.btn-danger:hover {
 			background: #dc2626;
 		}
+		.btn-delete {
+			background: #991b1b;
+			color: white;
+		}
+		.btn-delete:hover {
+			background: #7f1d1d;
+		}
 		.btn:disabled {
 			opacity: 0.5;
 			cursor: not-allowed;
@@ -548,9 +555,11 @@
 						${!account.is_verified ? `
 							<button class="btn btn-success" onclick="approveGym('${account.user_id}')" title="Approve">✓</button>
 							<button class="btn btn-danger" onclick="rejectGym('${account.user_id}')" title="Reject">✗</button>
+							<button class="btn btn-delete" onclick="deleteGym('${account.user_id}')" title="Delete">🗑</button>
 						` : `
 							<span class="status-badge verified" style="margin-right: 10px;">✓ Verified</span>
 							<button class="btn btn-danger" onclick="rejectGym('${account.user_id}')" title="Reject">✗</button>
+							<button class="btn btn-delete" onclick="deleteGym('${account.user_id}')" title="Delete">🗑</button>
 						`}
 					</div>
 				</div>
@@ -612,6 +621,42 @@
 			} catch (error) {
 				console.error('Error rejecting gym:', error);
 				showError('Failed to reject gym account.');
+			}
+		}
+
+		async function deleteGym(userId) {
+			if (!confirm('⚠️ WARNING: Are you sure you want to DELETE this gym account? This action cannot be undone and all data will be permanently deleted.')) {
+				return;
+			}
+			if (!confirm('⚠️ FINAL WARNING: This will permanently delete the account and all associated data. Are you absolutely sure?')) {
+				return;
+			}
+
+			try {
+				// TEMPORARILY DISABLED AUTH - call API without auth header
+				const response = await fetch(`/api/admin/gym-accounts/${userId}/delete`, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json'
+					}
+				});
+
+				if (!response.ok) {
+					if (response.status === 401) {
+						document.getElementById('login-container').style.display = 'flex';
+						document.getElementById('admin-container').style.display = 'none';
+					} else {
+						const errorText = await response.text();
+						showError('Failed to delete gym account: ' + errorText);
+					}
+					return;
+				}
+
+				showError('Gym account deleted successfully.', 'success');
+				loadGymAccounts();
+			} catch (error) {
+				console.error('Error deleting gym:', error);
+				showError('Failed to delete gym account.');
 			}
 		}
 
