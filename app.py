@@ -3572,23 +3572,10 @@ def get_gym_dashboard():
 		# Add today's counts for "yesterday" comparison (if available)
 		if 'today_counts' in locals():
 			statistics["today_counts"] = today_counts
-			# Also calculate today's users count (users created today)
-			today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-			today_users_count = 0
-			if analytics_all.data:
-				for u in analytics_all.data:
-					if not u.get("user_id"):
-						continue
-					user_id = u.get("user_id")
-					if user_id in user_creation_dates:
-						try:
-							created_str = user_creation_dates[user_id].replace('Z', '+00:00')
-							created = datetime.fromisoformat(created_str)
-							if created >= today_start:
-								today_users_count += 1
-						except:
-							pass
-			statistics["today_counts"]["users"] = today_users_count
+			# For users, we compare TOTAL users today vs TOTAL users yesterday
+			# (not just new users created today, because users are cumulative)
+			# So today's users count is the total_users (all users that exist today)
+			statistics["today_counts"]["users"] = total_users
 		
 		if is_premium:
 			# Premium accounts get full access
