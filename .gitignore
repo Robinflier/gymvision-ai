@@ -56,6 +56,9 @@ android/.gradle/
 android/app/build/
 android/.idea/
 android/local.properties
+android/key.properties
+android/app/*.jks
+android/app/*.keystore
 
 # Model files (too large for git)
 *.pt

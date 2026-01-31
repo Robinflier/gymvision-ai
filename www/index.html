@@ -7,7 +7,7 @@
 	<link rel="manifest" href="static/manifest.webmanifest">
 	<meta name="theme-color" content="#0f0f10">
 	<meta name="apple-mobile-web-app-capable" content="yes">
-	<link rel="stylesheet" href="static/styles.css">
+	<link rel="stylesheet" href="static/styles.css?v=3">
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 	<!-- Supabase library - MUST load before app.js -->
@@ -26,6 +26,7 @@
 		// For local testing: use "http://localhost:5004" (iOS Simulator) or "http://YOUR_MAC_IP:5004" (real iPhone)
 		window.BACKEND_URL = "https://gymvision-ai.onrender.com"; // Change to "http://localhost:5004" for local testing
 	</script>
+	<script src="static/app.js?v=3" defer></script>
 	<script>
 		// Comprehensive error handling - prevent app crashes
 		// Also show alerts for critical errors so we can debug
@@ -437,6 +438,34 @@
 				</div>
 			</section>
 
+			<section class="card progress-orm-calculator-card">
+				<div class="progress-orm-header">
+					<h3>One Rep Max Calculator</h3>
+				</div>
+				<div class="progress-orm-content">
+					<div class="progress-orm-inputs">
+						<div class="progress-orm-input-group">
+							<label for="orm-weight" class="progress-orm-label">Weight</label>
+							<div class="progress-orm-input-wrapper">
+								<input type="number" id="orm-weight" placeholder="0" step="0.1" min="0" />
+								<span id="orm-unit-label" class="progress-orm-unit">kg</span>
+							</div>
+						</div>
+						<div class="progress-orm-input-group">
+							<label for="orm-reps" class="progress-orm-label">Reps</label>
+							<input type="number" id="orm-reps" placeholder="0" step="1" min="1" max="30" />
+						</div>
+					</div>
+					<div class="progress-orm-result">
+						<div class="progress-orm-result-label">Estimated 1RM</div>
+						<div class="progress-orm-result-value">
+							<span id="orm-result">—</span>
+							<span id="orm-result-unit" class="progress-orm-unit">kg</span>
+						</div>
+					</div>
+				</div>
+			</section>
+
 			<section class="card progress-chart-card">
 				<div class="progress-chart-header">
 					<h3>Weight Progress</h3>
@@ -539,26 +568,6 @@
 						</div>
 					</div>
 					
-					<!-- Unit Toggle (kg/lbs) -->
-					<div class="settings-option-item">
-						<div class="settings-option-left">
-							<img src="static/images/weight-icon.png?v=2" alt="Weight Unit" class="settings-icon" onerror="this.onerror=null; this.style.display='none'; this.nextElementSibling.style.display='block';">
-							<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:none; width:20px; height:20px; color:#dfe0e6; flex-shrink:0;">
-								<circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.5" fill="none"/>
-								<path d="M10 4V16M4 10H16" stroke="currentColor" stroke-width="1.5" fill="none"/>
-							</svg>
-							<span class="settings-option-label">Weight Unit</span>
-						</div>
-						<div class="settings-option-right">
-							<label class="settings-toggle">
-								<input type="checkbox" id="settings-unit-toggle">
-								<span class="settings-toggle-slider">
-									<span class="settings-toggle-label-left">lbs</span>
-									<span class="settings-toggle-label-right">kg</span>
-								</span>
-							</label>
-						</div>
-					</div>
 					
 					<!-- Rest Timer Toggle -->
 					<div class="settings-option-item">

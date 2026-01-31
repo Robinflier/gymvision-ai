@@ -72,13 +72,6 @@
 		.btn-reject:hover {
 			background: #dc2626;
 		}
-		.btn-delete {
-			background: #991b1b;
-			color: white;
-		}
-		.btn-delete:hover {
-			background: #7f1d1d;
-		}
 		.status {
 			padding: 6px 12px;
 			border-radius: 20px;
@@ -192,13 +185,13 @@
 
 	<!-- Admin Content (hidden until authenticated) -->
 	<div id="admin-content" class="admin-content">
-		<div class="header">
-			<h1>🔐 Admin Dashboard</h1>
-			<p>Approve or reject gym account requests</p>
-		</div>
+	<div class="header">
+		<h1>🔐 Admin Dashboard</h1>
+		<p>Approve or reject gym account requests</p>
+	</div>
 
-		<div id="error-message" class="error" style="display: none;"></div>
-		<div id="accounts-list" class="loading">Loading gym accounts...</div>
+	<div id="error-message" class="error" style="display: none;"></div>
+	<div id="accounts-list" class="loading">Loading gym accounts...</div>
 	</div>
 
 	<script>
@@ -300,7 +293,6 @@
 							<button class="btn btn-approve" onclick="approve('${account.user_id}')">✓ Approve</button>
 						` : ''}
 						<button class="btn btn-reject" onclick="reject('${account.user_id}')">✗ Reject</button>
-						<button class="btn btn-delete" onclick="deleteAccount('${account.user_id}')" title="Delete">🗑 Delete</button>
 					</div>
 				</div>
 			`).join('');
@@ -338,27 +330,6 @@
 					loadAccounts();
 				} else {
 					alert('Failed to reject: ' + await response.text());
-				}
-			} catch (error) {
-				alert('Error: ' + error.message);
-			}
-		}
-
-		async function deleteAccount(userId) {
-			if (!confirm('⚠️ WARNING: Are you sure you want to DELETE this gym account? This action cannot be undone and all data will be permanently deleted.')) return;
-			if (!confirm('⚠️ FINAL WARNING: This will permanently delete the account and all associated data. Are you absolutely sure?')) return;
-
-			try {
-				const response = await fetch(`/api/admin/gym-accounts/${userId}/delete`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' }
-				});
-
-				if (response.ok) {
-					alert('Gym account deleted successfully.');
-					loadAccounts();
-				} else {
-					alert('Failed to delete: ' + await response.text());
 				}
 			} catch (error) {
 				alert('Error: ' + error.message);
