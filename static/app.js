@@ -7486,6 +7486,10 @@ function initDataConsentToggle() {
 	});
 }
 
+// Debouncing and lock for saveGymName
+var saveGymNameDebounceTimer = null;
+var saveGymNameLock = false;
+
 // Save gym name to Supabase user_metadata and sync to analytics table
 async function saveGymName(gymName, placeId = null) {
 	// Normalize and update localStorage immediately (so switching tabs doesn't revert)
@@ -7499,44 +7503,68 @@ async function saveGymName(gymName, placeId = null) {
 		localStorage.removeItem('user-gym-place-id');
 	}
 
-	if (!supabaseClient) {
-		await initSupabase();
-	}
-	if (!supabaseClient) {
-		console.warn('[GYM] Supabase not available, saving to localStorage only');
-		return;
+	// Clear existing debounce timer
+	if (saveGymNameDebounceTimer) {
+		clearTimeout(saveGymNameDebounceTimer);
 	}
 
-	try {
-		const { data: { session } } = await supabaseClient.auth.getSession();
-		if (!session) {
-			// Not logged in, save to localStorage only
+	// Debounce: wait 500ms before actually saving
+	saveGymNameDebounceTimer = setTimeout(async () => {
+		// Check lock to prevent concurrent requests
+		if (saveGymNameLock) {
+			console.log('[GYM] Save already in progress, skipping duplicate request');
 			return;
 		}
 
-		// Call backend endpoint to update user_metadata and sync to analytics table
-		const apiUrl = getApiUrl('/api/collect-gym-data');
-		const response = await fetch(apiUrl, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Authorization': `Bearer ${session.access_token}`
-			},
-			body: JSON.stringify({
-				gym_name: normalizedGym || null,
-				gym_place_id: normalizedGym ? (normalizedPlaceId || null) : null
-			})
-		});
+		saveGymNameLock = true;
 
-		if (!response.ok) {
-			const errorData = await response.json().catch(() => ({}));
-			console.error('[GYM] Error saving gym name:', errorData);
-		} else {
-			console.log('[GYM] Gym name saved and synced successfully');
+		if (!supabaseClient) {
+			await initSupabase();
 		}
-	} catch (e) {
-		console.error('[GYM] Error saving gym name:', e);
-	}
+		if (!supabaseClient) {
+			console.warn('[GYM] Supabase not available, saving to localStorage only');
+			saveGymNameLock = false;
+			return;
+		}
+
+		try {
+			const { data: { session } } = await supabaseClient.auth.getSession();
+			if (!session) {
+				// Not logged in, save to localStorage only
+				saveGymNameLock = false;
+				return;
+			}
+
+			// Get current values from localStorage (may have changed during debounce)
+			const currentGym = localStorage.getItem('user-gym-name') || '';
+			const currentPlaceId = localStorage.getItem('user-gym-place-id') || '';
+
+			// Call backend endpoint to update user_metadata and sync to analytics table
+			const apiUrl = getApiUrl('/api/collect-gym-data');
+			const response = await fetch(apiUrl, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'Authorization': `Bearer ${session.access_token}`
+				},
+				body: JSON.stringify({
+					gym_name: currentGym || null,
+					gym_place_id: currentGym ? (currentPlaceId || null) : null
+				})
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json().catch(() => ({}));
+				console.error('[GYM] Error saving gym name:', errorData);
+			} else {
+				console.log('[GYM] Gym name saved and synced successfully');
+			}
+		} catch (e) {
+			console.error('[GYM] Error saving gym name:', e);
+		} finally {
+			saveGymNameLock = false;
+		}
+	}, 500);
 }
 
 // Load gym name from Supabase user_metadata or localStorage
@@ -7572,14 +7600,28 @@ async function loadGymName() {
 	}
 }
 
+// Lock for saveDataConsent
+var saveDataConsentLock = false;
+
 // Save data collection consent to Supabase user_metadata and sync to analytics table
 async function saveDataConsent(hasConsent) {
+	// Update localStorage immediately
+	localStorage.setItem('user-data-consent', hasConsent ? 'true' : 'false');
+
+	// Check lock to prevent concurrent requests
+	if (saveDataConsentLock) {
+		console.log('[CONSENT] Save already in progress, skipping duplicate request');
+		return;
+	}
+
+	saveDataConsentLock = true;
+
 	if (!supabaseClient) {
 		await initSupabase();
 	}
 	if (!supabaseClient) {
 		console.warn('[CONSENT] Supabase not available, saving to localStorage only');
-		localStorage.setItem('user-data-consent', hasConsent ? 'true' : 'false');
+		saveDataConsentLock = false;
 		return;
 	}
 
@@ -7587,16 +7629,17 @@ async function saveDataConsent(hasConsent) {
 		const { data: { session } } = await supabaseClient.auth.getSession();
 		if (!session) {
 			// Not logged in, save to localStorage only
-			localStorage.setItem('user-data-consent', hasConsent ? 'true' : 'false');
+			saveDataConsentLock = false;
 			return;
 		}
 
-		// Call backend endpoint to update user_metadata and sync to analytics table
-		const apiUrl = getApiUrl('/api/collect-gym-data');
-		// Include current gym snapshot too, so gym_analytics stays in sync with the toggle.
+		// Get current gym snapshot from localStorage
 		const gymNameRaw = localStorage.getItem('user-gym-name');
 		const gymName = (gymNameRaw !== null) ? (gymNameRaw || '').trim() : '';
 		const placeId = (localStorage.getItem('user-gym-place-id') || '').trim();
+
+		// Call backend endpoint to update user_metadata and sync to analytics table
+		const apiUrl = getApiUrl('/api/collect-gym-data');
 		const response = await fetch(apiUrl, {
 			method: 'POST',
 			headers: {
@@ -7614,17 +7657,13 @@ async function saveDataConsent(hasConsent) {
 		if (!response.ok) {
 			const errorData = await response.json().catch(() => ({}));
 			console.error('[CONSENT] Error saving consent:', errorData);
-			// Fallback to localStorage
-			localStorage.setItem('user-data-consent', hasConsent ? 'true' : 'false');
 		} else {
 			console.log('[CONSENT] Consent saved and synced successfully');
-			// Also save to localStorage as backup
-			localStorage.setItem('user-data-consent', hasConsent ? 'true' : 'false');
 		}
 	} catch (e) {
 		console.error('[CONSENT] Error saving consent:', e);
-		// Fallback to localStorage
-		localStorage.setItem('user-data-consent', hasConsent ? 'true' : 'false');
+	} finally {
+		saveDataConsentLock = false;
 	}
 }
 
