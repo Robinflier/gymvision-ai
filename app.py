@@ -2217,7 +2217,7 @@ def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = Non
 
 		# Only log if there's a change or first sync (reduce log spam)
 		if not exists or gym_id is not None:
-		print(f"[GYM SYNC] Synced gym analytics for user {user_id}, linked to gym_id: {gym_id}")
+			print(f"[GYM SYNC] Synced gym analytics for user {user_id}, linked to gym_id: {gym_id}")
 		
 		return True
 	except Exception as e:
