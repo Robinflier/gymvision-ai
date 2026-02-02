@@ -2849,7 +2849,7 @@ def get_gym_dashboard():
 		analytics_consent = admin_client.table("gym_analytics").select("*").eq("gym_id", gym_id).eq("data_collection_consent", True).execute()
 		
 		# Calculate statistics
-		# If a specific date is selected, only count users that existed up to and including that date
+		# If a specific date is selected, only count users that were linked to the gym up to and including that date
 		if selected_date:
 			try:
 				selected_date_obj = datetime.fromisoformat(selected_date).date()
@@ -2860,31 +2860,28 @@ def get_gym_dashboard():
 					for u in analytics_all.data:
 						if not u.get("user_id"):
 							continue
-						user_id = u.get("user_id")
-						user_created = None
-						if user_id in user_creation_dates:
+						# Use gym_analytics.created_at (when user was linked to gym), not account creation date
+						linked_at = None
+						if u.get("created_at"):
 							try:
-								created_str = user_creation_dates[user_id].replace('Z', '+00:00')
-								user_created = datetime.fromisoformat(created_str)
+								linked_at = datetime.fromisoformat(u.get("created_at").replace('Z', '+00:00'))
 							except:
 								pass
-						if not user_created and u.get("created_at"):
-							try:
-								user_created = datetime.fromisoformat(u.get("created_at").replace('Z', '+00:00'))
-							except:
-								pass
-						if user_created and user_created <= selected_date_end:
+						
+						# Count user if they were linked to gym on or before selected date
+						if linked_at and linked_at <= selected_date_end:
 							total_users += 1
 							# Check if user has consent
 							if u.get("data_collection_consent") == True:
 								users_with_consent += 1
-						elif not user_created:
-							# If no creation date, assume old user (count it)
+						elif not linked_at:
+							# If no linked_at date, assume old link (count it)
 							total_users += 1
 							if u.get("data_collection_consent") == True:
 								users_with_consent += 1
 				users_linked = total_users
-			except:
+			except Exception as e:
+				print(f"[GYM DASHBOARD] Error calculating users for date {selected_date}: {e}")
 				# Fallback to normal calculation if date parsing fails
 				total_users = len(analytics_all.data) if analytics_all.data else 0
 				users_with_consent = len(analytics_consent.data) if analytics_consent.data else 0
@@ -3051,7 +3048,7 @@ def get_gym_dashboard():
 				if selected_date:
 					stats_end_date = selected_date
 
-				# Get all workouts for charts (no date filter for charts)
+				# Get all workouts for charts (use period filter for charts)
 				all_workouts = []
 				# Supabase has an IN limit; chunk
 				for i in range(0, len(consent_user_ids), 50):
@@ -3080,6 +3077,33 @@ def get_gym_dashboard():
 							raise
 					if res.data:
 						all_workouts.extend(res.data)
+				
+				# For statistics: if selected_date is provided, get ALL workouts up to that date (not just chart period)
+				stats_workouts = []
+				if stats_end_date:
+					for i in range(0, len(consent_user_ids), 50):
+						chunk = consent_user_ids[i:i+50]
+						try:
+							q = admin_client.table("workouts") \
+								.select("user_id,date,exercises,gym_name,gym_place_id") \
+								.in_("user_id", chunk) \
+								.lte("date", stats_end_date)
+							res = q.execute()
+						except Exception as e:
+							msg = str(e)
+							if "gym_name" in msg or "gym_place_id" in msg:
+								q = admin_client.table("workouts") \
+									.select("user_id,date,exercises") \
+									.in_("user_id", chunk) \
+									.lte("date", stats_end_date)
+								res = q.execute()
+							else:
+								raise
+						if res.data:
+							stats_workouts.extend(res.data)
+				else:
+					# No date filter: use all_workouts for statistics too
+					stats_workouts = all_workouts
 
 				machine_sets = {}
 				muscle_sets = {}
@@ -3095,6 +3119,8 @@ def get_gym_dashboard():
 				total_exercises = 0
 
 				target_gym = (gym_name or "").lower().strip()
+				
+				# Process workouts for charts (all_workouts)
 				for w in all_workouts:
 					# Filter to workouts that were actually saved with this gym (snapshot on the workout).
 					w_gym = (w.get("gym_name") or "").lower().strip()
@@ -3108,41 +3134,18 @@ def get_gym_dashboard():
 					if w_gym and target_gym and w_gym != target_gym:
 						continue
 
-					# Parse workout date once
+					# Parse workout date for charts
 					date_str = w.get("date")
 					dt = None
-					workout_date = None
 					try:
 						# date is stored as YYYY-MM-DD
 						dt = datetime.fromisoformat(str(date_str))
-						workout_date = dt.date()
 					except Exception:
 						# fallback
 						try:
 							dt = datetime.fromisoformat(str(date_str).split("T")[0])
-							workout_date = dt.date()
 						except Exception:
 							dt = None
-							workout_date = None
-					
-					# For statistics: only count workouts up to and including stats_end_date (cumulative)
-					# For charts: count all workouts (no date filter)
-					if stats_end_date:
-						try:
-							stats_date_obj = datetime.fromisoformat(stats_end_date).date()
-							if workout_date and workout_date <= stats_date_obj:
-								total_workouts += 1
-								exercises = w.get("exercises") or []
-								if isinstance(exercises, list):
-									total_exercises += len(exercises)
-						except:
-							pass
-					else:
-						# No date filter: count all workouts for statistics
-						total_workouts += 1
-						exercises = w.get("exercises") or []
-						if isinstance(exercises, list):
-							total_exercises += len(exercises)
 					if dt:
 						day_key = dt.strftime("%Y-%m-%d")
 						day_counts[day_key] = day_counts.get(day_key, 0) + 1
@@ -3174,10 +3177,10 @@ def get_gym_dashboard():
 						except Exception:
 							pass
 
+					# Process exercises for charts (all workouts)
 					exercises = w.get("exercises") or []
 					if not isinstance(exercises, list):
 						continue
-					total_exercises += len(exercises)
 					
 					# Calculate volume for this workout (for volume_by_week)
 					workout_volume = 0
@@ -3250,6 +3253,26 @@ def get_gym_dashboard():
 					# Add volume to week
 					if workout_week_key and workout_volume > 0:
 						volume_by_week[workout_week_key] = volume_by_week.get(workout_week_key, 0) + workout_volume
+
+				# Calculate statistics (workouts and exercises) from stats_workouts
+				# This is separate from charts to ensure we count ALL workouts up to selected_date
+				for w in stats_workouts:
+					# Filter to workouts that were actually saved with this gym
+					w_gym = (w.get("gym_name") or "").lower().strip()
+					
+					# CRITICAL: Only use workouts where gym_name is actually set (not "gym -" or empty)
+					if not w_gym or w_gym == "-" or w_gym == "gym -":
+						continue
+					
+					# If gym_name is present, it must match the target gym
+					if w_gym and target_gym and w_gym != target_gym:
+						continue
+					
+					# Count workout and exercises for statistics
+					total_workouts += 1
+					exercises = w.get("exercises") or []
+					if isinstance(exercises, list):
+						total_exercises += len(exercises)
 
 				top_machines = sorted(machine_sets.items(), key=lambda kv: kv[1], reverse=True)  # Show all machines
 				top_muscles = sorted(muscle_sets.items(), key=lambda kv: kv[1], reverse=True)[:8]
