@@ -6143,10 +6143,19 @@ function initProgress() {
 			return;
 		}
 		
+		const weightNum = parseFloat(weight);
+		if (isNaN(weightNum) || weightNum <= 0) {
+			console.log('[PROGRESS] Invalid weight value:', weight);
+			alert('Please enter a valid weight');
+			return;
+		}
+		
 		// Convert weight from display unit to kg for storage
 		const currentUnit = getWeightUnit();
-		const value = convertWeightForStorage(parseFloat(weight), currentUnit);
+		const value = convertWeightForStorage(weightNum, currentUnit);
 		const dayKey = dateInputValue; // YYYY-MM-DD from input[type=date]
+		
+		console.log('[PROGRESS] Saving weight:', value, 'kg for date:', dayKey);
 		
 		// Save to Supabase if available
 		if (supabaseClient) {
@@ -6359,14 +6368,18 @@ async function loadProgress() {
 					console.error('[WEIGHT] Error loading from Supabase:', error);
 					// Fallback to localStorage
 				} else if (weightsData && weightsData.length > 0) {
+					console.log('[WEIGHT] Loaded', weightsData.length, 'weights from Supabase');
 					// Convert Supabase data to progress format
 					progress = weightsData.map(w => ({
 						date: new Date(w.date + 'T12:00:00').toISOString(),
 						dayKey: w.date,
 						weight: parseFloat(w.weight)
 					}));
+					console.log('[WEIGHT] Converted progress data:', progress);
 					// Also update localStorage for backwards compatibility
 					localStorage.setItem('progress', JSON.stringify(progress));
+				} else {
+					console.log('[WEIGHT] No weights found in Supabase, using localStorage');
 				}
 			}
 		} catch (err) {
@@ -6384,6 +6397,7 @@ async function loadProgress() {
 	}
 
 	// Weight Chart
+	console.log('[PROGRESS] Rendering weight chart with', progress.length, 'data points');
 	renderWeightChart(progress);
 	renderWorkoutHeatmap(workouts);
 	renderMonthlyHeatmap(workouts);
