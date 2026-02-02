@@ -6129,18 +6129,49 @@ function initProgress() {
 
 	const progressForm = document.getElementById('progress-form');
 	if (progressForm) {
-		progressForm.addEventListener('submit', (e) => {
+		progressForm.addEventListener('submit', async (e) => {
 			e.preventDefault();
 			const weight = document.getElementById('progress-weight')?.value;
 			const dateInputValue = document.getElementById('progress-date')?.value;
 			if (weight && dateInputValue) {
-				const progress = JSON.parse(localStorage.getItem('progress') || '[]');
-				// Use the selected date so you can backfill specific days
-				const dayKey = dateInputValue; // YYYY-MM-DD from input[type=date]
-				const now = new Date(`${dayKey}T12:00:00`);
 				// Convert weight from display unit to kg for storage
 				const currentUnit = getWeightUnit();
 				const value = convertWeightForStorage(parseFloat(weight), currentUnit);
+				const dayKey = dateInputValue; // YYYY-MM-DD from input[type=date]
+				
+				// Save to Supabase if available
+				if (supabaseClient) {
+					try {
+						const { data: { session } } = await supabaseClient.auth.getSession();
+						if (session && session.user) {
+							// Upsert to Supabase (insert or update if exists for this date)
+							const { error } = await supabaseClient
+								.from('weights')
+								.upsert({
+									user_id: session.user.id,
+									date: dayKey,
+									weight: value
+								}, {
+									onConflict: 'user_id,date',
+									ignoreDuplicates: false
+								});
+							
+							if (error) {
+								console.error('[WEIGHT] Error saving to Supabase:', error);
+								// Fallback to localStorage if Supabase fails
+							} else {
+								console.log('[WEIGHT] Weight saved to Supabase successfully');
+							}
+						}
+					} catch (err) {
+						console.error('[WEIGHT] Error saving weight:', err);
+						// Fallback to localStorage
+					}
+				}
+				
+				// Also save to localStorage for backwards compatibility and offline support
+				const progress = JSON.parse(localStorage.getItem('progress') || '[]');
+				const now = new Date(`${dayKey}T12:00:00`);
 				// Remove any existing entries for this day (to prevent duplicates)
 				const filteredProgress = progress.filter(p => {
 					const pDayKey = p.dayKey || (p.date ? p.date.slice(0, 10) : '');
@@ -6158,6 +6189,7 @@ function initProgress() {
 					dayKey: p.dayKey || (p.date ? p.date.slice(0, 10) : '')
 				}));
 				localStorage.setItem('progress', JSON.stringify(normalizedProgress));
+				
 				// Reset weight input
 				const weightInput = document.getElementById('progress-weight');
 				if (weightInput) weightInput.value = '';
@@ -6269,7 +6301,39 @@ async function loadProgress() {
 		showLoginScreen();
 		return;
 	}
-	const progress = JSON.parse(localStorage.getItem('progress') || '[]');
+	
+	// Load weights from Supabase if available
+	let progress = JSON.parse(localStorage.getItem('progress') || '[]');
+	if (supabaseClient) {
+		try {
+			const { data: { session } } = await supabaseClient.auth.getSession();
+			if (session && session.user) {
+				const { data: weightsData, error } = await supabaseClient
+					.from('weights')
+					.select('*')
+					.eq('user_id', session.user.id)
+					.order('date', { ascending: true });
+				
+				if (error) {
+					console.error('[WEIGHT] Error loading from Supabase:', error);
+					// Fallback to localStorage
+				} else if (weightsData && weightsData.length > 0) {
+					// Convert Supabase data to progress format
+					progress = weightsData.map(w => ({
+						date: new Date(w.date + 'T12:00:00').toISOString(),
+						dayKey: w.date,
+						weight: parseFloat(w.weight)
+					}));
+					// Also update localStorage for backwards compatibility
+					localStorage.setItem('progress', JSON.stringify(progress));
+				}
+			}
+		} catch (err) {
+			console.error('[WEIGHT] Error loading weights:', err);
+			// Fallback to localStorage
+		}
+	}
+	
 	const workouts = JSON.parse(localStorage.getItem('workouts') || '[]');
 
 	// Initialize unit label
@@ -6278,8 +6342,8 @@ async function loadProgress() {
 		unitLabel.textContent = getWeightUnitLabel().toLowerCase();
 	}
 
-	// Weight Chart - DISABLED (code preserved for future use)
-	// renderWeightChart(progress);
+	// Weight Chart
+	renderWeightChart(progress);
 	renderWorkoutHeatmap(workouts);
 	renderMonthlyHeatmap(workouts);
 	initMonthlyHeatmapNavigation();
