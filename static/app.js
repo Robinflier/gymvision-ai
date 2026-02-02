@@ -6176,21 +6176,23 @@ function initProgress() {
 					if (existing && !checkError) {
 						console.log('[WEIGHT] Updating existing record');
 						// Update existing record
+						// Ensure weight is a number, not string
 						const { error: updateError } = await supabaseClient
 							.from('weights')
-							.update({ weight: value })
+							.update({ weight: Number(value) }) // Ensure it's a number
 							.eq('user_id', session.user.id)
 							.eq('date', dayKey);
 						error = updateError;
 					} else {
 						console.log('[WEIGHT] Inserting new record');
 						// Insert new record (or updateError was set, try insert anyway)
+						// Ensure weight is a number, not string
 						const { error: insertError } = await supabaseClient
 							.from('weights')
 							.insert({
 								user_id: session.user.id,
 								date: dayKey,
-								weight: value
+								weight: Number(value) // Ensure it's a number
 							});
 						error = insertError;
 					}
