@@ -1602,6 +1602,15 @@ async function showGymDashboardScreen() {
 		});
 	}
 
+	// Date picker
+	const dateInput = document.getElementById('gym-dashboard-date');
+	if (dateInput && !dateInput.dataset.bound) {
+		dateInput.dataset.bound = 'true';
+		dateInput.addEventListener('change', () => {
+			loadGymDashboardData();
+		});
+	}
+
 	initGymDashboardPeriodToggle();
 	await loadGymDashboardData();
 }
@@ -1675,8 +1684,26 @@ async function loadGymDashboardData() {
 		}
 		if (titleEl) titleEl.textContent = meta.gym_name || 'Gym Dashboard';
 
+		// Get selected date or use today
+		const dateInput = document.getElementById('gym-dashboard-date');
+		let selectedDate = null;
+		if (dateInput && dateInput.value) {
+			selectedDate = dateInput.value; // YYYY-MM-DD format
+		} else {
+			// Default to today
+			const today = new Date();
+			const year = today.getFullYear();
+			const month = String(today.getMonth() + 1).padStart(2, '0');
+			const day = String(today.getDate()).padStart(2, '0');
+			selectedDate = `${year}-${month}-${day}`;
+			if (dateInput) dateInput.value = selectedDate;
+		}
+
 		const qs = new URLSearchParams();
 		qs.set('period', getGymDashboardPeriod());
+		if (selectedDate) {
+			qs.set('date', selectedDate);
+		}
 		const apiUrl = getApiUrl('/api/gym/dashboard') + `?${qs.toString()}`;
 		const res = await fetch(apiUrl, {
 			headers: { 'Authorization': `Bearer ${session.access_token}` }
@@ -1695,10 +1722,6 @@ async function loadGymDashboardData() {
 		if (totalEl) totalEl.textContent = totalUsers;
 		if (workoutsEl) workoutsEl.textContent = totalWorkouts;
 		if (exercisesEl) exercisesEl.textContent = totalExercises;
-
-		// Initialize comparison toggle and render comparisons
-		initGymComparisonToggle();
-		updateGymComparisonLabels(stats.comparison || {}, stats.today_counts);
 
 		// Charts
 		const charts = stats.charts || {};

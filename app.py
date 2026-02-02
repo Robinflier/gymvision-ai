@@ -2217,7 +2217,7 @@ def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = Non
 
 		# Only log if there's a change or first sync (reduce log spam)
 		if not exists or gym_id is not None:
-			print(f"[GYM SYNC] Synced gym analytics for user {user_id}, linked to gym_id: {gym_id}")
+		print(f"[GYM SYNC] Synced gym analytics for user {user_id}, linked to gym_id: {gym_id}")
 		
 		return True
 	except Exception as e:
@@ -2814,6 +2814,15 @@ def get_gym_dashboard():
 			period = "week"
 		lookback_days = 7 if period == "week" else 30 if period == "month" else 365 if period == "year" else None
 		
+		# Get date parameter (YYYY-MM-DD format) - if provided, show data for that specific date
+		selected_date = request.args.get("date")
+		if selected_date:
+			try:
+				# Validate date format
+				datetime.fromisoformat(selected_date)
+			except:
+				selected_date = None
+		
 		# Get analytics data for this gym
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
@@ -2840,9 +2849,50 @@ def get_gym_dashboard():
 		analytics_consent = admin_client.table("gym_analytics").select("*").eq("gym_id", gym_id).eq("data_collection_consent", True).execute()
 		
 		# Calculate statistics
-		total_users = len(analytics_all.data) if analytics_all.data else 0
-		users_with_consent = len(analytics_consent.data) if analytics_consent.data else 0
-		users_linked = total_users  # same as total users for this gym_id
+		# If a specific date is selected, only count users that existed up to and including that date
+		if selected_date:
+			try:
+				selected_date_obj = datetime.fromisoformat(selected_date).date()
+				selected_date_end = datetime.combine(selected_date_obj, datetime.max.time())
+				total_users = 0
+				users_with_consent = 0
+				if analytics_all.data:
+					for u in analytics_all.data:
+						if not u.get("user_id"):
+							continue
+						user_id = u.get("user_id")
+						user_created = None
+						if user_id in user_creation_dates:
+							try:
+								created_str = user_creation_dates[user_id].replace('Z', '+00:00')
+								user_created = datetime.fromisoformat(created_str)
+							except:
+								pass
+						if not user_created and u.get("created_at"):
+							try:
+								user_created = datetime.fromisoformat(u.get("created_at").replace('Z', '+00:00'))
+							except:
+								pass
+						if user_created and user_created <= selected_date_end:
+							total_users += 1
+							# Check if user has consent
+							if u.get("data_collection_consent") == True:
+								users_with_consent += 1
+						elif not user_created:
+							# If no creation date, assume old user (count it)
+							total_users += 1
+							if u.get("data_collection_consent") == True:
+								users_with_consent += 1
+				users_linked = total_users
+			except:
+				# Fallback to normal calculation if date parsing fails
+				total_users = len(analytics_all.data) if analytics_all.data else 0
+				users_with_consent = len(analytics_consent.data) if analytics_consent.data else 0
+				users_linked = total_users
+		else:
+			total_users = len(analytics_all.data) if analytics_all.data else 0
+			users_with_consent = len(analytics_consent.data) if analytics_consent.data else 0
+			users_linked = total_users  # same as total users for this gym_id
 		
 		# Calculate previous period comparisons (for KPI cards)
 		now = datetime.utcnow()
@@ -2989,8 +3039,14 @@ def get_gym_dashboard():
 
 			if consent_user_ids:
 				# Filter window (controlled by ?period=week|month|year|all). For "all" we don't apply a date filter.
+				# If a specific date is provided, filter to that date only
 				start_date = None
-				if isinstance(lookback_days, int) and lookback_days > 0:
+				end_date = None
+				if selected_date:
+					# Filter to only the selected date
+					start_date = selected_date
+					end_date = selected_date
+				elif isinstance(lookback_days, int) and lookback_days > 0:
 					start_date = (datetime.utcnow().date() - timedelta(days=lookback_days)).isoformat()
 
 				all_workouts = []
@@ -3005,6 +3061,8 @@ def get_gym_dashboard():
 							.in_("user_id", chunk)
 						if start_date:
 							q = q.gte("date", start_date)
+						if end_date:
+							q = q.lte("date", end_date)
 						res = q.execute()
 					except Exception as e:
 						# If gym_name column doesn't exist, we can't do per-workout gym analytics reliably.
@@ -3015,6 +3073,8 @@ def get_gym_dashboard():
 								.in_("user_id", chunk)
 							if start_date:
 								q = q.gte("date", start_date)
+							if end_date:
+								q = q.lte("date", end_date)
 							res = q.execute()
 						else:
 							raise
