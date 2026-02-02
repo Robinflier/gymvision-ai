@@ -6128,106 +6128,125 @@ function initProgress() {
 	}
 
 	const progressForm = document.getElementById('progress-form');
+	const addButton = document.querySelector('.progress-inline-submit');
+	
+	// Handler function to avoid duplication
+	async function handleWeightSubmit(e) {
+		if (e) e.preventDefault();
+		console.log('[PROGRESS] Form submitted');
+		const weight = document.getElementById('progress-weight')?.value;
+		const dateInputValue = document.getElementById('progress-date')?.value;
+		console.log('[PROGRESS] Weight:', weight, 'Date:', dateInputValue);
+		
+		if (!weight || !dateInputValue) {
+			console.log('[PROGRESS] Missing weight or date');
+			return;
+		}
+		
+		// Convert weight from display unit to kg for storage
+		const currentUnit = getWeightUnit();
+		const value = convertWeightForStorage(parseFloat(weight), currentUnit);
+		const dayKey = dateInputValue; // YYYY-MM-DD from input[type=date]
+		
+		// Save to Supabase if available
+		if (supabaseClient) {
+			try {
+				const { data: { session } } = await supabaseClient.auth.getSession();
+				if (session && session.user) {
+					console.log('[WEIGHT] Saving to Supabase for user:', session.user.id);
+					// Upsert to Supabase (insert or update if exists for this date)
+					// Check if record exists
+					const { data: existing, error: checkError } = await supabaseClient
+						.from('weights')
+						.select('id')
+						.eq('user_id', session.user.id)
+						.eq('date', dayKey)
+						.maybeSingle();
+					
+					let error = null;
+					if (existing && !checkError) {
+						console.log('[WEIGHT] Updating existing record');
+						// Update existing record
+						const { error: updateError } = await supabaseClient
+							.from('weights')
+							.update({ weight: value })
+							.eq('user_id', session.user.id)
+							.eq('date', dayKey);
+						error = updateError;
+					} else {
+						console.log('[WEIGHT] Inserting new record');
+						// Insert new record (or updateError was set, try insert anyway)
+						const { error: insertError } = await supabaseClient
+							.from('weights')
+							.insert({
+								user_id: session.user.id,
+								date: dayKey,
+								weight: value
+							});
+						error = insertError;
+					}
+					
+					if (error) {
+						console.error('[WEIGHT] Error saving to Supabase:', error);
+						// Fallback to localStorage if Supabase fails
+					} else {
+						console.log('[WEIGHT] Weight saved to Supabase successfully');
+					}
+				} else {
+					console.log('[WEIGHT] No session, saving to localStorage only');
+				}
+			} catch (err) {
+				console.error('[WEIGHT] Error saving weight:', err);
+				// Fallback to localStorage
+			}
+		}
+		
+		// Also save to localStorage for backwards compatibility and offline support
+		const progress = JSON.parse(localStorage.getItem('progress') || '[]');
+		const now = new Date(`${dayKey}T12:00:00`);
+		// Remove any existing entries for this day (to prevent duplicates)
+		const filteredProgress = progress.filter(p => {
+			const pDayKey = p.dayKey || (p.date ? p.date.slice(0, 10) : '');
+			return pDayKey !== dayKey;
+		});
+		// Add the new entry with both date and dayKey for consistency
+		filteredProgress.push({
+			date: now.toISOString(),
+			dayKey: dayKey, // Ensure dayKey is always set
+			weight: value
+		});
+		// Ensure all existing entries also have dayKey
+		const normalizedProgress = filteredProgress.map(p => ({
+			...p,
+			dayKey: p.dayKey || (p.date ? p.date.slice(0, 10) : '')
+		}));
+		localStorage.setItem('progress', JSON.stringify(normalizedProgress));
+		
+		// Reset weight input
+		const weightInput = document.getElementById('progress-weight');
+		if (weightInput) weightInput.value = '';
+		// Reset date to today after saving
+		const today = new Date();
+		const year = today.getFullYear();
+		const month = String(today.getMonth() + 1).padStart(2, '0');
+		const day = String(today.getDate()).padStart(2, '0');
+		if (dateInput) dateInput.value = `${year}-${month}-${day}`;
+		const dateEl = document.getElementById('progress-date');
+		if (dateEl) {
+			const today = new Date();
+			dateEl.value = today.toISOString().slice(0, 10);
+		}
+		loadProgress();
+	}
+	
 	if (progressForm) {
 		console.log('[PROGRESS] Form found, adding submit listener');
-		progressForm.addEventListener('submit', async (e) => {
-			e.preventDefault();
-			console.log('[PROGRESS] Form submitted');
-			const weight = document.getElementById('progress-weight')?.value;
-			const dateInputValue = document.getElementById('progress-date')?.value;
-			console.log('[PROGRESS] Weight:', weight, 'Date:', dateInputValue);
-			if (weight && dateInputValue) {
-				// Convert weight from display unit to kg for storage
-				const currentUnit = getWeightUnit();
-				const value = convertWeightForStorage(parseFloat(weight), currentUnit);
-				const dayKey = dateInputValue; // YYYY-MM-DD from input[type=date]
-				
-				// Save to Supabase if available
-				if (supabaseClient) {
-					try {
-						const { data: { session } } = await supabaseClient.auth.getSession();
-						if (session && session.user) {
-							// Upsert to Supabase (insert or update if exists for this date)
-							// Check if record exists
-							const { data: existing, error: checkError } = await supabaseClient
-								.from('weights')
-								.select('id')
-								.eq('user_id', session.user.id)
-								.eq('date', dayKey)
-								.maybeSingle();
-							
-							let error = null;
-							if (existing && !checkError) {
-								// Update existing record
-								const { error: updateError } = await supabaseClient
-									.from('weights')
-									.update({ weight: value })
-									.eq('user_id', session.user.id)
-									.eq('date', dayKey);
-								error = updateError;
-							} else {
-								// Insert new record (or updateError was set, try insert anyway)
-								const { error: insertError } = await supabaseClient
-									.from('weights')
-									.insert({
-										user_id: session.user.id,
-										date: dayKey,
-										weight: value
-									});
-								error = insertError;
-							}
-							
-							if (error) {
-								console.error('[WEIGHT] Error saving to Supabase:', error);
-								// Fallback to localStorage if Supabase fails
-							} else {
-								console.log('[WEIGHT] Weight saved to Supabase successfully');
-							}
-						}
-					} catch (err) {
-						console.error('[WEIGHT] Error saving weight:', err);
-						// Fallback to localStorage
-					}
-				}
-				
-				// Also save to localStorage for backwards compatibility and offline support
-				const progress = JSON.parse(localStorage.getItem('progress') || '[]');
-				const now = new Date(`${dayKey}T12:00:00`);
-				// Remove any existing entries for this day (to prevent duplicates)
-				const filteredProgress = progress.filter(p => {
-					const pDayKey = p.dayKey || (p.date ? p.date.slice(0, 10) : '');
-					return pDayKey !== dayKey;
-				});
-				// Add the new entry with both date and dayKey for consistency
-				filteredProgress.push({
-					date: now.toISOString(),
-					dayKey: dayKey, // Ensure dayKey is always set
-					weight: value
-				});
-				// Ensure all existing entries also have dayKey
-				const normalizedProgress = filteredProgress.map(p => ({
-					...p,
-					dayKey: p.dayKey || (p.date ? p.date.slice(0, 10) : '')
-				}));
-				localStorage.setItem('progress', JSON.stringify(normalizedProgress));
-				
-				// Reset weight input
-				const weightInput = document.getElementById('progress-weight');
-				if (weightInput) weightInput.value = '';
-				// Reset date to today after saving
-				const today = new Date();
-				const year = today.getFullYear();
-				const month = String(today.getMonth() + 1).padStart(2, '0');
-				const day = String(today.getDate()).padStart(2, '0');
-				if (dateInput) dateInput.value = `${year}-${month}-${day}`;
-				const dateEl = document.getElementById('progress-date');
-				if (dateEl) {
-					const today = new Date();
-					dateEl.value = today.toISOString().slice(0, 10);
-				}
-				loadProgress();
-			}
-		});
+		progressForm.addEventListener('submit', handleWeightSubmit);
+	}
+	
+	if (addButton) {
+		console.log('[PROGRESS] Add button found, adding click listener');
+		addButton.addEventListener('click', handleWeightSubmit);
 	}
 
 	const filterBtns = document.querySelectorAll('.progress-filter-btn');
