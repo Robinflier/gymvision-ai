@@ -6129,10 +6129,13 @@ function initProgress() {
 
 	const progressForm = document.getElementById('progress-form');
 	if (progressForm) {
+		console.log('[PROGRESS] Form found, adding submit listener');
 		progressForm.addEventListener('submit', async (e) => {
 			e.preventDefault();
+			console.log('[PROGRESS] Form submitted');
 			const weight = document.getElementById('progress-weight')?.value;
 			const dateInputValue = document.getElementById('progress-date')?.value;
+			console.log('[PROGRESS] Weight:', weight, 'Date:', dateInputValue);
 			if (weight && dateInputValue) {
 				// Convert weight from display unit to kg for storage
 				const currentUnit = getWeightUnit();
@@ -6145,16 +6148,34 @@ function initProgress() {
 						const { data: { session } } = await supabaseClient.auth.getSession();
 						if (session && session.user) {
 							// Upsert to Supabase (insert or update if exists for this date)
-							const { error } = await supabaseClient
+							// Check if record exists
+							const { data: existing, error: checkError } = await supabaseClient
 								.from('weights')
-								.upsert({
-									user_id: session.user.id,
-									date: dayKey,
-									weight: value
-								}, {
-									onConflict: 'user_id,date',
-									ignoreDuplicates: false
-								});
+								.select('id')
+								.eq('user_id', session.user.id)
+								.eq('date', dayKey)
+								.maybeSingle();
+							
+							let error = null;
+							if (existing && !checkError) {
+								// Update existing record
+								const { error: updateError } = await supabaseClient
+									.from('weights')
+									.update({ weight: value })
+									.eq('user_id', session.user.id)
+									.eq('date', dayKey);
+								error = updateError;
+							} else {
+								// Insert new record (or updateError was set, try insert anyway)
+								const { error: insertError } = await supabaseClient
+									.from('weights')
+									.insert({
+										user_id: session.user.id,
+										date: dayKey,
+										weight: value
+									});
+								error = insertError;
+							}
 							
 							if (error) {
 								console.error('[WEIGHT] Error saving to Supabase:', error);
