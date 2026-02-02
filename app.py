@@ -3038,17 +3038,20 @@ def get_gym_dashboard():
 			consent_user_ids = list(dict.fromkeys(consent_user_ids))  # de-dupe keep order
 
 			if consent_user_ids:
-				# Filter window (controlled by ?period=week|month|year|all). For "all" we don't apply a date filter.
-				# If a specific date is provided, filter to that date only
-				start_date = None
-				end_date = None
+				# For charts: always get all data (no date filter)
+				# For statistics: filter by selected_date if provided (cumulative up to that date)
+				chart_start_date = None
+				stats_end_date = None
+				
+				# Charts use period filter (always)
+				if isinstance(lookback_days, int) and lookback_days > 0:
+					chart_start_date = (datetime.utcnow().date() - timedelta(days=lookback_days)).isoformat()
+				
+				# Statistics use selected_date if provided (cumulative: up to and including that date)
 				if selected_date:
-					# Filter to only the selected date
-					start_date = selected_date
-					end_date = selected_date
-				elif isinstance(lookback_days, int) and lookback_days > 0:
-					start_date = (datetime.utcnow().date() - timedelta(days=lookback_days)).isoformat()
+					stats_end_date = selected_date
 
+				# Get all workouts for charts (no date filter for charts)
 				all_workouts = []
 				# Supabase has an IN limit; chunk
 				for i in range(0, len(consent_user_ids), 50):
@@ -3059,10 +3062,9 @@ def get_gym_dashboard():
 						q = admin_client.table("workouts") \
 							.select("user_id,date,inserted_at,created_at,exercises,gym_name,gym_place_id") \
 							.in_("user_id", chunk)
-						if start_date:
-							q = q.gte("date", start_date)
-						if end_date:
-							q = q.lte("date", end_date)
+						# Charts: use period filter
+						if chart_start_date:
+							q = q.gte("date", chart_start_date)
 						res = q.execute()
 					except Exception as e:
 						# If gym_name column doesn't exist, we can't do per-workout gym analytics reliably.
@@ -3071,10 +3073,8 @@ def get_gym_dashboard():
 							q = admin_client.table("workouts") \
 								.select("user_id,date,inserted_at,created_at,exercises") \
 								.in_("user_id", chunk)
-							if start_date:
-								q = q.gte("date", start_date)
-							if end_date:
-								q = q.lte("date", end_date)
+							if chart_start_date:
+								q = q.gte("date", chart_start_date)
 							res = q.execute()
 						else:
 							raise
@@ -3108,18 +3108,41 @@ def get_gym_dashboard():
 					if w_gym and target_gym and w_gym != target_gym:
 						continue
 
-					total_workouts += 1
-
+					# Parse workout date once
 					date_str = w.get("date")
+					dt = None
+					workout_date = None
 					try:
 						# date is stored as YYYY-MM-DD
 						dt = datetime.fromisoformat(str(date_str))
+						workout_date = dt.date()
 					except Exception:
 						# fallback
 						try:
 							dt = datetime.fromisoformat(str(date_str).split("T")[0])
+							workout_date = dt.date()
 						except Exception:
 							dt = None
+							workout_date = None
+					
+					# For statistics: only count workouts up to and including stats_end_date (cumulative)
+					# For charts: count all workouts (no date filter)
+					if stats_end_date:
+						try:
+							stats_date_obj = datetime.fromisoformat(stats_end_date).date()
+							if workout_date and workout_date <= stats_date_obj:
+								total_workouts += 1
+								exercises = w.get("exercises") or []
+								if isinstance(exercises, list):
+									total_exercises += len(exercises)
+						except:
+							pass
+					else:
+						# No date filter: count all workouts for statistics
+						total_workouts += 1
+						exercises = w.get("exercises") or []
+						if isinstance(exercises, list):
+							total_exercises += len(exercises)
 					if dt:
 						day_key = dt.strftime("%Y-%m-%d")
 						day_counts[day_key] = day_counts.get(day_key, 0) + 1
