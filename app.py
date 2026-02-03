@@ -2869,19 +2869,22 @@ def get_gym_dashboard():
 								pass
 						
 						# Count user if they were linked to gym on or before selected date
-						if linked_at and linked_at <= selected_date_end:
-							total_users += 1
-							# Check if user has consent
-							if u.get("data_collection_consent") == True:
-								users_with_consent += 1
-						elif not linked_at:
-							# If no linked_at date, assume old link (count it)
-							total_users += 1
-							if u.get("data_collection_consent") == True:
-								users_with_consent += 1
+						if linked_at:
+							if linked_at <= selected_date_end:
+								total_users += 1
+								# Check if user has consent
+								if u.get("data_collection_consent") == True:
+									users_with_consent += 1
+							# If linked_at is after selected_date, don't count (user wasn't linked yet)
+						else:
+							# If no linked_at date, don't count (we can't determine when they were linked)
+							pass
 				users_linked = total_users
+				print(f"[GYM DASHBOARD] Users for date {selected_date}: total={total_users}, with_consent={users_with_consent}")
 			except Exception as e:
 				print(f"[GYM DASHBOARD] Error calculating users for date {selected_date}: {e}")
+				import traceback
+				traceback.print_exc()
 				# Fallback to normal calculation if date parsing fails
 				total_users = len(analytics_all.data) if analytics_all.data else 0
 				users_with_consent = len(analytics_consent.data) if analytics_consent.data else 0
