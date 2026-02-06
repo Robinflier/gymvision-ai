@@ -9845,6 +9845,17 @@ function saveExerciseNotes(exerciseKey, exerciseIndex) {
 		renderWorkoutList();
 	}
 
+	// Update notes buttons in "Your Workouts" view immediately
+	const hasNotes = notes.length > 0;
+	const notesButtons = document.querySelectorAll(`.workout-exercise-notes-btn[data-exercise-key="${exerciseKey}"]`);
+	notesButtons.forEach(btn => {
+		if (hasNotes) {
+			btn.classList.add('has-notes');
+		} else {
+			btn.classList.remove('has-notes');
+		}
+	});
+
 	closeExerciseNotesModal();
 }
 

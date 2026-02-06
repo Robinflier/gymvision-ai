@@ -3220,7 +3220,9 @@ def get_gym_dashboard():
 						muscles = _exercise_muscles(ex) or []
 						primary = muscles[0] if muscles else ""
 						if primary and primary != "-" and primary.lower() != "cardio":
-							muscle_sets[primary] = muscle_sets.get(primary, 0) + sets_n
+							# Normalize muscle name: capitalize first letter, lowercase rest (consistent with app)
+							normalized_muscle = primary.capitalize()
+							muscle_sets[normalized_muscle] = muscle_sets.get(normalized_muscle, 0) + sets_n
 						
 						# Count Cardio vs Strength sets
 						# First, check if the exercise itself is cardio based on metadata
@@ -3278,7 +3280,7 @@ def get_gym_dashboard():
 						total_exercises += len(exercises)
 
 				top_machines = sorted(machine_sets.items(), key=lambda kv: kv[1], reverse=True)  # Show all machines
-				top_muscles = sorted(muscle_sets.items(), key=lambda kv: kv[1], reverse=True)[:8]
+				top_muscles = sorted(muscle_sets.items(), key=lambda kv: kv[1], reverse=True)  # Show all muscles, not just top 8
 
 				# last 8 weeks (sorted)
 				last_weeks = sorted(week_counts.items(), key=lambda kv: kv[0])[-8:]
