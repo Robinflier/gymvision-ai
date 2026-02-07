@@ -1903,43 +1903,41 @@ function renderGymDayPeakTimes(charts) {
 		return;
 	}
 
-	const dayHourData = charts.workouts_by_day_hour || {};
-	const days = Object.keys(dayHourData).sort().reverse(); // Most recent first
+	const weekdayHourData = charts.workouts_by_day_hour || {};
+	// Weekday order: Monday through Sunday
+	const weekdayOrder = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+	const availableWeekdays = weekdayOrder.filter(day => weekdayHourData[day] && weekdayHourData[day].some(h => h.value > 0));
 
-	console.log('[DAY PEAK] Day hour data:', dayHourData);
-	console.log('[DAY PEAK] Available days:', days);
+	console.log('[DAY PEAK] Weekday hour data:', weekdayHourData);
+	console.log('[DAY PEAK] Available weekdays:', availableWeekdays);
 
-	// Populate day selector
+	// Populate day selector with weekdays
 	daySelector.innerHTML = '<option value="">Select day...</option>';
-	if (days.length === 0) {
+	if (availableWeekdays.length === 0) {
 		const option = document.createElement('option');
 		option.value = '';
 		option.textContent = 'No days available';
 		option.disabled = true;
 		daySelector.appendChild(option);
-		console.log('[DAY PEAK] No days available in data');
+		console.log('[DAY PEAK] No weekdays available in data');
 	} else {
-		days.forEach(day => {
-			const date = new Date(day + 'T12:00:00');
-			const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-			const dayNum = date.getDate();
-			const month = date.toLocaleDateString('en-US', { month: 'short' });
+		availableWeekdays.forEach(weekday => {
 			const option = document.createElement('option');
-			option.value = day;
-			option.textContent = `${dayName} ${dayNum} ${month}`;
+			option.value = weekday;
+			option.textContent = weekday;
 			daySelector.appendChild(option);
 		});
-		console.log('[DAY PEAK] Populated', days.length, 'days');
+		console.log('[DAY PEAK] Populated', availableWeekdays.length, 'weekdays');
 	}
 
 	// Render function
-	const renderDay = (selectedDay) => {
-		if (!selectedDay || !dayHourData[selectedDay]) {
+	const renderDay = (selectedWeekday) => {
+		if (!selectedWeekday || !weekdayHourData[selectedWeekday]) {
 			el.innerHTML = '<div class="gym-chart-empty">Select a day to view peak times</div>';
 			return;
 		}
 
-		const hourlyData = dayHourData[selectedDay];
+		const hourlyData = weekdayHourData[selectedWeekday];
 		const items = hourlyData.map(item => ({
 			label: item.label,
 			value: item.value
@@ -1948,11 +1946,19 @@ function renderGymDayPeakTimes(charts) {
 		renderGymPeakHistogram(containerId, items, { labelMode: 'hour' });
 	};
 
-	// Event listener for day selector
+	// Event listener for day selector - use both change and input for better compatibility
 	if (daySelector.dataset.bound !== 'true') {
 		daySelector.dataset.bound = 'true';
-		daySelector.addEventListener('change', (e) => {
-			renderDay(e.target.value);
+		const handleChange = (e) => {
+			const selectedValue = e.target.value;
+			console.log('[DAY PEAK] Day selected:', selectedValue);
+			renderDay(selectedValue);
+		};
+		daySelector.addEventListener('change', handleChange);
+		daySelector.addEventListener('input', handleChange); // For better iOS compatibility
+		// Also add click handler to ensure it's clickable
+		daySelector.addEventListener('click', (e) => {
+			e.stopPropagation();
 		});
 	}
 
