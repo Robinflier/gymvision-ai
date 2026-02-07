@@ -3175,8 +3175,9 @@ def get_gym_dashboard():
 						if user_id:
 							active_users_by_week[week_key].add(user_id)
 
-					# Peak hours: prefer inserted_at timestamp (more precise than date); fallback to created_at
+					# Peak hours: prefer inserted_at timestamp (more precise than date); fallback to created_at, then workout date
 					inserted = w.get("inserted_at") or w.get("created_at")
+					dti = None
 					if inserted:
 						try:
 							ts = str(inserted).replace("Z", "+00:00")
@@ -3186,15 +3187,21 @@ def get_gym_dashboard():
 								dti = dti.astimezone(ZoneInfo("Europe/Amsterdam"))
 							except Exception:
 								pass
-							hour = int(dti.hour)
-							hour_counts[hour] = hour_counts.get(hour, 0) + 1
-							# Also track per day
-							day_key = dti.strftime("%Y-%m-%d")
-							if day_key not in day_hour_counts:
-								day_hour_counts[day_key] = {h: 0 for h in range(24)}
-							day_hour_counts[day_key][hour] = day_hour_counts[day_key].get(hour, 0) + 1
 						except Exception:
 							pass
+					
+					# Fallback to workout date if no timestamp available
+					if not dti and dt:
+						dti = dt.replace(hour=12, minute=0, second=0, microsecond=0)  # Use noon as default time
+					
+					if dti:
+						hour = int(dti.hour)
+						hour_counts[hour] = hour_counts.get(hour, 0) + 1
+						# Also track per day
+						day_key = dti.strftime("%Y-%m-%d")
+						if day_key not in day_hour_counts:
+							day_hour_counts[day_key] = {h: 0 for h in range(24)}
+						day_hour_counts[day_key][hour] = day_hour_counts[day_key].get(hour, 0) + 1
 
 					# Process exercises for charts (all workouts)
 					exercises = w.get("exercises") or []
