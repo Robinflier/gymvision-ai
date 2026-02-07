@@ -3223,6 +3223,11 @@ def get_gym_dashboard():
 							# Normalize muscle name: capitalize first letter, lowercase rest (consistent with app)
 							normalized_muscle = primary.capitalize()
 							muscle_sets[normalized_muscle] = muscle_sets.get(normalized_muscle, 0) + sets_n
+						elif not primary or primary == "-":
+							# Debug: log exercises without primary muscle
+							ex_key = ex.get("key") or ex.get("display") or "unknown"
+							if ex_key not in ["cardio", "-"]:
+								print(f"[GYM DASHBOARD] Exercise {ex_key} has no primary muscle. Muscles: {muscles}")
 						
 						# Count Cardio vs Strength sets
 						# First, check if the exercise itself is cardio based on metadata
