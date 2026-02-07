@@ -1736,7 +1736,6 @@ async function loadGymDashboardData() {
 		});
 		renderGymMachinesChart('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
 		renderGymPeakTimes(charts);
-		renderGymDayPeakTimes(charts);
 		renderGymMuscleFocus(charts.top_muscles_by_sets);
 		renderGymCategories(charts.exercise_categories || []);
 
@@ -1851,32 +1850,74 @@ function updateGymComparisonLabels(comparisonData, todayCounts) {
 function renderGymPeakTimes(charts) {
 	const containerId = 'gym-dashboard-chart-peak';
 	const el = document.getElementById(containerId);
+	const daySelector = document.getElementById('gym-day-selector');
 	if (!el) return;
+	
 	const buttons = document.querySelectorAll('.gym-mini-btn[data-peak]');
 	const hasAny = (arr) => Array.isArray(arr) && arr.some(x => Number(x?.value || 0) > 0);
-	const applyMode = (mode) => {
+	
+	// Setup weekday dropdown
+	const weekdayHourData = charts.workouts_by_day_hour || {};
+	const weekdayOrder = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+	const availableWeekdays = weekdayOrder.filter(day => weekdayHourData[day] && weekdayHourData[day].some(h => h.value > 0));
+	
+	if (daySelector) {
+		daySelector.innerHTML = '<option value="">All days</option>';
+		if (availableWeekdays.length > 0) {
+			availableWeekdays.forEach(weekday => {
+				const option = document.createElement('option');
+				option.value = weekday;
+				option.textContent = weekday;
+				daySelector.appendChild(option);
+			});
+		}
+	}
+	
+	const applyMode = (mode, selectedWeekday = null) => {
 		buttons.forEach(b => {
 			const active = (b.dataset.peak === mode);
 			b.classList.toggle('active', active);
 			b.setAttribute('aria-selected', active ? 'true' : 'false');
 		});
+		
+		// Show/hide day selector based on mode
+		if (daySelector) {
+			daySelector.style.display = (mode === 'days') ? 'block' : 'none';
+		}
+		
 		if (mode === 'days') {
-			// Days = weekday buckets only (Mon-Sun)
-			if (hasAny(charts.workouts_by_weekday)) {
-				renderGymPeakHistogram(containerId, charts.workouts_by_weekday, { labelMode: 'weekday' });
+			// Days mode: show specific weekday or all weekdays
+			if (selectedWeekday && weekdayHourData[selectedWeekday]) {
+				// Show specific weekday hourly data
+				const hourlyData = weekdayHourData[selectedWeekday];
+				const items = hourlyData.map(item => ({
+					label: item.label,
+					value: item.value
+				}));
+				if (hasAny(items)) {
+					renderGymPeakHistogram(containerId, items, { labelMode: 'hour' });
+				} else {
+					el.innerHTML = `<div class="gym-chart-empty">No data for ${selectedWeekday}</div>`;
+				}
 			} else {
-				el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
+				// Show all weekdays aggregated
+				if (hasAny(charts.workouts_by_weekday)) {
+					renderGymPeakHistogram(containerId, charts.workouts_by_weekday, { labelMode: 'weekday' });
+				} else {
+					el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
+				}
 			}
 		} else {
-			// Hours = hour-of-day buckets
+			// Hours = hour-of-day buckets (all days combined)
 			if (hasAny(charts.workouts_by_hour)) {
 				renderGymPeakHistogram(containerId, charts.workouts_by_hour, { labelMode: 'hour' });
 			} else {
-				el.innerHTML = `<div class="gym-chart-empty">No data yet (deploy backend update for Hours)</div>`;
+				el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
 			}
 		}
 	};
-	// bind once
+	
+	// Bind mode buttons
 	buttons.forEach(btn => {
 		if (btn.dataset.bound === 'true') return;
 		btn.dataset.bound = 'true';
@@ -1885,9 +1926,25 @@ function renderGymPeakTimes(charts) {
 			e.stopPropagation();
 			const mode = (btn.dataset.peak || 'hours').toString();
 			try { localStorage.setItem('gym-peak-mode', mode); } catch (e) { }
-			applyMode(mode);
+			// When switching to days, use current dropdown value; when switching to hours, clear selection
+			const currentDay = (mode === 'days' && daySelector) ? daySelector.value : null;
+			applyMode(mode, currentDay || null);
 		});
 	});
+	
+	// Bind day selector
+	if (daySelector && daySelector.dataset.bound !== 'true') {
+		daySelector.dataset.bound = 'true';
+		daySelector.addEventListener('change', (e) => {
+			const selectedWeekday = e.target.value || null;
+			const currentMode = Array.from(buttons).find(b => b.classList.contains('active'))?.dataset.peak || 'hours';
+			if (currentMode === 'days') {
+				applyMode('days', selectedWeekday);
+			}
+		});
+	}
+	
+	// Initialize
 	let mode = 'hours';
 	try { mode = (localStorage.getItem('gym-peak-mode') || 'hours').toString(); } catch (e) { }
 	mode = (mode === 'days') ? 'days' : 'hours';
