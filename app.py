@@ -3186,7 +3186,13 @@ def get_gym_dashboard():
 								dti = dti.astimezone(ZoneInfo("Europe/Amsterdam"))
 							except Exception:
 								pass
-							hour_counts[int(dti.hour)] = hour_counts.get(int(dti.hour), 0) + 1
+							hour = int(dti.hour)
+							hour_counts[hour] = hour_counts.get(hour, 0) + 1
+							# Also track per day
+							day_key = dti.strftime("%Y-%m-%d")
+							if day_key not in day_hour_counts:
+								day_hour_counts[day_key] = {h: 0 for h in range(24)}
+							day_hour_counts[day_key][hour] = day_hour_counts[day_key].get(hour, 0) + 1
 						except Exception:
 							pass
 
@@ -3307,6 +3313,11 @@ def get_gym_dashboard():
 				chart["top_muscles_by_sets"] = [{"label": k, "value": v} for k, v in top_muscles]
 				chart["workouts_by_weekday"] = [{"label": k, "value": weekday_counts[k]} for k in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]]
 				chart["workouts_by_hour"] = [{"label": f"{h:02d}:00", "value": hour_counts.get(h, 0)} for h in range(24)]
+				# Per-day hourly data: convert to format { "YYYY-MM-DD": [{"label": "00:00", "value": count}, ...] }
+				chart["workouts_by_day_hour"] = {
+					day: [{"label": f"{h:02d}:00", "value": hours.get(h, 0)} for h in range(24)]
+					for day, hours in day_hour_counts.items()
+				}
 				
 				# Volume by week (last 8 weeks, sorted)
 				sorted_weeks = sorted(volume_by_week.items(), key=lambda kv: kv[0])[-8:]
