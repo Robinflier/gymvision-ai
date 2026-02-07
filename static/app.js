@@ -6196,12 +6196,14 @@ function initProgress() {
 			return;
 		}
 		
-		const weightNum = parseFloat(weight);
+		let weightNum = parseFloat(weight);
 		if (isNaN(weightNum) || weightNum <= 0) {
 			console.log('[PROGRESS] Invalid weight value:', weight);
 			alert('Please enter a valid weight');
 			return;
 		}
+		// Round to 1 decimal place: 17.52 -> 17.5
+		weightNum = Math.round(weightNum * 10) / 10;
 		
 		// Convert weight from display unit to kg for storage
 		const currentUnit = getWeightUnit();
@@ -6364,13 +6366,15 @@ function initOneRepMaxCalculator() {
 
 	// Calculate 1RM using Epley formula: weight × (1 + reps/30)
 	function calculate1RM() {
-		const weight = parseFloat(weightInput.value);
+		let weight = parseFloat(weightInput.value);
 		const reps = parseFloat(repsInput.value);
 
 		if (!weight || !reps || weight <= 0 || reps <= 0 || reps > 30) {
 			if (resultEl) resultEl.textContent = '—';
 			return;
 		}
+		// Round weight to 1 decimal place: 17.52 -> 17.5
+		weight = Math.round(weight * 10) / 10;
 
 		// Epley formula: 1RM = weight × (1 + reps/30)
 		const oneRepMax = weight * (1 + reps / 30);
