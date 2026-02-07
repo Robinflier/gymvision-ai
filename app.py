@@ -3286,6 +3286,9 @@ def get_gym_dashboard():
 
 				top_machines = sorted(machine_sets.items(), key=lambda kv: kv[1], reverse=True)  # Show all machines
 				top_muscles = sorted(muscle_sets.items(), key=lambda kv: kv[1], reverse=True)  # Show all muscles, not just top 8
+				print(f"[GYM DASHBOARD] Total unique muscles found: {len(top_muscles)}")
+				if len(top_muscles) > 0:
+					print(f"[GYM DASHBOARD] Top 10 muscles: {top_muscles[:10]}")
 
 				# last 8 weeks (sorted)
 				last_weeks = sorted(week_counts.items(), key=lambda kv: kv[0])[-8:]
