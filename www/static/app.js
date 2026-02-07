@@ -2011,17 +2011,6 @@ function renderGymDayPeakTimes(charts) {
 			console.log('[DAY PEAK] Day selected:', selectedValue);
 			renderDay(selectedValue);
 		};
-		daySelector.addEventListener('change', handleChange);
-		daySelector.addEventListener('input', handleChange); // For better iOS compatibility
-		// Also add click handler to ensure it's clickable
-		daySelector.addEventListener('click', (e) => {
-			e.stopPropagation();
-		});
-	}
-
-	// Initial render (empty state)
-	renderDay('');
-}
 
 function createHiDPICanvas(parentEl, cssHeight) {
 	const canvas = document.createElement('canvas');
