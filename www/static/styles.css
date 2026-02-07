@@ -4526,18 +4526,21 @@ button,
 }
 
 .gym-podium-item.rank-1 {
-	background: linear-gradient(135deg, rgba(124, 92, 255, 0.35), rgba(0, 0, 0, 0.0));
-	border-color: rgba(124, 92, 255, 0.25)
+	background: linear-gradient(135deg, rgba(124, 92, 255, 0.45), rgba(88, 60, 220, 0.25));
+	border-color: rgba(124, 92, 255, 0.35);
+	box-shadow: 0 4px 12px rgba(124, 92, 255, 0.15);
 }
 
 .gym-podium-item.rank-2 {
-	background: linear-gradient(135deg, rgba(0, 212, 255, 0.25), rgba(0, 0, 0, 0.0));
-	border-color: rgba(0, 212, 255, 0.18)
+	background: linear-gradient(135deg, rgba(0, 212, 255, 0.35), rgba(0, 180, 220, 0.20));
+	border-color: rgba(0, 212, 255, 0.28);
+	box-shadow: 0 4px 12px rgba(0, 212, 255, 0.12);
 }
 
 .gym-podium-item.rank-3 {
-	background: linear-gradient(135deg, rgba(255, 105, 180, 0.22), rgba(0, 0, 0, 0.0));
-	border-color: rgba(255, 105, 180, 0.16)
+	background: linear-gradient(135deg, rgba(255, 105, 180, 0.32), rgba(220, 80, 150, 0.20));
+	border-color: rgba(255, 105, 180, 0.24);
+	box-shadow: 0 4px 12px rgba(255, 105, 180, 0.10);
 }
 
 .gym-podium-rank {
@@ -4557,7 +4560,7 @@ button,
 
 .gym-podium-name {
 	color: #fff;
-	font-size: 11px;
+	font-size: 13px;
 	font-weight: 700;
 	max-width: 100%;
 	width: 100%;

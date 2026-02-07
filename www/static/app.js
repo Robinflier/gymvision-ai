@@ -1893,6 +1893,56 @@ function renderGymPeakTimes(charts) {
 	applyMode(mode);
 }
 
+function renderGymDayPeakTimes(charts) {
+	const containerId = 'gym-dashboard-chart-day-peak';
+	const el = document.getElementById(containerId);
+	const daySelector = document.getElementById('gym-day-selector');
+	if (!el || !daySelector) return;
+
+	const dayHourData = charts.workouts_by_day_hour || {};
+	const days = Object.keys(dayHourData).sort().reverse(); // Most recent first
+
+	// Populate day selector
+	daySelector.innerHTML = '<option value="">Select day...</option>';
+	days.forEach(day => {
+		const date = new Date(day + 'T12:00:00');
+		const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+		const dayNum = date.getDate();
+		const month = date.toLocaleDateString('en-US', { month: 'short' });
+		const option = document.createElement('option');
+		option.value = day;
+		option.textContent = `${dayName} ${dayNum} ${month}`;
+		daySelector.appendChild(option);
+	});
+
+	// Render function
+	const renderDay = (selectedDay) => {
+		if (!selectedDay || !dayHourData[selectedDay]) {
+			el.innerHTML = '<div class="gym-chart-empty">Select a day to view peak times</div>';
+			return;
+		}
+
+		const hourlyData = dayHourData[selectedDay];
+		const items = hourlyData.map(item => ({
+			label: item.label,
+			value: item.value
+		}));
+
+		renderGymPeakHistogram(containerId, items, { labelMode: 'hour' });
+	};
+
+	// Event listener for day selector
+	if (daySelector.dataset.bound !== 'true') {
+		daySelector.dataset.bound = 'true';
+		daySelector.addEventListener('change', (e) => {
+			renderDay(e.target.value);
+		});
+	}
+
+	// Initial render (empty state)
+	renderDay('');
+}
+
 function createHiDPICanvas(parentEl, cssHeight) {
 	const canvas = document.createElement('canvas');
 	canvas.className = 'gym-peak-canvas';
