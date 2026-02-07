@@ -1731,7 +1731,8 @@ async function loadGymDashboardData() {
 		console.log('[GYM DASHBOARD] Charts data:', {
 			volume_by_week: charts.volume_by_week?.length || 0,
 			active_users_by_week: charts.active_users_by_week?.length || 0,
-			exercise_categories: charts.exercise_categories?.length || 0
+			exercise_categories: charts.exercise_categories?.length || 0,
+			workouts_by_day_hour: charts.workouts_by_day_hour ? Object.keys(charts.workouts_by_day_hour).length : 0
 		});
 		renderGymMachinesChart('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
 		renderGymPeakTimes(charts);
@@ -1897,23 +1898,39 @@ function renderGymDayPeakTimes(charts) {
 	const containerId = 'gym-dashboard-chart-day-peak';
 	const el = document.getElementById(containerId);
 	const daySelector = document.getElementById('gym-day-selector');
-	if (!el || !daySelector) return;
+	if (!el || !daySelector) {
+		console.log('[DAY PEAK] Missing elements:', { el: !!el, daySelector: !!daySelector });
+		return;
+	}
 
 	const dayHourData = charts.workouts_by_day_hour || {};
 	const days = Object.keys(dayHourData).sort().reverse(); // Most recent first
 
+	console.log('[DAY PEAK] Day hour data:', dayHourData);
+	console.log('[DAY PEAK] Available days:', days);
+
 	// Populate day selector
 	daySelector.innerHTML = '<option value="">Select day...</option>';
-	days.forEach(day => {
-		const date = new Date(day + 'T12:00:00');
-		const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-		const dayNum = date.getDate();
-		const month = date.toLocaleDateString('en-US', { month: 'short' });
+	if (days.length === 0) {
 		const option = document.createElement('option');
-		option.value = day;
-		option.textContent = `${dayName} ${dayNum} ${month}`;
+		option.value = '';
+		option.textContent = 'No days available';
+		option.disabled = true;
 		daySelector.appendChild(option);
-	});
+		console.log('[DAY PEAK] No days available in data');
+	} else {
+		days.forEach(day => {
+			const date = new Date(day + 'T12:00:00');
+			const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+			const dayNum = date.getDate();
+			const month = date.toLocaleDateString('en-US', { month: 'short' });
+			const option = document.createElement('option');
+			option.value = day;
+			option.textContent = `${dayName} ${dayNum} ${month}`;
+			daySelector.appendChild(option);
+		});
+		console.log('[DAY PEAK] Populated', days.length, 'days');
+	}
 
 	// Render function
 	const renderDay = (selectedDay) => {
