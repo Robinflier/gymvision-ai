@@ -3318,6 +3318,10 @@ def get_gym_dashboard():
 					day: [{"label": f"{h:02d}:00", "value": hours.get(h, 0)} for h in range(24)]
 					for day, hours in day_hour_counts.items()
 				}
+				print(f"[GYM DASHBOARD] workouts_by_day_hour: {len(chart['workouts_by_day_hour'])} days with hourly data")
+				if len(chart['workouts_by_day_hour']) > 0:
+					sample_days = list(chart['workouts_by_day_hour'].keys())[:3]
+					print(f"[GYM DASHBOARD] Sample days: {sample_days}")
 				
 				# Volume by week (last 8 weeks, sorted)
 				sorted_weeks = sorted(volume_by_week.items(), key=lambda kv: kv[0])[-8:]
