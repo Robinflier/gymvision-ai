@@ -3524,7 +3524,7 @@ def get_gym_dashboard():
 			statistics["monthly_growth"] = {}  # No monthly growth
 			statistics["charts"] = {
 				"top_machines_by_sets": chart.get("top_machines_by_sets", []),  # Show all machines
-				"top_muscles_by_sets": chart.get("top_muscles_by_sets", [])[:5],  # Only top 5
+				"top_muscles_by_sets": chart.get("top_muscles_by_sets", []),  # Show all muscles
 				"workouts_by_weekday": chart.get("workouts_by_weekday", []),  # Basic weekday chart
 				"workouts_by_hour": chart.get("workouts_by_hour", []),  # Basic hour chart
 				"workouts_by_day": [],  # No daily time series
