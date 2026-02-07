@@ -883,7 +883,7 @@
 				</div>
 			</header>
 			<div style="padding: 22px;">
-				<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 14px;">
+				<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; gap: 14px;">
 					<h2 id="gym-dashboard-title" style="margin:0;font-size:22px;font-weight:800;flex:1;">Gym Dashboard</h2>
 					<div style="display: flex; align-items: center; gap: 10px;">
 						<label for="gym-dashboard-date" style="color: #c9cad6; font-size: 12px; font-weight: 600; white-space: nowrap;">Date:</label>
@@ -931,6 +931,16 @@
 							</div>
 						</div>
 						<div id="gym-dashboard-chart-peak" class="gym-chart"></div>
+					</section>
+
+					<section class="card" style="margin:14px 0 0;">
+						<div style="padding:18px 18px 10px;font-weight:800;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+							<span>Peak times by day</span>
+							<select id="gym-day-selector" style="background:#15151a;border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;padding:6px 10px;font-size:12px;font-weight:600;font-family:'Inter',sans-serif;cursor:pointer;">
+								<option value="">Select day...</option>
+							</select>
+						</div>
+						<div id="gym-dashboard-chart-day-peak" class="gym-chart"></div>
 					</section>
 
 					<section class="card" style="margin:14px 0 0;">

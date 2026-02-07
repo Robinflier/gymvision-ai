@@ -89,11 +89,14 @@ function isLbs() {
 	return false;
 }
 
-// Convert weight for display (always kg, no decimals)
+// Convert weight for display (always kg, 1 decimal place)
 function convertWeightForDisplay(weightKg) {
 	if (weightKg == null || weightKg === '') return '';
 	const weight = Number(weightKg);
-	return Math.round(weight).toString(); // kg: no decimals (e.g., "10")
+	// Round to 1 decimal place: 17.52 -> 17.5, 17.5 -> 17.5, 17.0 -> 17
+	const rounded = Math.round(weight * 10) / 10;
+	// Remove trailing zero if it's a whole number (17.0 -> 17)
+	return rounded % 1 === 0 ? rounded.toString() : rounded.toFixed(1);
 }
 
 // Convert weight for storage (always kg)
@@ -1732,6 +1735,7 @@ async function loadGymDashboardData() {
 		});
 		renderGymMachinesChart('gym-dashboard-chart-machines', charts.top_machines_by_sets, 'sets');
 		renderGymPeakTimes(charts);
+		renderGymDayPeakTimes(charts);
 		renderGymMuscleFocus(charts.top_muscles_by_sets);
 		renderGymCategories(charts.exercise_categories || []);
 
@@ -4797,7 +4801,7 @@ function renderWorkoutList() {
 				<div class="workout-edit-set-number">${setIdx + 1}</div>
 				</div>
 				${isBodyweight ? '' : `<div class="weight-col">
-					<input type="number" class="workout-edit-set-input weight" placeholder="${weightPlaceholder}" inputmode="decimal" value="${weightDisplayValue}" aria-label="Set weight (${getWeightUnitLabel().toLowerCase()})">
+					<input type="number" class="workout-edit-set-input weight" placeholder="${weightPlaceholder}" inputmode="decimal" step="0.1" min="0" value="${weightDisplayValue}" aria-label="Set weight (${getWeightUnitLabel().toLowerCase()})">
 				</div>`}
 				<div class="reps-col">
 					<input type="number" class="workout-edit-set-input reps" placeholder="${repsPlaceholder}" inputmode="numeric" value="${repsDisplayValue}" aria-label="Set reps">
@@ -4815,12 +4819,39 @@ function renderWorkoutList() {
 
 				if (weightInput) {
 					weightInput.addEventListener('input', (e) => {
+						// Round to 1 decimal place while typing: 17.52 -> 17.5
+						const value = e.target.value;
+						if (value && !isNaN(value)) {
+							const numValue = parseFloat(value);
+							if (!isNaN(numValue)) {
+								const rounded = Math.round(numValue * 10) / 10;
+								// Only update if value changed (to avoid cursor jumping)
+								if (rounded !== numValue) {
+									e.target.value = rounded % 1 === 0 ? rounded.toString() : rounded.toFixed(1);
+								}
+							}
+						}
 						// Convert input value (in current unit) to kg for storage
 						const currentUnit = getWeightUnit();
 						ex.sets[setIdx].weight = convertWeightForStorage(e.target.value, currentUnit);
 						saveWorkoutDraft();
 						// Auto-trigger rest timer if enabled and set is complete (both weight and reps)
 						checkAndTriggerRestTimer(ex.sets[setIdx], e.target.value, repsInput.value, ex);
+					});
+					// Also handle on blur to ensure final value is rounded
+					weightInput.addEventListener('blur', (e) => {
+						const value = e.target.value;
+						if (value && !isNaN(value)) {
+							const numValue = parseFloat(value);
+							if (!isNaN(numValue)) {
+								const rounded = Math.round(numValue * 10) / 10;
+								e.target.value = rounded % 1 === 0 ? rounded.toString() : rounded.toFixed(1);
+								// Update stored value
+								const currentUnit = getWeightUnit();
+								ex.sets[setIdx].weight = convertWeightForStorage(e.target.value, currentUnit);
+								saveWorkoutDraft();
+							}
+						}
 					});
 				}
 
@@ -6166,12 +6197,14 @@ function initProgress() {
 			return;
 		}
 		
-		const weightNum = parseFloat(weight);
+		let weightNum = parseFloat(weight);
 		if (isNaN(weightNum) || weightNum <= 0) {
 			console.log('[PROGRESS] Invalid weight value:', weight);
 			alert('Please enter a valid weight');
 			return;
 		}
+		// Round to 1 decimal place: 17.52 -> 17.5
+		weightNum = Math.round(weightNum * 10) / 10;
 		
 		// Convert weight from display unit to kg for storage
 		const currentUnit = getWeightUnit();
@@ -6334,13 +6367,15 @@ function initOneRepMaxCalculator() {
 
 	// Calculate 1RM using Epley formula: weight × (1 + reps/30)
 	function calculate1RM() {
-		const weight = parseFloat(weightInput.value);
+		let weight = parseFloat(weightInput.value);
 		const reps = parseFloat(repsInput.value);
 
 		if (!weight || !reps || weight <= 0 || reps <= 0 || reps > 30) {
 			if (resultEl) resultEl.textContent = '—';
 			return;
 		}
+		// Round weight to 1 decimal place: 17.52 -> 17.5
+		weight = Math.round(weight * 10) / 10;
 
 		// Epley formula: 1RM = weight × (1 + reps/30)
 		const oneRepMax = weight * (1 + reps / 30);
@@ -7851,7 +7886,12 @@ var scheduledNotificationId = null;
 var restTimerStartTime = null; // Track when timer started for background accuracy
 var restTimerInitialSeconds = 0; // Store initial seconds when timer starts
 
+var restTimerInitialized = false;
+
 function initRestTimer() {
+	// Prevent multiple initializations
+	if (restTimerInitialized) return;
+	
 	const overlay = document.getElementById('rest-timer-overlay');
 	const closeBtn = document.getElementById('rest-timer-close');
 	const startBtn = document.getElementById('rest-timer-start');
@@ -7860,6 +7900,9 @@ function initRestTimer() {
 	const timeDisplay = document.getElementById('rest-timer-time');
 
 	if (!overlay || !closeBtn || !startBtn || !add30SecBtn || !subtract30SecBtn || !timeDisplay) return;
+
+	// Mark as initialized
+	restTimerInitialized = true;
 
 	// Close button
 	closeBtn.addEventListener('click', () => {
@@ -9844,6 +9887,17 @@ function saveExerciseNotes(exerciseKey, exerciseIndex) {
 		saveWorkoutDraft();
 		renderWorkoutList();
 	}
+
+	// Update notes buttons in "Your Workouts" view immediately
+	const hasNotes = notes.length > 0;
+	const notesButtons = document.querySelectorAll(`.workout-exercise-notes-btn[data-exercise-key="${exerciseKey}"]`);
+	notesButtons.forEach(btn => {
+		if (hasNotes) {
+			btn.classList.add('has-notes');
+		} else {
+			btn.classList.remove('has-notes');
+		}
+	});
 
 	closeExerciseNotesModal();
 }

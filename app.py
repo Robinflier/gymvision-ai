@@ -3122,6 +3122,8 @@ def get_gym_dashboard():
 				hour_counts = {h: 0 for h in range(24)}
 				week_counts = {}
 				day_counts = {}
+				# Per-day hourly data: { "YYYY-MM-DD": { 0: count, 1: count, ... 23: count } }
+				day_hour_counts = {}
 				volume_by_week = {}  # Total kg per week (weight × reps × sets)
 				active_users_by_week = {}  # Unique users per week
 				cardio_sets = 0
