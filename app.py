@@ -3556,6 +3556,7 @@ def get_gym_dashboard():
 				"top_muscles_by_sets": chart.get("top_muscles_by_sets", []),  # Show all muscles
 				"workouts_by_weekday": chart.get("workouts_by_weekday", []),  # Basic weekday chart
 				"workouts_by_hour": chart.get("workouts_by_hour", []),  # Basic hour chart
+				"workouts_by_day_hour": chart.get("workouts_by_day_hour", {}),  # Include day-specific hourly data
 				"workouts_by_day": [],  # No daily time series
 				"workouts_last_weeks": [],  # No weekly history
 				"volume_by_week": [],  # No volume tracking
