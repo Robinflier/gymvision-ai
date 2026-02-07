@@ -881,15 +881,17 @@
 				</div>
 			</header>
 			<div style="padding: 22px;">
-				<h2 id="gym-dashboard-title" style="margin:0 0 14px;font-size:22px;font-weight:800;">Gym Dashboard</h2>
+				<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 14px;">
+					<h2 id="gym-dashboard-title" style="margin:0;font-size:22px;font-weight:800;flex:1;">Gym Dashboard</h2>
+					<div style="display: flex; align-items: center; gap: 10px;">
+						<label for="gym-dashboard-date" style="color: #c9cad6; font-size: 12px; font-weight: 600; white-space: nowrap;">Date:</label>
+						<input type="date" id="gym-dashboard-date" style="max-width: 136px; padding: 6px 10px; background: #15151a; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; color: #fff; font-size: 13px; font-weight: 600; font-family: 'Inter', sans-serif; box-sizing: border-box;">
+					</div>
+				</div>
 				<div id="gym-dashboard-error" class="auth-error"></div>
 				<div id="gym-dashboard-loading" class="progress-empty" style="padding:18px 0;">Loading dashboard...</div>
 
 				<div id="gym-dashboard-panels" class="hidden">
-					<div style="margin-bottom: 14px; display: flex; align-items: center; gap: 10px;">
-						<label for="gym-dashboard-date" style="color: #c9cad6; font-size: 12px; font-weight: 600; white-space: nowrap;">Date:</label>
-						<input type="date" id="gym-dashboard-date" style="flex: 1; max-width: 160px; padding: 6px 10px; background: #15151a; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; color: #fff; font-size: 13px; font-weight: 600; font-family: 'Inter', sans-serif; box-sizing: border-box;">
-					</div>
 					<div class="settings-stats-grid" style="margin-bottom: 44px;">
 						<div class="settings-stat-box" style="background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);">
 							<div class="settings-stat-value" id="gym-dashboard-total-users">0</div>

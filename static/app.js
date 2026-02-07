@@ -89,11 +89,14 @@ function isLbs() {
 	return false;
 }
 
-// Convert weight for display (always kg, no decimals)
+// Convert weight for display (always kg, 1 decimal place)
 function convertWeightForDisplay(weightKg) {
 	if (weightKg == null || weightKg === '') return '';
 	const weight = Number(weightKg);
-	return Math.round(weight).toString(); // kg: no decimals (e.g., "10")
+	// Round to 1 decimal place: 17.52 -> 17.5, 17.5 -> 17.5, 17.0 -> 17
+	const rounded = Math.round(weight * 10) / 10;
+	// Remove trailing zero if it's a whole number (17.0 -> 17)
+	return rounded % 1 === 0 ? rounded.toString() : rounded.toFixed(1);
 }
 
 // Convert weight for storage (always kg)
@@ -4797,7 +4800,7 @@ function renderWorkoutList() {
 				<div class="workout-edit-set-number">${setIdx + 1}</div>
 				</div>
 				${isBodyweight ? '' : `<div class="weight-col">
-					<input type="number" class="workout-edit-set-input weight" placeholder="${weightPlaceholder}" inputmode="decimal" value="${weightDisplayValue}" aria-label="Set weight (${getWeightUnitLabel().toLowerCase()})">
+					<input type="number" class="workout-edit-set-input weight" placeholder="${weightPlaceholder}" inputmode="decimal" step="0.1" min="0" value="${weightDisplayValue}" aria-label="Set weight (${getWeightUnitLabel().toLowerCase()})">
 				</div>`}
 				<div class="reps-col">
 					<input type="number" class="workout-edit-set-input reps" placeholder="${repsPlaceholder}" inputmode="numeric" value="${repsDisplayValue}" aria-label="Set reps">
@@ -4815,12 +4818,39 @@ function renderWorkoutList() {
 
 				if (weightInput) {
 					weightInput.addEventListener('input', (e) => {
+						// Round to 1 decimal place while typing: 17.52 -> 17.5
+						const value = e.target.value;
+						if (value && !isNaN(value)) {
+							const numValue = parseFloat(value);
+							if (!isNaN(numValue)) {
+								const rounded = Math.round(numValue * 10) / 10;
+								// Only update if value changed (to avoid cursor jumping)
+								if (rounded !== numValue) {
+									e.target.value = rounded % 1 === 0 ? rounded.toString() : rounded.toFixed(1);
+								}
+							}
+						}
 						// Convert input value (in current unit) to kg for storage
 						const currentUnit = getWeightUnit();
 						ex.sets[setIdx].weight = convertWeightForStorage(e.target.value, currentUnit);
 						saveWorkoutDraft();
 						// Auto-trigger rest timer if enabled and set is complete (both weight and reps)
 						checkAndTriggerRestTimer(ex.sets[setIdx], e.target.value, repsInput.value, ex);
+					});
+					// Also handle on blur to ensure final value is rounded
+					weightInput.addEventListener('blur', (e) => {
+						const value = e.target.value;
+						if (value && !isNaN(value)) {
+							const numValue = parseFloat(value);
+							if (!isNaN(numValue)) {
+								const rounded = Math.round(numValue * 10) / 10;
+								e.target.value = rounded % 1 === 0 ? rounded.toString() : rounded.toFixed(1);
+								// Update stored value
+								const currentUnit = getWeightUnit();
+								ex.sets[setIdx].weight = convertWeightForStorage(e.target.value, currentUnit);
+								saveWorkoutDraft();
+							}
+						}
 					});
 				}
 
