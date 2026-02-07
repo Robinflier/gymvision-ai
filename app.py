@@ -7,7 +7,7 @@ import time
 import urllib.parse
 import urllib.request
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from collections import defaultdict
@@ -2216,7 +2216,14 @@ def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = Non
 				raise
 
 		# Only log if there's a change or first sync (reduce log spam)
-		if not exists or gym_id is not None:
+		# Check if data actually changed before logging
+		if existing.data and len(existing.data) > 0:
+			existing_row = existing.data[0]
+			# Only log if gym_id changed or this is a new record
+			if not exists or (gym_id is not None and existing_row.get("gym_id") != gym_id):
+				print(f"[GYM SYNC] Synced gym analytics for user {user_id}, linked to gym_id: {gym_id}")
+		elif not exists:
+			# First sync - always log
 			print(f"[GYM SYNC] Synced gym analytics for user {user_id}, linked to gym_id: {gym_id}")
 		
 		return True
@@ -2853,7 +2860,8 @@ def get_gym_dashboard():
 		if selected_date:
 			try:
 				selected_date_obj = datetime.fromisoformat(selected_date).date()
-				selected_date_end = datetime.combine(selected_date_obj, datetime.max.time())
+				# Make timezone-aware (UTC) to match linked_at
+				selected_date_end = datetime.combine(selected_date_obj, datetime.max.time()).replace(tzinfo=timezone.utc)
 				total_users = 0
 				users_with_consent = 0
 				if analytics_all.data:
