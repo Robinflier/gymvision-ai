@@ -3197,11 +3197,10 @@ def get_gym_dashboard():
 					if dti:
 						hour = int(dti.hour)
 						hour_counts[hour] = hour_counts.get(hour, 0) + 1
-						# Also track per day
-						day_key = dti.strftime("%Y-%m-%d")
-						if day_key not in day_hour_counts:
-							day_hour_counts[day_key] = {h: 0 for h in range(24)}
-						day_hour_counts[day_key][hour] = day_hour_counts[day_key].get(hour, 0) + 1
+						# Also track per weekday (Monday, Tuesday, etc.)
+						weekday_name = dti.strftime("%A")  # Full weekday name (Monday, Tuesday, etc.)
+						if weekday_name in weekday_hour_counts:
+							weekday_hour_counts[weekday_name][hour] = weekday_hour_counts[weekday_name].get(hour, 0) + 1
 
 					# Process exercises for charts (all workouts)
 					exercises = w.get("exercises") or []
