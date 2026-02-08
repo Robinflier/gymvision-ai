@@ -2003,15 +2003,6 @@ function renderGymDayPeakTimes(charts) {
 		renderGymPeakHistogram(containerId, items, { labelMode: 'hour' });
 	};
 
-	// Event listener for day selector - use both change and input for better compatibility
-	if (daySelector.dataset.bound !== 'true') {
-		daySelector.dataset.bound = 'true';
-		const handleChange = (e) => {
-			const selectedValue = e.target.value;
-			console.log('[DAY PEAK] Day selected:', selectedValue);
-			renderDay(selectedValue);
-		};
-
 function createHiDPICanvas(parentEl, cssHeight) {
 	const canvas = document.createElement('canvas');
 	canvas.className = 'gym-peak-canvas';
