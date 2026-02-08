@@ -3979,6 +3979,16 @@ function openExerciseSelector() {
 			preds.innerHTML = '';
 			preds.style.display = 'none';
 		}
+		
+		// Reset muscle filter to "All" when opening selector
+		const muscleButtons = document.querySelectorAll('#exercise-selector-muscles button');
+		muscleButtons.forEach(btn => {
+			btn.classList.remove('active');
+			if (btn.textContent === 'All') {
+				btn.classList.add('active');
+			}
+		});
+		
 		const filterFn = window.filterExercisesForSelector;
 		if (typeof filterFn === 'function') {
 			filterFn('', null);
