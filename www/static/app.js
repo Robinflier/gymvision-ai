@@ -1880,13 +1880,13 @@ function renderGymPeakTimes(charts) {
 			b.setAttribute('aria-selected', active ? 'true' : 'false');
 		});
 		
-		// Show/hide day selector based on mode
+		// Show/hide day selector based on mode (show for "hours", hide for "days")
 		if (daySelector) {
-			daySelector.style.display = (mode === 'days') ? 'block' : 'none';
+			daySelector.style.display = (mode === 'hours') ? 'block' : 'none';
 		}
 		
-		if (mode === 'days') {
-			// Days mode: show specific weekday or all weekdays
+		if (mode === 'hours') {
+			// Hours mode: show hourly data for specific weekday or all days combined
 			if (selectedWeekday && weekdayHourData[selectedWeekday]) {
 				// Show specific weekday hourly data
 				const hourlyData = weekdayHourData[selectedWeekday];
@@ -1900,24 +1900,24 @@ function renderGymPeakTimes(charts) {
 					el.innerHTML = `<div class="gym-chart-empty">No data for ${selectedWeekday}</div>`;
 				}
 			} else {
-				// Show all weekdays aggregated
-				if (hasAny(charts.workouts_by_weekday)) {
-					renderGymPeakHistogram(containerId, charts.workouts_by_weekday, { labelMode: 'weekday' });
+				// Show all days combined (default hours view)
+				if (hasAny(charts.workouts_by_hour)) {
+					renderGymPeakHistogram(containerId, charts.workouts_by_hour, { labelMode: 'hour' });
 				} else {
 					el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
 				}
 			}
 		} else {
-			// Hours = hour-of-day buckets (all days combined)
-			if (hasAny(charts.workouts_by_hour)) {
-				renderGymPeakHistogram(containerId, charts.workouts_by_hour, { labelMode: 'hour' });
+			// Days mode: show weekdays (Mon-Sun) aggregated
+			if (hasAny(charts.workouts_by_weekday)) {
+				renderGymPeakHistogram(containerId, charts.workouts_by_weekday, { labelMode: 'weekday' });
 			} else {
 				el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
 			}
 		}
 	};
 	
-	// Bind mode buttons
+		// Bind mode buttons
 	buttons.forEach(btn => {
 		if (btn.dataset.bound === 'true') return;
 		btn.dataset.bound = 'true';
@@ -1926,8 +1926,8 @@ function renderGymPeakTimes(charts) {
 			e.stopPropagation();
 			const mode = (btn.dataset.peak || 'hours').toString();
 			try { localStorage.setItem('gym-peak-mode', mode); } catch (e) { }
-			// When switching to days, use current dropdown value; when switching to hours, clear selection
-			const currentDay = (mode === 'days' && daySelector) ? daySelector.value : null;
+			// When switching to hours, use current dropdown value; when switching to days, ignore dropdown
+			const currentDay = (mode === 'hours' && daySelector) ? daySelector.value : null;
 			applyMode(mode, currentDay || null);
 		});
 	});
@@ -1938,8 +1938,8 @@ function renderGymPeakTimes(charts) {
 		daySelector.addEventListener('change', (e) => {
 			const selectedWeekday = e.target.value || null;
 			const currentMode = Array.from(buttons).find(b => b.classList.contains('active'))?.dataset.peak || 'hours';
-			if (currentMode === 'days') {
-				applyMode('days', selectedWeekday);
+			if (currentMode === 'hours') {
+				applyMode('hours', selectedWeekday);
 			}
 		});
 	}
