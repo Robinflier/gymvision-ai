@@ -2007,6 +2007,9 @@ function renderGymPeakHistogram(containerId, items, opts = {}) {
 		bars.classList.add('hour-mode');
 	}
 
+	// Track tooltip z-index to stack them properly
+	let tooltipZIndex = 1000;
+	
 	list.forEach((x, i) => {
 		const v = Number(x?.value || 0);
 		const hPct = Math.max(2, Math.round((v / max) * 100));
@@ -2021,6 +2024,7 @@ function renderGymPeakHistogram(containerId, items, opts = {}) {
 		const tooltip = document.createElement('div');
 		tooltip.className = 'gym-peak-tooltip';
 		tooltip.textContent = `${label}: ${v}`;
+		tooltip.style.zIndex = tooltipZIndex.toString();
 		item.appendChild(tooltip);
 		
 		const bar = document.createElement('div');
@@ -2030,18 +2034,32 @@ function renderGymPeakHistogram(containerId, items, opts = {}) {
 		bar.setAttribute('data-label', label);
 		item.appendChild(bar);
 		
-		// Add touch/click event for mobile
+		// Add touch/click event for mobile and desktop
 		let tooltipTimeout = null;
-		item.addEventListener('touchstart', (e) => {
-			e.preventDefault();
+		const showTooltip = () => {
+			// Increase z-index for this tooltip so it appears on top
+			tooltipZIndex++;
+			tooltip.style.zIndex = tooltipZIndex.toString();
 			tooltip.style.opacity = '1';
 			if (tooltipTimeout) clearTimeout(tooltipTimeout);
 			tooltipTimeout = setTimeout(() => {
 				tooltip.style.opacity = '0';
 			}, 2000);
+		};
+		
+		item.addEventListener('touchstart', (e) => {
+			e.preventDefault();
+			showTooltip();
 		});
 		item.addEventListener('touchend', (e) => {
 			e.preventDefault();
+		});
+		item.addEventListener('mouseenter', () => {
+			showTooltip();
+		});
+		item.addEventListener('mouseleave', () => {
+			if (tooltipTimeout) clearTimeout(tooltipTimeout);
+			tooltip.style.opacity = '0';
 		});
 		
 		bars.appendChild(item);
