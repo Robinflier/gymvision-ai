@@ -2016,6 +2016,13 @@ function renderGymPeakHistogram(containerId, items, opts = {}) {
 		item.setAttribute('data-value', v);
 		item.setAttribute('data-label', label);
 		item.setAttribute('title', `${label}: ${v}`);
+		
+		// Create tooltip element
+		const tooltip = document.createElement('div');
+		tooltip.className = 'gym-peak-tooltip';
+		tooltip.textContent = `${label}: ${v}`;
+		item.appendChild(tooltip);
+		
 		const bar = document.createElement('div');
 		bar.className = 'gym-peak-bar';
 		bar.style.height = `${hPct}%`;
