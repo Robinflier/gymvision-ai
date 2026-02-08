@@ -78,7 +78,7 @@ var exerciseSelectorInitialized = false;
 // ========== WEIGHT UNIT CONVERSION ==========
 // Always use kg - no unit switching
 function getWeightUnit() {
-	return 'kg';
+		return 'kg';
 }
 
 function isKg() {
@@ -1896,14 +1896,14 @@ function renderGymPeakTimes(charts) {
 				}));
 				if (hasAny(items)) {
 					renderGymPeakHistogram(containerId, items, { labelMode: 'hour' });
-				} else {
-					el.innerHTML = `<div class="gym-chart-empty">No data for ${selectedWeekday}</div>`;
-				}
 			} else {
+					el.innerHTML = `<div class="gym-chart-empty">No data for ${selectedWeekday}</div>`;
+			}
+		} else {
 				// Show all days combined (default hours view)
-				if (hasAny(charts.workouts_by_hour)) {
-					renderGymPeakHistogram(containerId, charts.workouts_by_hour, { labelMode: 'hour' });
-				} else {
+			if (hasAny(charts.workouts_by_hour)) {
+				renderGymPeakHistogram(containerId, charts.workouts_by_hour, { labelMode: 'hour' });
+			} else {
 					el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
 				}
 			}
@@ -1950,58 +1950,6 @@ function renderGymPeakTimes(charts) {
 	mode = (mode === 'days') ? 'days' : 'hours';
 	applyMode(mode);
 }
-
-function renderGymDayPeakTimes(charts) {
-	const containerId = 'gym-dashboard-chart-day-peak';
-	const el = document.getElementById(containerId);
-	const daySelector = document.getElementById('gym-day-selector');
-	if (!el || !daySelector) {
-		console.log('[DAY PEAK] Missing elements:', { el: !!el, daySelector: !!daySelector });
-		return;
-	}
-
-	const weekdayHourData = charts.workouts_by_day_hour || {};
-	// Weekday order: Monday through Sunday
-	const weekdayOrder = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-	const availableWeekdays = weekdayOrder.filter(day => weekdayHourData[day] && weekdayHourData[day].some(h => h.value > 0));
-
-	console.log('[DAY PEAK] Weekday hour data:', weekdayHourData);
-	console.log('[DAY PEAK] Available weekdays:', availableWeekdays);
-
-	// Populate day selector with weekdays
-	daySelector.innerHTML = '<option value="">Select day...</option>';
-	if (availableWeekdays.length === 0) {
-		const option = document.createElement('option');
-		option.value = '';
-		option.textContent = 'No days available';
-		option.disabled = true;
-		daySelector.appendChild(option);
-		console.log('[DAY PEAK] No weekdays available in data');
-	} else {
-		availableWeekdays.forEach(weekday => {
-			const option = document.createElement('option');
-			option.value = weekday;
-			option.textContent = weekday;
-			daySelector.appendChild(option);
-		});
-		console.log('[DAY PEAK] Populated', availableWeekdays.length, 'weekdays');
-	}
-
-	// Render function
-	const renderDay = (selectedWeekday) => {
-		if (!selectedWeekday || !weekdayHourData[selectedWeekday]) {
-			el.innerHTML = '<div class="gym-chart-empty">Select a day to view peak times</div>';
-			return;
-		}
-
-		const hourlyData = weekdayHourData[selectedWeekday];
-		const items = hourlyData.map(item => ({
-			label: item.label,
-			value: item.value
-		}));
-
-		renderGymPeakHistogram(containerId, items, { labelMode: 'hour' });
-	};
 
 function createHiDPICanvas(parentEl, cssHeight) {
 	const canvas = document.createElement('canvas');
@@ -4543,7 +4491,7 @@ function setWorkoutTimerDisplay(durationMs = 0) {
 			div.textContent = formatDurationDisplay(durationMs);
 			timerEl.parentNode.replaceChild(div, timerEl);
 		} else {
-			timerEl.textContent = formatDurationDisplay(durationMs);
+		timerEl.textContent = formatDurationDisplay(durationMs);
 		}
 	}
 }
@@ -6298,8 +6246,8 @@ function initProgress() {
 	async function handleWeightSubmit(e) {
 		if (e) e.preventDefault();
 		console.log('[PROGRESS] Form submitted');
-		const weight = document.getElementById('progress-weight')?.value;
-		const dateInputValue = document.getElementById('progress-date')?.value;
+			const weight = document.getElementById('progress-weight')?.value;
+			const dateInputValue = document.getElementById('progress-date')?.value;
 		console.log('[PROGRESS] Weight:', weight, 'Date:', dateInputValue);
 		
 		if (!weight || !dateInputValue) {
@@ -6316,8 +6264,8 @@ function initProgress() {
 		// Round to 1 decimal place: 17.52 -> 17.5
 		weightNum = Math.round(weightNum * 10) / 10;
 		
-		// Convert weight from display unit to kg for storage
-		const currentUnit = getWeightUnit();
+				// Convert weight from display unit to kg for storage
+				const currentUnit = getWeightUnit();
 		const value = convertWeightForStorage(weightNum, currentUnit);
 		const dayKey = dateInputValue; // YYYY-MM-DD from input[type=date]
 		
@@ -6381,40 +6329,40 @@ function initProgress() {
 		// Also save to localStorage for backwards compatibility and offline support
 		const progress = JSON.parse(localStorage.getItem('progress') || '[]');
 		const now = new Date(`${dayKey}T12:00:00`);
-		// Remove any existing entries for this day (to prevent duplicates)
-		const filteredProgress = progress.filter(p => {
-			const pDayKey = p.dayKey || (p.date ? p.date.slice(0, 10) : '');
-			return pDayKey !== dayKey;
-		});
-		// Add the new entry with both date and dayKey for consistency
-		filteredProgress.push({
-			date: now.toISOString(),
-			dayKey: dayKey, // Ensure dayKey is always set
-			weight: value
-		});
-		// Ensure all existing entries also have dayKey
-		const normalizedProgress = filteredProgress.map(p => ({
-			...p,
-			dayKey: p.dayKey || (p.date ? p.date.slice(0, 10) : '')
-		}));
-		localStorage.setItem('progress', JSON.stringify(normalizedProgress));
+				// Remove any existing entries for this day (to prevent duplicates)
+				const filteredProgress = progress.filter(p => {
+					const pDayKey = p.dayKey || (p.date ? p.date.slice(0, 10) : '');
+					return pDayKey !== dayKey;
+				});
+				// Add the new entry with both date and dayKey for consistency
+				filteredProgress.push({
+					date: now.toISOString(),
+					dayKey: dayKey, // Ensure dayKey is always set
+					weight: value
+				});
+				// Ensure all existing entries also have dayKey
+				const normalizedProgress = filteredProgress.map(p => ({
+					...p,
+					dayKey: p.dayKey || (p.date ? p.date.slice(0, 10) : '')
+				}));
+				localStorage.setItem('progress', JSON.stringify(normalizedProgress));
 		
-		// Reset weight input
-		const weightInput = document.getElementById('progress-weight');
-		if (weightInput) weightInput.value = '';
-		// Reset date to today after saving
-		const today = new Date();
-		const year = today.getFullYear();
-		const month = String(today.getMonth() + 1).padStart(2, '0');
-		const day = String(today.getDate()).padStart(2, '0');
-		if (dateInput) dateInput.value = `${year}-${month}-${day}`;
-		const dateEl = document.getElementById('progress-date');
-		if (dateEl) {
-			const today = new Date();
-			dateEl.value = today.toISOString().slice(0, 10);
-		}
-		loadProgress();
-	}
+				// Reset weight input
+				const weightInput = document.getElementById('progress-weight');
+				if (weightInput) weightInput.value = '';
+				// Reset date to today after saving
+				const today = new Date();
+				const year = today.getFullYear();
+				const month = String(today.getMonth() + 1).padStart(2, '0');
+				const day = String(today.getDate()).padStart(2, '0');
+				if (dateInput) dateInput.value = `${year}-${month}-${day}`;
+				const dateEl = document.getElementById('progress-date');
+				if (dateEl) {
+					const today = new Date();
+					dateEl.value = today.toISOString().slice(0, 10);
+				}
+				loadProgress();
+			}
 	
 	if (progressForm) {
 		console.log('[PROGRESS] Form found, adding submit listener');
@@ -7806,52 +7754,52 @@ async function saveGymName(gymName, placeId = null) {
 
 		saveGymNameLock = true;
 
-		if (!supabaseClient) {
-			await initSupabase();
-		}
-		if (!supabaseClient) {
-			console.warn('[GYM] Supabase not available, saving to localStorage only');
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		console.warn('[GYM] Supabase not available, saving to localStorage only');
 			saveGymNameLock = false;
+		return;
+	}
+
+	try {
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			// Not logged in, save to localStorage only
+				saveGymNameLock = false;
 			return;
 		}
-
-		try {
-			const { data: { session } } = await supabaseClient.auth.getSession();
-			if (!session) {
-				// Not logged in, save to localStorage only
-				saveGymNameLock = false;
-				return;
-			}
 
 			// Get current values from localStorage (may have changed during debounce)
 			const currentGym = localStorage.getItem('user-gym-name') || '';
 			const currentPlaceId = localStorage.getItem('user-gym-place-id') || '';
 
-			// Call backend endpoint to update user_metadata and sync to analytics table
-			const apiUrl = getApiUrl('/api/collect-gym-data');
-			const response = await fetch(apiUrl, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					'Authorization': `Bearer ${session.access_token}`
-				},
-				body: JSON.stringify({
+		// Call backend endpoint to update user_metadata and sync to analytics table
+		const apiUrl = getApiUrl('/api/collect-gym-data');
+		const response = await fetch(apiUrl, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${session.access_token}`
+			},
+			body: JSON.stringify({
 					gym_name: currentGym || null,
 					gym_place_id: currentGym ? (currentPlaceId || null) : null
-				})
-			});
+			})
+		});
 
-			if (!response.ok) {
-				const errorData = await response.json().catch(() => ({}));
-				console.error('[GYM] Error saving gym name:', errorData);
-			} else {
-				console.log('[GYM] Gym name saved and synced successfully');
-			}
-		} catch (e) {
-			console.error('[GYM] Error saving gym name:', e);
+		if (!response.ok) {
+			const errorData = await response.json().catch(() => ({}));
+			console.error('[GYM] Error saving gym name:', errorData);
+		} else {
+			console.log('[GYM] Gym name saved and synced successfully');
+		}
+	} catch (e) {
+		console.error('[GYM] Error saving gym name:', e);
 		} finally {
 			saveGymNameLock = false;
-		}
+	}
 	}, 500);
 }
 
