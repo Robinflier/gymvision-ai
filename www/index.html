@@ -923,16 +923,18 @@
 					</section>
 
 					<section class="card" style="margin:14px 0 0;">
-						<div style="padding:18px 18px 4px;font-weight:800;display:flex;align-items:center;justify-content:space-between;gap:10px;">
-							<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1;">
-								<span style="align-self:flex-start;">Peak times</span>
+						<div style="padding:18px 18px 4px;font-weight:800;">
+							<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+								<span>Peak times</span>
+								<div class="gym-mini-toggle" role="tablist" aria-label="Peak times view" style="flex-shrink:0;">
+									<button type="button" class="gym-mini-btn active" data-peak="hours" aria-selected="true">Hours</button>
+									<button type="button" class="gym-mini-btn" data-peak="days" aria-selected="false">Days</button>
+								</div>
+							</div>
+							<div style="display:flex;justify-content:flex-start;padding-top:4px;">
 								<select id="gym-day-selector" style="display:none;background:#15151a;border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;padding:5px 8px;font-size:11px;font-weight:600;font-family:'Inter',sans-serif;cursor:pointer;white-space:nowrap;max-width:75px;width:auto;appearance:none;-webkit-appearance:none;-moz-appearance:none;background-image:none;">
 									<option value="">All days</option>
 								</select>
-							</div>
-							<div class="gym-mini-toggle" role="tablist" aria-label="Peak times view" style="flex-shrink:0;">
-								<button type="button" class="gym-mini-btn active" data-peak="hours" aria-selected="true">Hours</button>
-								<button type="button" class="gym-mini-btn" data-peak="days" aria-selected="false">Days</button>
 							</div>
 						</div>
 						<div id="gym-dashboard-chart-peak" class="gym-chart"></div>
