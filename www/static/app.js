@@ -3982,16 +3982,24 @@ function openExerciseSelector() {
 		
 		// Reset muscle filter to "All" when opening selector
 		const muscleButtons = document.querySelectorAll('#exercise-selector-muscles button');
+		let allButton = null;
 		muscleButtons.forEach(btn => {
 			btn.classList.remove('active');
 			if (btn.textContent === 'All') {
 				btn.classList.add('active');
+				allButton = btn;
 			}
 		});
 		
-		const filterFn = window.filterExercisesForSelector;
-		if (typeof filterFn === 'function') {
-			filterFn('', null);
+		// Trigger click on "All" button to reset selectedMuscle variable
+		if (allButton) {
+			allButton.click();
+		} else {
+			// Fallback: just call filter function with null
+			const filterFn = window.filterExercisesForSelector;
+			if (typeof filterFn === 'function') {
+				filterFn('', null);
+			}
 		}
 	} else {
 		console.error('[ERROR] exercise-selector element not found!');
