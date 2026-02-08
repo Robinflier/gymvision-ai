@@ -4772,6 +4772,18 @@ button,
 	text-align: center
 }
 
+/* Day selector styling - remove arrows */
+#gym-day-selector {
+	appearance: none !important;
+	-webkit-appearance: none !important;
+	-moz-appearance: none !important;
+	background-image: none !important;
+}
+
+#gym-day-selector::-ms-expand {
+	display: none;
+}
+
 /* Make gym donut slightly smaller than Progress tab donut */
 #gym-muscle-chart {
 	width: 100%;
