@@ -2010,9 +2010,18 @@ function renderGymPeakHistogram(containerId, items, opts = {}) {
 	list.forEach((x, i) => {
 		const v = Number(x?.value || 0);
 		const hPct = Math.max(2, Math.round((v / max) * 100));
+		const label = (x?.label || '').toString();
 		const item = document.createElement('div');
 		item.className = 'gym-peak-baritem';
-		item.innerHTML = `<div class="gym-peak-bar" style="height:${hPct}%"></div>`;
+		item.setAttribute('data-value', v);
+		item.setAttribute('data-label', label);
+		item.setAttribute('title', `${label}: ${v}`);
+		const bar = document.createElement('div');
+		bar.className = 'gym-peak-bar';
+		bar.style.height = `${hPct}%`;
+		bar.setAttribute('data-value', v);
+		bar.setAttribute('data-label', label);
+		item.appendChild(bar);
 		bars.appendChild(item);
 	});
 
