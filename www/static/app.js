@@ -2029,6 +2029,21 @@ function renderGymPeakHistogram(containerId, items, opts = {}) {
 		bar.setAttribute('data-value', v);
 		bar.setAttribute('data-label', label);
 		item.appendChild(bar);
+		
+		// Add touch/click event for mobile
+		let tooltipTimeout = null;
+		item.addEventListener('touchstart', (e) => {
+			e.preventDefault();
+			tooltip.style.opacity = '1';
+			if (tooltipTimeout) clearTimeout(tooltipTimeout);
+			tooltipTimeout = setTimeout(() => {
+				tooltip.style.opacity = '0';
+			}, 2000);
+		});
+		item.addEventListener('touchend', (e) => {
+			e.preventDefault();
+		});
+		
 		bars.appendChild(item);
 	});
 

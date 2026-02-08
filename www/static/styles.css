@@ -4740,7 +4740,8 @@ button,
 	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-.gym-peak-baritem:hover .gym-peak-tooltip {
+.gym-peak-baritem:hover .gym-peak-tooltip,
+.gym-peak-baritem:active .gym-peak-tooltip {
 	opacity: 1;
 }
 
