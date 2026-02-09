@@ -70,6 +70,7 @@ var workoutTimer = null;
 var workoutStartTime = null;
 var reportProblemSelection = null;
 var gymReportsRefreshTimer = null;
+var gymPeakLatestCharts = null;
 // Use var instead of const to prevent duplicate declaration error if script runs twice
 var WORKOUT_DRAFT_KEY = 'currentWorkoutDraft';
 var DEFAULT_SET_COUNT = 3;
@@ -2015,6 +2016,10 @@ function updateGymComparisonLabels(comparisonData, todayCounts) {
 }
 
 function renderGymPeakTimes(charts) {
+	if (charts) {
+		gymPeakLatestCharts = charts;
+	}
+	const activeCharts = gymPeakLatestCharts || {};
 	const containerId = 'gym-dashboard-chart-peak';
 	const el = document.getElementById(containerId);
 	if (!el) return;
@@ -2022,25 +2027,24 @@ function renderGymPeakTimes(charts) {
 	const hourDayWrap = document.getElementById('gym-peak-hour-day-wrap');
 	const hourDaySelect = document.getElementById('gym-peak-hour-day-select');
 	const peakTitleLabel = document.getElementById('gym-peak-title-label');
-	const dayHourMap = charts?.workouts_by_day_hour || {};
-	const currentPeriod = getGymDashboardPeriod();
-	const dayStorageKey = `gym-peak-hour-day:${currentPeriod}`;
+	const dayHourMap = activeCharts?.workouts_by_day_hour || {};
 	const hasAny = (arr) => Array.isArray(arr) && arr.some(x => Number(x?.value || 0) > 0);
+	const getDayStorageKey = () => `gym-peak-hour-day:${getGymDashboardPeriod()}`;
 	const readHourDay = () => {
 		try {
-			const raw = (localStorage.getItem(dayStorageKey) || 'all').toString().trim();
+			const raw = (localStorage.getItem(getDayStorageKey()) || 'all').toString().trim();
 			return raw || 'all';
 		} catch (e) {
 			return 'all';
 		}
 	};
 	const writeHourDay = (value) => {
-		try { localStorage.setItem(dayStorageKey, value || 'all'); } catch (e) { }
+		try { localStorage.setItem(getDayStorageKey(), value || 'all'); } catch (e) { }
 	};
 	const getHoursForSelectedDay = () => {
 		const selectedDay = (hourDaySelect?.value || 'all').toString();
 		if (selectedDay === 'all') {
-			return charts.workouts_by_hour || [];
+			return activeCharts.workouts_by_hour || [];
 		}
 		return Array.isArray(dayHourMap[selectedDay]) ? dayHourMap[selectedDay] : [];
 	};
@@ -2069,12 +2073,7 @@ function renderGymPeakTimes(charts) {
 					try { return (localStorage.getItem('gym-peak-mode') || 'hours').toString(); } catch (e) { return 'hours'; }
 				})();
 				if (currentMode !== 'days') {
-					const selectedHours = getHoursForSelectedDay();
-					if (hasAny(selectedHours)) {
-						renderGymPeakHistogram(containerId, selectedHours, { labelMode: 'hour' });
-					} else {
-						el.innerHTML = `<div class="gym-chart-empty">No data yet for this day</div>`;
-					}
+					renderGymPeakTimes(gymPeakLatestCharts);
 				}
 			});
 			window.addEventListener('resize', syncPeakDaySelectWidth);
@@ -2090,8 +2089,8 @@ function renderGymPeakTimes(charts) {
 		if (mode === 'days') {
 			if (hourDayWrap) hourDayWrap.classList.add('hidden');
 			// Days = weekday buckets only (Mon-Sun)
-			if (hasAny(charts.workouts_by_weekday)) {
-				renderGymPeakHistogram(containerId, charts.workouts_by_weekday, { labelMode: 'weekday' });
+			if (hasAny(activeCharts.workouts_by_weekday)) {
+				renderGymPeakHistogram(containerId, activeCharts.workouts_by_weekday, { labelMode: 'weekday' });
 			} else {
 				el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
 			}
@@ -2099,10 +2098,10 @@ function renderGymPeakTimes(charts) {
 			if (hourDayWrap) hourDayWrap.classList.remove('hidden');
 			// Hours = hour-of-day buckets
 			let hoursData = getHoursForSelectedDay();
-			if (!hasAny(hoursData) && hourDaySelect && hourDaySelect.value !== 'all' && hasAny(charts.workouts_by_hour)) {
+			if (!hasAny(hoursData) && hourDaySelect && hourDaySelect.value !== 'all' && hasAny(activeCharts.workouts_by_hour)) {
 				hourDaySelect.value = 'all';
 				writeHourDay('all');
-				hoursData = charts.workouts_by_hour || [];
+				hoursData = activeCharts.workouts_by_hour || [];
 			}
 			if (hasAny(hoursData)) {
 				renderGymPeakHistogram(containerId, hoursData, { labelMode: 'hour' });
@@ -2120,7 +2119,7 @@ function renderGymPeakTimes(charts) {
 			e.stopPropagation();
 			const mode = (btn.dataset.peak || 'hours').toString();
 			try { localStorage.setItem('gym-peak-mode', mode); } catch (e) { }
-			applyMode(mode);
+			renderGymPeakTimes(gymPeakLatestCharts);
 		});
 	});
 	let mode = 'hours';
