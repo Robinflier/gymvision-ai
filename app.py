@@ -104,6 +104,13 @@ ALLOWED_MUSCLES = {
 	"back", "chest", "shoulders", "biceps", "triceps", "quads", "hamstrings", "calves", "abs", "glutes", "forearms", "cardio",
 }
 
+PROBLEM_REPORT_TYPES = {
+	"broken": "Broken",
+	"damaged": "Damaged",
+	"not_placed_convenient": "Not placed convenient",
+	"very_busy": "Very busy",
+}
+
 # Synonym mapping (lowercase) -> allowed name
 MUSCLE_SYNONYMS: Dict[str, str] = {
 	"lats": "back",
@@ -127,6 +134,11 @@ def normalize_muscles(muscles: List[str]) -> List[str]:
 			# Title-case for display
 			result.append(key.capitalize())
 	return result
+
+
+def normalize_problem_report_type(value: Optional[str]) -> Optional[str]:
+	key = (value or "").strip().lower().replace(" ", "_")
+	return PROBLEM_REPORT_TYPES.get(key)
 
 MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	# Chest
@@ -2237,6 +2249,39 @@ def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = Non
 		return False
 
 
+def _extract_users_list(all_users_response: Any) -> List[Any]:
+	users_list = getattr(all_users_response, "data", None)
+	if users_list is None:
+		users_list = getattr(all_users_response, "users", None)
+	if users_list is None and isinstance(all_users_response, dict):
+		users_list = all_users_response.get("data") or all_users_response.get("users")
+	if users_list is None and isinstance(all_users_response, list):
+		users_list = all_users_response
+	return users_list or []
+
+
+def _find_gym_account_id_by_name(admin_client: Any, gym_name: Optional[str]) -> Optional[str]:
+	target = (gym_name or "").strip().lower()
+	if not target:
+		return None
+	try:
+		all_users = admin_client.auth.admin.list_users()
+		for user in _extract_users_list(all_users):
+			user_id = getattr(user, "id", None) or (user.get("id") if isinstance(user, dict) else None)
+			user_meta = getattr(user, "user_metadata", None)
+			if user_meta is None and isinstance(user, dict):
+				user_meta = user.get("user_metadata") or user.get("raw_user_meta_data")
+			user_meta = user_meta or {}
+			if user_meta.get("is_gym_account") != True:
+				continue
+			candidate = (user_meta.get("gym_name") or "").strip().lower()
+			if candidate and candidate == target:
+				return user_id
+	except Exception as e:
+		print(f"[GYM REPORTS] Failed to resolve gym account by name: {e}")
+	return None
+
+
 @app.route("/api/gym-data", methods=["GET", "OPTIONS"])
 def get_gym_data():
 	"""
@@ -2485,6 +2530,221 @@ def sync_gym_data():
 		return jsonify({"error": f"Failed to sync gym data: {str(e)}"}), 500
 
 
+@app.route("/api/gym/problem-reports", methods=["GET", "POST", "OPTIONS"])
+def gym_problem_reports():
+	"""
+	POST: user submits a problem report for their selected gym.
+	GET: gym account fetches open problem reports for its gym.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Authentication required"}), 401
+
+	access_token = auth_header.replace("Bearer ", "").strip()
+	if not access_token:
+		return jsonify({"error": "Missing access token"}), 401
+
+	SUPABASE_URL = os.getenv("SUPABASE_URL")
+	SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+	if not SUPABASE_URL or not SUPABASE_ANON_KEY or not SUPABASE_SERVICE_ROLE_KEY:
+		return jsonify({"error": "Supabase configuration missing"}), 500
+
+	try:
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+
+		user = user_response.user
+		user_id = user.id
+		user_meta = user.user_metadata or {}
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+		if request.method == "POST":
+			data = request.get_json() or {}
+			exercise_key = (data.get("exercise_key") or "").strip()
+			exercise_display = (data.get("exercise_display") or "").strip()
+			issue_type = normalize_problem_report_type(data.get("issue_type"))
+			note = (data.get("note") or "").strip()
+			gym_name = (data.get("gym_name") or user_meta.get("gym_name") or "").strip()
+			gym_place_id = (data.get("gym_place_id") or user_meta.get("gym_place_id") or "").strip()
+
+			if not exercise_display:
+				return jsonify({"error": "Exercise is required"}), 400
+			if not issue_type:
+				return jsonify({"error": "Invalid issue type"}), 400
+			if len(note) > 120:
+				return jsonify({"error": "Note max length is 120 characters"}), 400
+			if not gym_name:
+				return jsonify({"error": "No gym selected. Set your gym first in Settings."}), 400
+
+			gym_id = None
+			try:
+				analytics_result = admin_client.table("gym_analytics").select("gym_id,gym_name").eq("user_id", user_id).limit(1).execute()
+				if analytics_result.data and len(analytics_result.data) > 0:
+					gym_id = analytics_result.data[0].get("gym_id")
+					if not gym_name:
+						gym_name = (analytics_result.data[0].get("gym_name") or "").strip()
+			except Exception:
+				pass
+
+			if not gym_id:
+				gym_id = _find_gym_account_id_by_name(admin_client, gym_name)
+
+			payload = {
+				"user_id": user_id,
+				"gym_id": gym_id,
+				"gym_name": gym_name,
+				"gym_place_id": gym_place_id or None,
+				"exercise_key": exercise_key or None,
+				"exercise_display": exercise_display,
+				"issue_type": issue_type,
+				"note": note or None,
+				"status": "open",
+				"is_read": False,
+			}
+
+			admin_client.table("gym_problem_reports").insert(payload).execute()
+			return jsonify({"success": True, "message": "Problem report sent"}), 200
+
+		# GET for gym accounts
+		if user_meta.get("is_gym_account") != True:
+			return jsonify({"error": "Only gym accounts can view reports"}), 403
+		if user_meta.get("is_verified") != True:
+			return jsonify({"error": "Gym account not verified"}), 403
+
+		limit_raw = request.args.get("limit", "50")
+		try:
+			limit = max(1, min(200, int(limit_raw)))
+		except Exception:
+			limit = 50
+
+		gym_id = user_id
+		gym_name = (user_meta.get("gym_name") or "").strip()
+		result = admin_client.table("gym_problem_reports") \
+			.select("*") \
+			.eq("status", "open") \
+			.eq("gym_id", gym_id) \
+			.order("created_at", desc=True) \
+			.limit(limit) \
+			.execute()
+
+		reports = result.data or []
+		if not reports and gym_name:
+			fallback = admin_client.table("gym_problem_reports") \
+				.select("*") \
+				.eq("status", "open") \
+				.eq("gym_name", gym_name) \
+				.order("created_at", desc=True) \
+				.limit(limit) \
+				.execute()
+			reports = fallback.data or []
+
+		serialized = []
+		unread_count = 0
+		for row in reports:
+			is_read = row.get("is_read") == True
+			if not is_read:
+				unread_count += 1
+			serialized.append({
+				"id": row.get("id"),
+				"exercise_key": row.get("exercise_key"),
+				"exercise_display": row.get("exercise_display"),
+				"issue_type": row.get("issue_type"),
+				"note": row.get("note"),
+				"status": row.get("status"),
+				"is_read": is_read,
+				"created_at": row.get("created_at"),
+			})
+
+		return jsonify({
+			"success": True,
+			"open_count": len(serialized),
+			"unread_count": unread_count,
+			"reports": serialized
+		}), 200
+
+	except Exception as e:
+		msg = str(e)
+		print(f"[GYM REPORTS] Error: {msg}")
+		import traceback
+		traceback.print_exc()
+		if "gym_problem_reports" in msg:
+			return jsonify({"error": "Problem reports table missing. Run create_gym_problem_reports_table.sql"}), 500
+		return jsonify({"error": f"Failed to process problem reports: {msg}"}), 500
+
+
+@app.route("/api/gym/problem-reports/mark-read", methods=["POST", "OPTIONS"])
+def mark_gym_problem_reports_read():
+	"""Mark one or all open problem reports as read for the current gym account."""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+
+	auth_header = request.headers.get("Authorization")
+	if not auth_header or not auth_header.startswith("Bearer "):
+		return jsonify({"error": "Authentication required"}), 401
+
+	access_token = auth_header.replace("Bearer ", "").strip()
+	if not access_token:
+		return jsonify({"error": "Missing access token"}), 401
+
+	SUPABASE_URL = os.getenv("SUPABASE_URL")
+	SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+	if not SUPABASE_URL or not SUPABASE_ANON_KEY or not SUPABASE_SERVICE_ROLE_KEY:
+		return jsonify({"error": "Supabase configuration missing"}), 500
+
+	try:
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		if not user_response.user:
+			return jsonify({"error": "Invalid token"}), 401
+
+		user = user_response.user
+		user_id = user.id
+		user_meta = user.user_metadata or {}
+		if user_meta.get("is_gym_account") != True or user_meta.get("is_verified") != True:
+			return jsonify({"error": "Only verified gym accounts can perform this action"}), 403
+
+		data = request.get_json() or {}
+		report_id = (data.get("report_id") or "").strip()
+		gym_name = (user_meta.get("gym_name") or "").strip()
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		update_payload = {"is_read": True, "updated_at": datetime.now().isoformat()}
+
+		query = admin_client.table("gym_problem_reports").update(update_payload).eq("status", "open").eq("gym_id", user_id)
+		if report_id:
+			query = query.eq("id", report_id)
+		query.execute()
+
+		# Backwards compatible fallback when older records don't have gym_id populated
+		if gym_name:
+			fallback_query = admin_client.table("gym_problem_reports").update(update_payload).eq("status", "open").eq("gym_name", gym_name)
+			if report_id:
+				fallback_query = fallback_query.eq("id", report_id)
+			fallback_query.execute()
+
+		return jsonify({"success": True}), 200
+	except Exception as e:
+		msg = str(e)
+		print(f"[GYM REPORTS] Mark-read error: {msg}")
+		import traceback
+		traceback.print_exc()
+		if "gym_problem_reports" in msg:
+			return jsonify({"error": "Problem reports table missing. Run create_gym_problem_reports_table.sql"}), 500
+		return jsonify({"error": f"Failed to mark reports as read: {msg}"}), 500
+
+
 @app.route("/api/gym/delete-account", methods=["POST", "OPTIONS"])
 def delete_gym_account():
 	"""
@@ -2507,6 +2767,12 @@ def delete_gym_account():
 		return jsonify({"error": "Missing access token"}), 401
 	
 	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+		if not SUPABASE_URL or not SUPABASE_ANON_KEY or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+
 		# Verify user and get user info
 		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 		user_response = supabase_client.auth.get_user(access_token)
@@ -2903,7 +3169,7 @@ def get_gym_dashboard():
 			users_linked = total_users  # same as total users for this gym_id
 		
 		# Calculate previous period comparisons (for KPI cards)
-		now = datetime.utcnow()
+		now = datetime.now(timezone.utc)
 		comparison_data = {
 			"yesterday": {"users": 0, "workouts": 0, "exercises": 0},
 			"last_week": {"users": 0, "workouts": 0, "exercises": 0},
@@ -3053,7 +3319,7 @@ def get_gym_dashboard():
 				
 				# Charts use period filter (always)
 				if isinstance(lookback_days, int) and lookback_days > 0:
-					chart_start_date = (datetime.utcnow().date() - timedelta(days=lookback_days)).isoformat()
+					chart_start_date = (datetime.now(timezone.utc).date() - timedelta(days=lookback_days)).isoformat()
 				
 				# Statistics use selected_date if provided (cumulative: up to and including that date)
 				if selected_date:
@@ -3349,7 +3615,7 @@ def get_gym_dashboard():
 					print(f"[GYM DASHBOARD] No exercise categories data (total_sets=0)")
 				# Daily time series for line chart (X = days)
 				try:
-					end_d = datetime.utcnow().date()
+					end_d = datetime.now(timezone.utc).date()
 					# Use selected period; for "all" show last 365 days (still "all days" on the x-axis)
 					span_days = lookback_days if isinstance(lookback_days, int) and lookback_days > 0 else 365
 					start_d = end_d - timedelta(days=span_days - 1)
@@ -3370,8 +3636,8 @@ def get_gym_dashboard():
 				
 				# Calculate previous period comparisons for workouts and exercises
 				# For "yesterday" comparison, we need to compare TODAY vs YESTERDAY (not total period)
-				today_date = datetime.utcnow().date().isoformat()
-				yesterday_date = (datetime.utcnow() - timedelta(days=1)).date().isoformat()
+				today_date = datetime.now(timezone.utc).date().isoformat()
+				yesterday_date = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
 				
 				# Get TODAY's workouts and exercises for comparison
 				today_workouts = []
@@ -3434,8 +3700,8 @@ def get_gym_dashboard():
 				
 				# Last week: same period but 7 days ago
 				if lookback_days:
-					last_week_start = (datetime.utcnow() - timedelta(days=lookback_days + 7)).date().isoformat()
-					last_week_end = (datetime.utcnow() - timedelta(days=7)).date().isoformat()
+					last_week_start = (datetime.now(timezone.utc) - timedelta(days=lookback_days + 7)).date().isoformat()
+					last_week_end = (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat()
 					last_week_workouts = [
 						w for w in all_workouts
 						if last_week_start <= w.get("date", "") <= last_week_end
@@ -3447,8 +3713,8 @@ def get_gym_dashboard():
 				
 				# Last month: same period but 30 days ago
 				if lookback_days:
-					last_month_start = (datetime.utcnow() - timedelta(days=lookback_days + 30)).date().isoformat()
-					last_month_end = (datetime.utcnow() - timedelta(days=30)).date().isoformat()
+					last_month_start = (datetime.now(timezone.utc) - timedelta(days=lookback_days + 30)).date().isoformat()
+					last_month_end = (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
 					last_month_workouts = [
 						w for w in all_workouts
 						if last_month_start <= w.get("date", "") <= last_month_end

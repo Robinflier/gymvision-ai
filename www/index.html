@@ -7,7 +7,7 @@
 	<link rel="manifest" href="static/manifest.webmanifest">
 	<meta name="theme-color" content="#0f0f10">
 	<meta name="apple-mobile-web-app-capable" content="yes">
-	<link rel="stylesheet" href="static/styles.css?v=3">
+	<link rel="stylesheet" href="static/styles.css">
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 	<!-- Supabase library - MUST load before app.js -->
@@ -26,7 +26,6 @@
 		// For local testing: use "http://localhost:5004" (iOS Simulator) or "http://YOUR_MAC_IP:5004" (real iPhone)
 		window.BACKEND_URL = "https://gymvision-ai.onrender.com"; // Change to "http://localhost:5004" for local testing
 	</script>
-	<script src="static/app.js?v=3" defer></script>
 	<script>
 		// Comprehensive error handling - prevent app crashes
 		// Also show alerts for critical errors so we can debug
@@ -542,6 +541,18 @@
 							<button type="button" id="settings-gym-clear" class="settings-gym-clear" aria-label="Clear gym" title="Clear">×</button>
 							<div id="gym-autocomplete-dropdown" class="gym-autocomplete-dropdown" style="display: none;"></div>
 						</div>
+						<div class="settings-report-problem-wrap">
+							<button type="button" id="settings-report-problem-btn" class="settings-report-problem-btn">
+								<span class="settings-report-problem-icon" aria-hidden="true">
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+										<path d="M12 3L21 20H3L12 3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+										<path d="M12 9V14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+										<circle cx="12" cy="17.2" r="1.1" fill="currentColor"/>
+									</svg>
+								</span>
+								<span>Report a problem</span>
+							</button>
+						</div>
 					</div>
 				</div>
 				
@@ -775,7 +786,6 @@
 						<option value="glutes">Glutes</option>
 						<option value="calves">Calves</option>
 						<option value="abs">Abs</option>
-						<option value="forearms">Forearms</option>
 					</select>
 				</div>
 				<div class="custom-exercise-actions">
@@ -879,7 +889,10 @@
 			<header class="topbar">
 				<div class="brand brand-logo"><img src="static/logo.png" alt="GymVision" /></div>
 				<div class="icons streak">
-					<button type="button" id="gym-dashboard-logout" class="btn" style="padding:8px 12px;font-size:13px;min-width:auto;">Logout</button>
+					<button type="button" id="gym-dashboard-reports-btn" class="gym-reports-top-btn">
+						Reports
+						<span id="gym-dashboard-reports-badge" class="gym-reports-top-badge hidden">0</span>
+					</button>
 				</div>
 			</header>
 			<div style="padding: 22px;">
@@ -923,18 +936,25 @@
 					</section>
 
 					<section class="card" style="margin:14px 0 0;">
-						<div style="padding:18px 18px 4px;font-weight:800;">
-							<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-								<span>Peak times</span>
-								<div class="gym-mini-toggle" role="tablist" aria-label="Peak times view" style="flex-shrink:0;">
-									<button type="button" class="gym-mini-btn active" data-peak="hours" aria-selected="true">Hours</button>
-									<button type="button" class="gym-mini-btn" data-peak="days" aria-selected="false">Days</button>
+						<div class="gym-peak-header" style="padding:18px 18px 10px;font-weight:800;">
+							<div class="gym-peak-title-stack">
+								<span id="gym-peak-title-label">Peak times</span>
+								<div id="gym-peak-hour-day-wrap" class="gym-peak-hour-day-wrap">
+									<select id="gym-peak-hour-day-select" class="gym-peak-hour-day-select" aria-label="Select day for peak hours">
+										<option value="all">All days</option>
+										<option value="Monday">Monday</option>
+										<option value="Tuesday">Tuesday</option>
+										<option value="Wednesday">Wednesday</option>
+										<option value="Thursday">Thursday</option>
+										<option value="Friday">Friday</option>
+										<option value="Saturday">Saturday</option>
+										<option value="Sunday">Sunday</option>
+									</select>
 								</div>
 							</div>
-							<div style="display:flex;justify-content:flex-start;padding-top:1px;padding-left:6px;">
-								<select id="gym-day-selector" style="display:none;background:#15151a;border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;padding:5px 8px;font-size:11px;font-weight:600;font-family:'Inter',sans-serif;cursor:pointer;white-space:nowrap;max-width:75px;width:auto;appearance:none;-webkit-appearance:none;-moz-appearance:none;background-image:none;">
-									<option value="">All days</option>
-								</select>
+							<div class="gym-mini-toggle" role="tablist" aria-label="Peak times view">
+								<button type="button" class="gym-mini-btn active" data-peak="hours" aria-selected="true">Hours</button>
+								<button type="button" class="gym-mini-btn" data-peak="days" aria-selected="false">Days</button>
 							</div>
 						</div>
 						<div id="gym-dashboard-chart-peak" class="gym-chart"></div>
@@ -968,15 +988,59 @@
 						</div>
 					</section>
 
-					<!-- Delete Account Section - Always visible -->
-					<section class="card" style="margin:14px 0 0;border:1px solid rgba(124,92,255,0.2);">
-						<div style="padding:18px;">
-							<div style="font-weight:800;margin-bottom:12px;color:#7c5cff;">Delete Account</div>
-							<p style="color:#888;font-size:14px;margin-bottom:16px;">Permanently delete your gym account. This action cannot be undone.</p>
-							<button type="button" id="gym-dashboard-delete-account" class="btn" style="background:rgba(124,92,255,0.15);border:1px solid rgba(124,92,255,0.3);color:#7c5cff;width:100%;padding:12px;font-weight:600;">Delete Account</button>
-						</div>
-					</section>
+					<div class="gym-dashboard-account-actions gym-dashboard-account-actions-inline">
+						<button type="button" id="gym-dashboard-logout-secondary" data-gym-logout="true" class="gym-dashboard-action-btn gym-dashboard-action-btn-logout">Logout</button>
+						<button type="button" id="gym-dashboard-delete-account" class="gym-dashboard-action-btn gym-dashboard-action-btn-delete">Delete Account</button>
+					</div>
 				</div>
+			</div>
+		</div>
+
+		<div id="report-problem-modal" class="report-problem-modal hidden">
+			<div class="report-problem-backdrop"></div>
+			<div class="report-problem-content">
+				<div class="report-problem-header">
+					<h3>Report a problem</h3>
+					<button type="button" id="report-problem-close" class="report-problem-close" aria-label="Close">✕</button>
+				</div>
+				<div class="report-problem-body">
+					<div class="report-problem-field">
+						<label for="report-problem-select-exercise">Exercise</label>
+						<button type="button" id="report-problem-select-exercise" class="report-problem-select-btn">Select exercise</button>
+					</div>
+					<div class="report-problem-field">
+						<label for="report-problem-issue">Issue</label>
+						<select id="report-problem-issue" class="report-problem-select">
+							<option value="">Select issue</option>
+							<option value="broken">Broken</option>
+							<option value="damaged">Damaged</option>
+							<option value="not_placed_convenient">Not placed convenient</option>
+							<option value="very_busy">Very busy</option>
+						</select>
+					</div>
+					<div class="report-problem-field">
+						<label for="report-problem-note">Note (optional)</label>
+						<textarea id="report-problem-note" class="report-problem-note" maxlength="120" placeholder="Max 120 characters"></textarea>
+						<div class="report-problem-note-count"><span id="report-problem-note-count">0</span>/120</div>
+					</div>
+				</div>
+				<div class="report-problem-actions">
+					<button type="button" id="report-problem-cancel" class="btn">Cancel</button>
+					<button type="button" id="report-problem-send" class="btn primary">Send</button>
+				</div>
+			</div>
+		</div>
+
+		<div id="gym-reports-modal" class="gym-reports-modal hidden">
+			<div class="gym-reports-backdrop"></div>
+			<div class="gym-reports-content">
+				<div class="gym-reports-header">
+					<h3>Problem reports</h3>
+					<button type="button" id="gym-reports-close" class="gym-reports-close" aria-label="Close">✕</button>
+				</div>
+				<div id="gym-reports-loading" class="gym-reports-loading">Loading reports...</div>
+				<div id="gym-reports-empty" class="gym-reports-empty hidden">No open reports</div>
+				<div id="gym-reports-list" class="gym-reports-list"></div>
 			</div>
 		</div>
 
@@ -1027,7 +1091,7 @@
 			</div>
 		</div>
 	</div>
-
+	
 	<!-- Forgot Password Modal -->
 	<div id="forgot-password-modal" class="forgot-password-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8); z-index: 10000; align-items: center; justify-content: center;">
 		<div class="forgot-password-content" style="background: #1a1a1b; border-radius: 16px; padding: 30px; width: 90%; max-width: 400px; border: 1px solid #333;">
@@ -1133,16 +1197,11 @@
 						
 						const sb = window.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 						
-						// Determine redirect URL - ALWAYS use backend URL for consistency
-						// This ensures the same URL is used in browser and Xcode/app
-						let redirectUrl;
-						// In app context, window.location.origin might be "capacitor://localhost"
-						// So we always use BACKEND_URL which is explicitly set
+					// Determine redirect URL - ALWAYS use backend URL for consistency
+					// This ensures the same URL is used in browser and Xcode/app
+					// and matches exactly what's configured in Supabase redirect URLs
 					const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
-					
-					// Always use the backend URL for consistency - this must match exactly
-					// what's configured in Supabase redirect URLs
-					redirectUrl = `${backendUrl}/reset-password`;
+					const redirectUrl = `${backendUrl}/reset-password`;
 						
 						console.log('[FORGOT PASSWORD] Using redirect URL:', redirectUrl);
 						console.log('[FORGOT PASSWORD] Is native platform:', window.Capacitor && window.Capacitor.isNativePlatform());

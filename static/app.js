@@ -68,6 +68,8 @@ var editingWorkoutId = null;
 var isSavingWorkout = false; // Prevent duplicate saves
 var workoutTimer = null;
 var workoutStartTime = null;
+var reportProblemSelection = null;
+var gymReportsRefreshTimer = null;
 // Use var instead of const to prevent duplicate declaration error if script runs twice
 var WORKOUT_DRAFT_KEY = 'currentWorkoutDraft';
 var DEFAULT_SET_COUNT = 3;
@@ -1352,7 +1354,12 @@ async function showLoginScreen() {
 		clearInterval(workoutTimer);
 		workoutTimer = null;
 	}
+	if (gymReportsRefreshTimer) {
+		clearInterval(gymReportsRefreshTimer);
+		gymReportsRefreshTimer = null;
+	}
 	workoutStartTime = null;
+	reportProblemSelection = null;
 
 	// Reset supabase client
 	supabaseClient = null;
@@ -1545,15 +1552,15 @@ async function showGymDashboardScreen() {
 		gymContent.style.display = '';
 	}
 
-	// Logout button
-	const logoutBtn = document.getElementById('gym-dashboard-logout');
-	if (logoutBtn && !logoutBtn.dataset.bound) {
+	// Logout buttons
+	document.querySelectorAll('[data-gym-logout="true"]').forEach((logoutBtn) => {
+		if (logoutBtn.dataset.bound === 'true') return;
 		logoutBtn.dataset.bound = 'true';
 		logoutBtn.addEventListener('click', async () => {
 			try { if (supabaseClient) await supabaseClient.auth.signOut(); } catch (e) { }
 			showLoginScreen();
 		});
-	}
+	});
 
 	// Delete account button
 	const deleteAccountBtn = document.getElementById('gym-dashboard-delete-account');
@@ -1614,8 +1621,162 @@ async function showGymDashboardScreen() {
 		});
 	}
 
+	// Reports button + modal
+	const reportsBtn = document.getElementById('gym-dashboard-reports-btn');
+	if (reportsBtn && reportsBtn.dataset.bound !== 'true') {
+		reportsBtn.dataset.bound = 'true';
+		reportsBtn.addEventListener('click', () => {
+			openGymReportsModal();
+		});
+	}
+
+	const reportsCloseBtn = document.getElementById('gym-reports-close');
+	if (reportsCloseBtn && reportsCloseBtn.dataset.bound !== 'true') {
+		reportsCloseBtn.dataset.bound = 'true';
+		reportsCloseBtn.addEventListener('click', closeGymReportsModal);
+	}
+	const reportsBackdrop = document.querySelector('#gym-reports-modal .gym-reports-backdrop');
+	if (reportsBackdrop && reportsBackdrop.dataset.bound !== 'true') {
+		reportsBackdrop.dataset.bound = 'true';
+		reportsBackdrop.addEventListener('click', closeGymReportsModal);
+	}
+
 	initGymDashboardPeriodToggle();
 	await loadGymDashboardData();
+	await refreshGymReportsBadge();
+
+	if (gymReportsRefreshTimer) {
+		clearInterval(gymReportsRefreshTimer);
+	}
+	gymReportsRefreshTimer = setInterval(() => {
+		refreshGymReportsBadge();
+	}, 45000);
+}
+
+async function fetchGymProblemReports(limit = 50) {
+	if (!supabaseClient) await initSupabase();
+	if (!supabaseClient) throw new Error('No session');
+	const { data: { session } } = await supabaseClient.auth.getSession();
+	if (!session) throw new Error('No session');
+	const apiUrl = getApiUrl(`/api/gym/problem-reports?limit=${encodeURIComponent(limit)}`);
+	const response = await fetch(apiUrl, {
+		headers: { 'Authorization': `Bearer ${session.access_token}` }
+	});
+	const data = await response.json().catch(() => ({}));
+	if (!response.ok) throw new Error(data.error || 'Failed to load reports');
+	return data;
+}
+
+function renderGymReportsList(reports) {
+	const listEl = document.getElementById('gym-reports-list');
+	const emptyEl = document.getElementById('gym-reports-empty');
+	if (!listEl) return;
+
+	listEl.innerHTML = '';
+	const safeReports = Array.isArray(reports) ? reports : [];
+
+	if (!safeReports.length) {
+		if (emptyEl) emptyEl.classList.remove('hidden');
+		return;
+	}
+	if (emptyEl) emptyEl.classList.add('hidden');
+
+	safeReports.forEach((report) => {
+		const item = document.createElement('div');
+		item.className = 'gym-report-item';
+
+		let createdText = '';
+		try {
+			const d = new Date(report.created_at);
+			createdText = d.toLocaleString();
+		} catch (e) {
+			createdText = report.created_at || '';
+		}
+
+		item.innerHTML = `
+			<div class="gym-report-item-top">
+				<div class="gym-report-exercise">${report.exercise_display || 'Exercise'}</div>
+				<div class="gym-report-issue">${report.issue_type || ''}</div>
+			</div>
+			${report.note ? `<div class="gym-report-note">${report.note}</div>` : ''}
+			<div class="gym-report-time">${createdText}</div>
+		`;
+		listEl.appendChild(item);
+	});
+}
+
+async function markGymReportsRead() {
+	if (!supabaseClient) await initSupabase();
+	if (!supabaseClient) return;
+	const { data: { session } } = await supabaseClient.auth.getSession();
+	if (!session) return;
+	try {
+		const apiUrl = getApiUrl('/api/gym/problem-reports/mark-read');
+		await fetch(apiUrl, {
+			method: 'POST',
+			headers: {
+				'Authorization': `Bearer ${session.access_token}`,
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({})
+		});
+	} catch (e) {
+		console.error('[GYM REPORTS] Mark read failed:', e);
+	}
+}
+
+async function refreshGymReportsBadge() {
+	const badgeEl = document.getElementById('gym-dashboard-reports-badge');
+	if (!badgeEl) return;
+	try {
+		const data = await fetchGymProblemReports(20);
+		const unread = Number(data.unread_count || 0);
+		if (unread > 0) {
+			badgeEl.textContent = String(unread);
+			badgeEl.classList.remove('hidden');
+		} else {
+			badgeEl.textContent = '0';
+			badgeEl.classList.add('hidden');
+		}
+	} catch (e) {
+		badgeEl.classList.add('hidden');
+	}
+}
+
+async function openGymReportsModal() {
+	const modal = document.getElementById('gym-reports-modal');
+	const loadingEl = document.getElementById('gym-reports-loading');
+	const emptyEl = document.getElementById('gym-reports-empty');
+	const listEl = document.getElementById('gym-reports-list');
+	if (!modal) return;
+
+	modal.classList.remove('hidden');
+	document.body.classList.add('modal-open');
+	if (loadingEl) loadingEl.classList.remove('hidden');
+	if (emptyEl) emptyEl.classList.add('hidden');
+	if (listEl) listEl.innerHTML = '';
+
+	try {
+		const data = await fetchGymProblemReports(100);
+		renderGymReportsList(data.reports || []);
+		await markGymReportsRead();
+		await refreshGymReportsBadge();
+	} catch (e) {
+		console.error('[GYM REPORTS] Open modal failed:', e);
+		if (emptyEl) {
+			emptyEl.textContent = e?.message || 'Failed to load reports';
+			emptyEl.classList.remove('hidden');
+		}
+	} finally {
+		if (loadingEl) loadingEl.classList.add('hidden');
+	}
+}
+
+function closeGymReportsModal() {
+	const modal = document.getElementById('gym-reports-modal');
+	if (!modal) return;
+	modal.classList.add('hidden');
+	document.body.classList.remove('modal-open');
 }
 
 // Use var instead of const to prevent duplicate declaration error if script runs twice
@@ -1851,7 +2012,65 @@ function renderGymPeakTimes(charts) {
 	const el = document.getElementById(containerId);
 	if (!el) return;
 	const buttons = document.querySelectorAll('.gym-mini-btn[data-peak]');
+	const hourDayWrap = document.getElementById('gym-peak-hour-day-wrap');
+	const hourDaySelect = document.getElementById('gym-peak-hour-day-select');
+	const peakTitleLabel = document.getElementById('gym-peak-title-label');
+	const dayHourMap = charts?.workouts_by_day_hour || {};
 	const hasAny = (arr) => Array.isArray(arr) && arr.some(x => Number(x?.value || 0) > 0);
+	const readHourDay = () => {
+		try {
+			const raw = (localStorage.getItem('gym-peak-hour-day') || 'all').toString().trim();
+			return raw || 'all';
+		} catch (e) {
+			return 'all';
+		}
+	};
+	const writeHourDay = (value) => {
+		try { localStorage.setItem('gym-peak-hour-day', value || 'all'); } catch (e) { }
+	};
+	const getHoursForSelectedDay = () => {
+		const selectedDay = (hourDaySelect?.value || 'all').toString();
+		if (selectedDay === 'all') {
+			return charts.workouts_by_hour || [];
+		}
+		return Array.isArray(dayHourMap[selectedDay]) ? dayHourMap[selectedDay] : [];
+	};
+
+	const syncPeakDaySelectWidth = () => {
+		if (!hourDaySelect || !peakTitleLabel) return;
+		const titleWidth = Math.ceil(peakTitleLabel.getBoundingClientRect().width || 0);
+		if (!titleWidth) return;
+		hourDaySelect.style.width = `${titleWidth}px`;
+		hourDaySelect.style.minWidth = `${titleWidth}px`;
+		hourDaySelect.style.maxWidth = `${titleWidth}px`;
+	};
+
+	if (hourDaySelect) {
+		const persistedDay = readHourDay();
+		const allowedValues = new Set(['all', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
+		const safeDay = allowedValues.has(persistedDay) ? persistedDay : 'all';
+		hourDaySelect.value = safeDay;
+		syncPeakDaySelectWidth();
+		if (hourDaySelect.dataset.bound !== 'true') {
+			hourDaySelect.dataset.bound = 'true';
+			hourDaySelect.addEventListener('change', () => {
+				writeHourDay(hourDaySelect.value || 'all');
+				const currentMode = (() => {
+					try { return (localStorage.getItem('gym-peak-mode') || 'hours').toString(); } catch (e) { return 'hours'; }
+				})();
+				if (currentMode !== 'days') {
+					const selectedHours = getHoursForSelectedDay();
+					if (hasAny(selectedHours)) {
+						renderGymPeakHistogram(containerId, selectedHours, { labelMode: 'hour' });
+					} else {
+						el.innerHTML = `<div class="gym-chart-empty">No data yet for this day</div>`;
+					}
+				}
+			});
+			window.addEventListener('resize', syncPeakDaySelectWidth);
+		}
+	}
+
 	const applyMode = (mode) => {
 		buttons.forEach(b => {
 			const active = (b.dataset.peak === mode);
@@ -1859,6 +2078,7 @@ function renderGymPeakTimes(charts) {
 			b.setAttribute('aria-selected', active ? 'true' : 'false');
 		});
 		if (mode === 'days') {
+			if (hourDayWrap) hourDayWrap.classList.add('hidden');
 			// Days = weekday buckets only (Mon-Sun)
 			if (hasAny(charts.workouts_by_weekday)) {
 				renderGymPeakHistogram(containerId, charts.workouts_by_weekday, { labelMode: 'weekday' });
@@ -1866,11 +2086,13 @@ function renderGymPeakTimes(charts) {
 				el.innerHTML = `<div class="gym-chart-empty">No data yet</div>`;
 			}
 		} else {
+			if (hourDayWrap) hourDayWrap.classList.remove('hidden');
 			// Hours = hour-of-day buckets
-			if (hasAny(charts.workouts_by_hour)) {
-				renderGymPeakHistogram(containerId, charts.workouts_by_hour, { labelMode: 'hour' });
+			const hoursData = getHoursForSelectedDay();
+			if (hasAny(hoursData)) {
+				renderGymPeakHistogram(containerId, hoursData, { labelMode: 'hour' });
 			} else {
-				el.innerHTML = `<div class="gym-chart-empty">No data yet (deploy backend update for Hours)</div>`;
+				el.innerHTML = `<div class="gym-chart-empty">No data yet for this day</div>`;
 			}
 		}
 	};
@@ -1948,12 +2170,41 @@ function renderGymPeakHistogram(containerId, items, opts = {}) {
 		bars.classList.add('hour-mode');
 	}
 
-	list.forEach((x, i) => {
+	const barItems = [];
+	const tooltip = document.createElement('div');
+	tooltip.className = 'gym-peak-tooltip';
+	const hideTooltip = () => {
+		barItems.forEach((node) => node.classList.remove('active'));
+		tooltip.classList.remove('show');
+	};
+	const showTooltip = (item, label, value) => {
+		barItems.forEach((node) => node.classList.remove('active'));
+		item.classList.add('active');
+		const itemRect = item.getBoundingClientRect();
+		const plotRect = plot.getBoundingClientRect();
+		const leftPx = Math.max(18, Math.min(plot.clientWidth - 18, (itemRect.left - plotRect.left) + (itemRect.width / 2)));
+		tooltip.style.left = `${leftPx}px`;
+		tooltip.replaceChildren();
+		const title = document.createElement('div');
+		title.textContent = label;
+		const details = document.createElement('div');
+		details.textContent = `${value} workout${value === 1 ? '' : 's'}`;
+		tooltip.appendChild(title);
+		tooltip.appendChild(details);
+		tooltip.classList.add('show');
+	};
+
+	list.forEach((x) => {
 		const v = Number(x?.value || 0);
 		const hPct = Math.max(2, Math.round((v / max) * 100));
 		const item = document.createElement('div');
 		item.className = 'gym-peak-baritem';
+		item.setAttribute('role', 'button');
+		item.tabIndex = 0;
+		item.dataset.value = String(v);
+		item.dataset.label = (x?.label || '').toString();
 		item.innerHTML = `<div class="gym-peak-bar" style="height:${hPct}%"></div>`;
+		barItems.push(item);
 		bars.appendChild(item);
 	});
 
@@ -1970,7 +2221,40 @@ function renderGymPeakHistogram(containerId, items, opts = {}) {
 	}
 
 	plot.appendChild(bars);
+	plot.appendChild(tooltip);
 	plot.appendChild(xAxis);
+
+	bars.addEventListener('click', (e) => {
+		const item = e.target.closest('.gym-peak-baritem');
+		if (!item) {
+			hideTooltip();
+			return;
+		}
+		const label = item.dataset.label || '';
+		const value = Number(item.dataset.value || 0);
+		if (item.classList.contains('active') && tooltip.classList.contains('show')) {
+			hideTooltip();
+			return;
+		}
+		showTooltip(item, label, value);
+	});
+
+	bars.addEventListener('keydown', (e) => {
+		const item = e.target.closest('.gym-peak-baritem');
+		if (!item) return;
+		if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault();
+			const label = item.dataset.label || '';
+			const value = Number(item.dataset.value || 0);
+			showTooltip(item, label, value);
+		}
+	});
+
+	plot.addEventListener('click', (e) => {
+		if (!e.target.closest('.gym-peak-baritem')) {
+			hideTooltip();
+		}
+	});
 
 	wrap.appendChild(y);
 	wrap.appendChild(plot);
@@ -3159,6 +3443,7 @@ function initExerciseSelector() {
 		closeBtn.addEventListener('click', () => {
 			if (selector) selector.classList.add('hidden');
 			document.body.classList.remove('selector-open');
+			window.exerciseSelectorContext = null;
 		});
 	}
 
@@ -3167,6 +3452,7 @@ function initExerciseSelector() {
 			if (e.target === selector) {
 				selector.classList.add('hidden');
 				document.body.classList.remove('selector-open');
+				window.exerciseSelectorContext = null;
 			}
 		});
 	}
@@ -3508,8 +3794,8 @@ function initExerciseSelector() {
 
 				const refinementOptions = refinements[labelLower];
 
-				// If it's a generic detection, show refinements (for both workout builder and insights)
-				if (refinementOptions && (currentTab === 'workout-builder' || ctx === 'insights')) {
+				// If it's a generic detection, show refinements (for workout builder, insights, and problem reports)
+				if (refinementOptions && (currentTab === 'workout-builder' || ctx === 'insights' || ctx === 'report_problem')) {
 					showExerciseRefinementsInSelector(refinementOptions, selector);
 					return;
 				}
@@ -3518,6 +3804,8 @@ function initExerciseSelector() {
 				if (ctx === 'insights') {
 					// Use insights view for history
 					handleExerciseInsightsForName(ex.display || ex.key);
+				} else if (ctx === 'report_problem') {
+					setReportProblemExercise(ex);
 				} else if (currentTab === 'workout-builder') {
 					// Add to workout
 					addExerciseToWorkout(ex);
@@ -3699,6 +3987,12 @@ function showExerciseRefinementsInSelector(refinementOptions, selectorEl) {
 			if (ctx === 'insights') {
 				// Use insights view for history
 				handleExerciseInsightsForName(exerciseName);
+			} else if (ctx === 'report_problem') {
+				const exerciseToStore = exercise || {
+					key: exerciseName.toLowerCase().replace(/\s+/g, '_'),
+					display: exerciseName
+				};
+				setReportProblemExercise(exerciseToStore);
 			} else if (currentTab === 'workout-builder') {
 				// Get full exercise info
 				let exerciseData = exercise;
@@ -3844,8 +4138,8 @@ async function classifyForExerciseSelector(file, predictionsContainer, selectorE
 
 				const refinementOptions = refinements[labelLower];
 
-				// If it's a generic detection, show refinements (for both workout builder and insights)
-				if (refinementOptions && (currentTab === 'workout-builder' || ctx === 'insights')) {
+				// If it's a generic detection, show refinements (for workout builder, insights, and problem reports)
+				if (refinementOptions && (currentTab === 'workout-builder' || ctx === 'insights' || ctx === 'report_problem')) {
 					showExerciseRefinementsInSelector(refinementOptions, selectorEl);
 					return;
 				}
@@ -3853,6 +4147,11 @@ async function classifyForExerciseSelector(file, predictionsContainer, selectorE
 				// Otherwise, proceed with normal selection
 				if (ctx === 'insights') {
 					handleExerciseInsightsForName(label);
+				} else if (ctx === 'report_problem') {
+					setReportProblemExercise({
+						key: pred.key || label.toLowerCase().replace(/\s+/g, '_'),
+						display: label
+					});
 				} else if (currentTab === 'workout-builder') {
 					const exercise = {
 						key: pred.key || label.toLowerCase(),
@@ -7389,6 +7688,7 @@ async function handleLogoutClick(e) {
 function initSettings() {
 	initLogout(); // Initialize logout button
 	initSettingsToggles();
+	initReportProblemModal();
 	initDeleteAccount();
 }
 
@@ -7874,6 +8174,186 @@ async function loadDataConsent() {
 	}
 
 	// Weight unit is always kg - no toggle needed
+}
+
+function setReportProblemExercise(exercise) {
+	const btn = document.getElementById('report-problem-select-exercise');
+	if (!exercise || !(exercise.display || exercise.key)) {
+		reportProblemSelection = null;
+		if (btn) btn.textContent = 'Select exercise';
+		return;
+	}
+
+	reportProblemSelection = {
+		key: exercise.key || '',
+		display: exercise.display || exercise.key || ''
+	};
+	if (btn) btn.textContent = reportProblemSelection.display;
+}
+
+function closeReportProblemModal() {
+	const modal = document.getElementById('report-problem-modal');
+	if (!modal) return;
+	modal.classList.add('hidden');
+	document.body.classList.remove('modal-open');
+	window.exerciseSelectorContext = null;
+}
+
+function openReportProblemModal() {
+	const modal = document.getElementById('report-problem-modal');
+	if (!modal) return;
+	modal.classList.remove('hidden');
+	document.body.classList.add('modal-open');
+}
+
+async function submitProblemReport() {
+	const issueEl = document.getElementById('report-problem-issue');
+	const noteEl = document.getElementById('report-problem-note');
+	const sendBtn = document.getElementById('report-problem-send');
+
+	const issueType = (issueEl?.value || '').trim();
+	const note = (noteEl?.value || '').trim();
+
+	if (!reportProblemSelection || !reportProblemSelection.display) {
+		alert('Please select an exercise');
+		return;
+	}
+	if (!issueType) {
+		alert('Please select an issue');
+		return;
+	}
+	if (note.length > 120) {
+		alert('Note can be max 120 characters');
+		return;
+	}
+
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		alert('Please log in first');
+		return;
+	}
+
+	const { data: { session } } = await supabaseClient.auth.getSession();
+	if (!session) {
+		alert('Please log in first');
+		return;
+	}
+
+	const gymName = (localStorage.getItem('user-gym-name') || '').trim();
+	const gymPlaceId = (localStorage.getItem('user-gym-place-id') || '').trim();
+	if (!gymName) {
+		alert('Please set your gym in Settings first');
+		return;
+	}
+
+	if (sendBtn) {
+		sendBtn.disabled = true;
+		sendBtn.textContent = 'Sending...';
+	}
+
+	try {
+		const apiUrl = getApiUrl('/api/gym/problem-reports');
+		const response = await fetch(apiUrl, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${session.access_token}`
+			},
+			body: JSON.stringify({
+				exercise_key: reportProblemSelection.key || null,
+				exercise_display: reportProblemSelection.display,
+				issue_type: issueType,
+				note: note || null,
+				gym_name: gymName,
+				gym_place_id: gymPlaceId || null
+			})
+		});
+		const data = await response.json().catch(() => ({}));
+		if (!response.ok) {
+			throw new Error(data.error || 'Failed to send report');
+		}
+
+		alert('Problem report sent');
+		setReportProblemExercise(null);
+		if (issueEl) issueEl.value = '';
+		if (noteEl) noteEl.value = '';
+		const countEl = document.getElementById('report-problem-note-count');
+		if (countEl) countEl.textContent = '0';
+		closeReportProblemModal();
+	} catch (e) {
+		console.error('[REPORT PROBLEM] Send failed:', e);
+		alert(e?.message || 'Failed to send report');
+	} finally {
+		if (sendBtn) {
+			sendBtn.disabled = false;
+			sendBtn.textContent = 'Send';
+		}
+	}
+}
+
+function initReportProblemModal() {
+	const openBtn = document.getElementById('settings-report-problem-btn');
+	const modal = document.getElementById('report-problem-modal');
+	const closeBtn = document.getElementById('report-problem-close');
+	const cancelBtn = document.getElementById('report-problem-cancel');
+	const backdrop = modal?.querySelector('.report-problem-backdrop');
+	const selectExerciseBtn = document.getElementById('report-problem-select-exercise');
+	const sendBtn = document.getElementById('report-problem-send');
+	const noteEl = document.getElementById('report-problem-note');
+	const noteCountEl = document.getElementById('report-problem-note-count');
+
+	if (openBtn && openBtn.dataset.bound !== 'true') {
+		openBtn.dataset.bound = 'true';
+		openBtn.addEventListener('click', async () => {
+			if (!allExercises || allExercises.length === 0) {
+				try { await loadExercises(); } catch (e) { }
+			}
+			setReportProblemExercise(null);
+			const issueEl = document.getElementById('report-problem-issue');
+			if (issueEl) issueEl.value = '';
+			if (noteEl) noteEl.value = '';
+			if (noteCountEl) noteCountEl.textContent = '0';
+			openReportProblemModal();
+		});
+	}
+
+	if (closeBtn && closeBtn.dataset.bound !== 'true') {
+		closeBtn.dataset.bound = 'true';
+		closeBtn.addEventListener('click', closeReportProblemModal);
+	}
+	if (cancelBtn && cancelBtn.dataset.bound !== 'true') {
+		cancelBtn.dataset.bound = 'true';
+		cancelBtn.addEventListener('click', closeReportProblemModal);
+	}
+	if (backdrop && backdrop.dataset.bound !== 'true') {
+		backdrop.dataset.bound = 'true';
+		backdrop.addEventListener('click', closeReportProblemModal);
+	}
+
+	if (selectExerciseBtn && selectExerciseBtn.dataset.bound !== 'true') {
+		selectExerciseBtn.dataset.bound = 'true';
+		selectExerciseBtn.addEventListener('click', () => {
+			window.exerciseSelectorContext = 'report_problem';
+			openExerciseSelector();
+		});
+	}
+
+	if (sendBtn && sendBtn.dataset.bound !== 'true') {
+		sendBtn.dataset.bound = 'true';
+		sendBtn.addEventListener('click', submitProblemReport);
+	}
+
+	if (noteEl && noteEl.dataset.bound !== 'true') {
+		noteEl.dataset.bound = 'true';
+		noteEl.addEventListener('input', () => {
+			if (noteEl.value.length > 120) {
+				noteEl.value = noteEl.value.slice(0, 120);
+			}
+			if (noteCountEl) noteCountEl.textContent = String(noteEl.value.length);
+		});
+	}
 }
 
 // ========== REST TIMER ==========
@@ -9895,4 +10375,3 @@ function saveExerciseNotes(exerciseKey, exerciseIndex) {
 
 window.openExerciseSelector = openExerciseSelector;
 window.addExerciseToWorkout = addExerciseToWorkout;
-
