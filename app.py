@@ -3473,8 +3473,9 @@ def get_gym_dashboard():
 					if dti:
 						hour = int(dti.hour)
 						hour_counts[hour] = hour_counts.get(hour, 0) + 1
-						# Also track per weekday (Monday, Tuesday, etc.)
-						weekday_name = dti.strftime("%A")  # Full weekday name (Monday, Tuesday, etc.)
+						# Track per weekday using workout.date (dt) to stay consistent with workouts_by_weekday
+						# This avoids mismatches where timestamp timezone shifts weekday differently.
+						weekday_name = dt.strftime("%A") if dt else dti.strftime("%A")
 						if weekday_name in weekday_hour_counts:
 							weekday_hour_counts[weekday_name][hour] = weekday_hour_counts[weekday_name].get(hour, 0) + 1
 

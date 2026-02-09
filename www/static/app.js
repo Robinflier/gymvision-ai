@@ -1781,6 +1781,7 @@ function closeGymReportsModal() {
 
 // Use var instead of const to prevent duplicate declaration error if script runs twice
 var GYM_DASHBOARD_PERIOD_KEY = 'gym-dashboard-period';
+var gymDashboardLoadRequestId = 0;
 
 function getGymDashboardPeriod() {
 	const v = (localStorage.getItem(GYM_DASHBOARD_PERIOD_KEY) || '').toString().toLowerCase().trim();
@@ -1819,10 +1820,13 @@ function initGymDashboardPeriodToggle() {
 }
 
 async function loadGymDashboardData() {
+	const requestId = ++gymDashboardLoadRequestId;
 	const errorEl = document.getElementById('gym-dashboard-error');
 	const loadingEl = document.getElementById('gym-dashboard-loading');
 	const panelsEl = document.getElementById('gym-dashboard-panels');
 	const titleEl = document.getElementById('gym-dashboard-title');
+	const period = getGymDashboardPeriod();
+	updateGymDashboardPeriodUI();
 
 	if (errorEl) {
 		errorEl.classList.remove('show');
@@ -1834,6 +1838,7 @@ async function loadGymDashboardData() {
 	try {
 		if (!supabaseClient) await initSupabase();
 		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (requestId !== gymDashboardLoadRequestId) return;
 		if (!session) {
 			showLoginScreen();
 			return;
@@ -1864,7 +1869,7 @@ async function loadGymDashboardData() {
 		}
 
 		const qs = new URLSearchParams();
-		qs.set('period', getGymDashboardPeriod());
+		qs.set('period', period);
 		if (selectedDate) {
 			qs.set('date', selectedDate);
 		}
@@ -1873,6 +1878,7 @@ async function loadGymDashboardData() {
 			headers: { 'Authorization': `Bearer ${session.access_token}` }
 		});
 		const data = await res.json().catch(() => ({}));
+		if (requestId !== gymDashboardLoadRequestId) return;
 		if (!res.ok) throw new Error(data?.error || 'Failed to load dashboard');
 
 		const stats = data.statistics || {};
@@ -1902,6 +1908,7 @@ async function loadGymDashboardData() {
 		if (loadingEl) loadingEl.style.display = 'none';
 		if (panelsEl) panelsEl.classList.remove('hidden');
 	} catch (e) {
+		if (requestId !== gymDashboardLoadRequestId) return;
 		if (loadingEl) loadingEl.style.display = 'none';
 		if (errorEl) {
 			errorEl.textContent = e?.message || 'Failed to load dashboard';
@@ -2016,17 +2023,19 @@ function renderGymPeakTimes(charts) {
 	const hourDaySelect = document.getElementById('gym-peak-hour-day-select');
 	const peakTitleLabel = document.getElementById('gym-peak-title-label');
 	const dayHourMap = charts?.workouts_by_day_hour || {};
+	const currentPeriod = getGymDashboardPeriod();
+	const dayStorageKey = `gym-peak-hour-day:${currentPeriod}`;
 	const hasAny = (arr) => Array.isArray(arr) && arr.some(x => Number(x?.value || 0) > 0);
 	const readHourDay = () => {
 		try {
-			const raw = (localStorage.getItem('gym-peak-hour-day') || 'all').toString().trim();
+			const raw = (localStorage.getItem(dayStorageKey) || 'all').toString().trim();
 			return raw || 'all';
 		} catch (e) {
 			return 'all';
 		}
 	};
 	const writeHourDay = (value) => {
-		try { localStorage.setItem('gym-peak-hour-day', value || 'all'); } catch (e) { }
+		try { localStorage.setItem(dayStorageKey, value || 'all'); } catch (e) { }
 	};
 	const getHoursForSelectedDay = () => {
 		const selectedDay = (hourDaySelect?.value || 'all').toString();
@@ -2035,11 +2044,11 @@ function renderGymPeakTimes(charts) {
 		}
 		return Array.isArray(dayHourMap[selectedDay]) ? dayHourMap[selectedDay] : [];
 	};
-
 	const syncPeakDaySelectWidth = () => {
-		if (!hourDaySelect || !peakTitleLabel) return;
+		if (!hourDaySelect || !hourDayWrap || !peakTitleLabel) return;
 		const titleWidth = Math.ceil(peakTitleLabel.getBoundingClientRect().width || 0);
 		if (!titleWidth) return;
+		hourDayWrap.style.width = `${titleWidth}px`;
 		hourDaySelect.style.width = `${titleWidth}px`;
 		hourDaySelect.style.minWidth = `${titleWidth}px`;
 		hourDaySelect.style.maxWidth = `${titleWidth}px`;
@@ -2051,6 +2060,7 @@ function renderGymPeakTimes(charts) {
 		const safeDay = allowedValues.has(persistedDay) ? persistedDay : 'all';
 		hourDaySelect.value = safeDay;
 		syncPeakDaySelectWidth();
+		setTimeout(syncPeakDaySelectWidth, 0);
 		if (hourDaySelect.dataset.bound !== 'true') {
 			hourDaySelect.dataset.bound = 'true';
 			hourDaySelect.addEventListener('change', () => {
@@ -2088,7 +2098,12 @@ function renderGymPeakTimes(charts) {
 		} else {
 			if (hourDayWrap) hourDayWrap.classList.remove('hidden');
 			// Hours = hour-of-day buckets
-			const hoursData = getHoursForSelectedDay();
+			let hoursData = getHoursForSelectedDay();
+			if (!hasAny(hoursData) && hourDaySelect && hourDaySelect.value !== 'all' && hasAny(charts.workouts_by_hour)) {
+				hourDaySelect.value = 'all';
+				writeHourDay('all');
+				hoursData = charts.workouts_by_hour || [];
+			}
 			if (hasAny(hoursData)) {
 				renderGymPeakHistogram(containerId, hoursData, { labelMode: 'hour' });
 			} else {

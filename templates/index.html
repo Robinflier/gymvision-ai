@@ -543,14 +543,7 @@
 						</div>
 						<div class="settings-report-problem-wrap">
 							<button type="button" id="settings-report-problem-btn" class="settings-report-problem-btn">
-								<span class="settings-report-problem-icon" aria-hidden="true">
-									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-										<path d="M12 3L21 20H3L12 3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-										<path d="M12 9V14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-										<circle cx="12" cy="17.2" r="1.1" fill="currentColor"/>
-									</svg>
-								</span>
-								<span>Report a problem</span>
+								<span class="settings-report-problem-label">Report a problem</span>
 							</button>
 						</div>
 					</div>
@@ -937,24 +930,24 @@
 
 					<section class="card" style="margin:14px 0 0;">
 						<div class="gym-peak-header" style="padding:18px 18px 10px;font-weight:800;">
-							<div class="gym-peak-title-stack">
+							<div class="gym-peak-title-row">
 								<span id="gym-peak-title-label">Peak times</span>
-								<div id="gym-peak-hour-day-wrap" class="gym-peak-hour-day-wrap">
-									<select id="gym-peak-hour-day-select" class="gym-peak-hour-day-select" aria-label="Select day for peak hours">
-										<option value="all">All days</option>
-										<option value="Monday">Monday</option>
-										<option value="Tuesday">Tuesday</option>
-										<option value="Wednesday">Wednesday</option>
-										<option value="Thursday">Thursday</option>
-										<option value="Friday">Friday</option>
-										<option value="Saturday">Saturday</option>
-										<option value="Sunday">Sunday</option>
-									</select>
+								<div class="gym-mini-toggle" role="tablist" aria-label="Peak times view">
+									<button type="button" class="gym-mini-btn active" data-peak="hours" aria-selected="true">Hours</button>
+									<button type="button" class="gym-mini-btn" data-peak="days" aria-selected="false">Days</button>
 								</div>
 							</div>
-							<div class="gym-mini-toggle" role="tablist" aria-label="Peak times view">
-								<button type="button" class="gym-mini-btn active" data-peak="hours" aria-selected="true">Hours</button>
-								<button type="button" class="gym-mini-btn" data-peak="days" aria-selected="false">Days</button>
+							<div id="gym-peak-hour-day-wrap" class="gym-peak-hour-day-wrap">
+								<select id="gym-peak-hour-day-select" class="gym-peak-hour-day-select" aria-label="Select day for peak hours">
+									<option value="all">All days</option>
+									<option value="Monday">Monday</option>
+									<option value="Tuesday">Tuesday</option>
+									<option value="Wednesday">Wednesday</option>
+									<option value="Thursday">Thursday</option>
+									<option value="Friday">Friday</option>
+									<option value="Saturday">Saturday</option>
+									<option value="Sunday">Sunday</option>
+								</select>
 							</div>
 						</div>
 						<div id="gym-dashboard-chart-peak" class="gym-chart"></div>
