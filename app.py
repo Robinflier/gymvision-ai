@@ -3089,12 +3089,15 @@ def get_gym_dashboard():
 		
 		# Get date parameter (YYYY-MM-DD format) - if provided, show data for that specific date
 		selected_date = request.args.get("date")
+		selected_date_obj = None
 		if selected_date:
 			try:
 				# Validate date format
-				datetime.fromisoformat(selected_date)
+				selected_date_obj = datetime.fromisoformat(selected_date).date()
+				selected_date = selected_date_obj.isoformat()
 			except:
 				selected_date = None
+				selected_date_obj = None
 		
 		# Get analytics data for this gym
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
@@ -3125,7 +3128,6 @@ def get_gym_dashboard():
 		# If a specific date is selected, only count users that were linked to the gym up to and including that date
 		if selected_date:
 			try:
-				selected_date_obj = datetime.fromisoformat(selected_date).date()
 				# Make timezone-aware (UTC) to match linked_at
 				selected_date_end = datetime.combine(selected_date_obj, datetime.max.time()).replace(tzinfo=timezone.utc)
 				total_users = 0
@@ -3312,14 +3314,18 @@ def get_gym_dashboard():
 			consent_user_ids = list(dict.fromkeys(consent_user_ids))  # de-dupe keep order
 
 			if consent_user_ids:
-				# For charts: always get all data (no date filter)
+				# For charts: always anchor period to selected_date when present, otherwise today (UTC)
 				# For statistics: filter by selected_date if provided (cumulative up to that date)
 				chart_start_date = None
+				chart_end_date = None
 				stats_end_date = None
+				anchor_date = selected_date_obj if selected_date_obj else datetime.now(timezone.utc).date()
 				
-				# Charts use period filter (always)
+				# Charts always end at anchor_date
+				chart_end_date = anchor_date.isoformat()
+				# Charts use period filter (week/month/year). "all" keeps open start.
 				if isinstance(lookback_days, int) and lookback_days > 0:
-					chart_start_date = (datetime.now(timezone.utc).date() - timedelta(days=lookback_days)).isoformat()
+					chart_start_date = (anchor_date - timedelta(days=lookback_days - 1)).isoformat()
 				
 				# Statistics use selected_date if provided (cumulative: up to and including that date)
 				if selected_date:
@@ -3339,6 +3345,8 @@ def get_gym_dashboard():
 						# Charts: use period filter
 						if chart_start_date:
 							q = q.gte("date", chart_start_date)
+						if chart_end_date:
+							q = q.lte("date", chart_end_date)
 						res = q.execute()
 					except Exception as e:
 						# If gym_name column doesn't exist, we can't do per-workout gym analytics reliably.
@@ -3349,6 +3357,8 @@ def get_gym_dashboard():
 								.in_("user_id", chunk)
 							if chart_start_date:
 								q = q.gte("date", chart_start_date)
+							if chart_end_date:
+								q = q.lte("date", chart_end_date)
 							res = q.execute()
 						else:
 							raise
