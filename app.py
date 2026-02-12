@@ -3411,6 +3411,8 @@ def get_gym_dashboard():
 				day_counts = {}
 				# Per-weekday hourly data: { "Monday": { 0: count, 1: count, ... 23: count }, "Tuesday": {...}, ... }
 				weekday_hour_counts = {day: {h: 0 for h in range(24)} for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]}
+				peak_times_from_sql = False
+				top_machines_from_sql = False
 				volume_by_week = {}  # Total kg per week (weight × reps × sets)
 				active_users_by_week = {}  # Unique users per week
 				cardio_sets = 0
@@ -3419,7 +3421,69 @@ def get_gym_dashboard():
 				total_exercises = 0
 
 				target_gym = (gym_name or "").lower().strip()
-				
+
+				# Step 1 optimization: compute peak times in SQL (Postgres) instead of Python loops.
+				# Falls back to existing Python logic if RPC is not available yet.
+				try:
+					peak_res = admin_client.rpc(
+						"get_gym_peak_times",
+						{
+							"p_user_ids": consent_user_ids,
+							"p_gym_name": gym_name,
+							"p_start_date": chart_start_date,
+							"p_end_date": chart_end_date,
+						},
+					).execute()
+					peak_rows = peak_res.data or []
+					for row in peak_rows:
+						weekday_name = str(row.get("weekday_name") or "").strip()
+						hour_val = row.get("hour")
+						count_val = row.get("workout_count") or 0
+						try:
+							hour = int(hour_val)
+							count = int(count_val)
+						except Exception:
+							continue
+						if hour < 0 or hour > 23 or count < 0:
+							continue
+						hour_counts[hour] = hour_counts.get(hour, 0) + count
+						if weekday_name in weekday_hour_counts:
+							weekday_hour_counts[weekday_name][hour] = weekday_hour_counts[weekday_name].get(hour, 0) + count
+					if peak_rows:
+						peak_times_from_sql = True
+				except Exception as e:
+					print(f"[GYM DASHBOARD] Peak times SQL RPC unavailable, falling back to Python: {e}")
+
+				# Step 2 optimization: compute top machines in SQL (Postgres) instead of Python loops.
+				# Falls back to existing Python logic if RPC is not available yet.
+				try:
+					machines_res = admin_client.rpc(
+						"get_gym_top_machines",
+						{
+							"p_user_ids": consent_user_ids,
+							"p_gym_name": gym_name,
+							"p_start_date": chart_start_date,
+							"p_end_date": chart_end_date,
+						},
+					).execute()
+					machine_rows = machines_res.data or []
+					machine_sets = {}
+					for row in machine_rows:
+						label = str(row.get("label") or "").strip()
+						value = row.get("value") or 0
+						if not label:
+							continue
+						try:
+							sets_count = int(value)
+						except Exception:
+							continue
+						if sets_count <= 0:
+							continue
+						machine_sets[label] = sets_count
+					top_machines_from_sql = True
+				except Exception as e:
+					print(f"[GYM DASHBOARD] Top machines SQL RPC unavailable, falling back to Python: {e}")
+			
 				# Process workouts for charts (all_workouts)
 				for w in all_workouts:
 					# Filter to workouts that were actually saved with this gym (snapshot on the workout).
@@ -3462,33 +3526,33 @@ def get_gym_dashboard():
 						if user_id:
 							active_users_by_week[week_key].add(user_id)
 
-					# Peak hours: prefer inserted_at timestamp (more precise than date); fallback to created_at, then workout date
-					inserted = w.get("inserted_at") or w.get("created_at")
-					dti = None
-					if inserted:
-						try:
-							ts = str(inserted).replace("Z", "+00:00")
-							dti = datetime.fromisoformat(ts)
+					# Peak hours fallback path (only when SQL RPC is not available yet).
+					if not peak_times_from_sql:
+						inserted = w.get("inserted_at") or w.get("created_at")
+						dti = None
+						if inserted:
 							try:
-								from zoneinfo import ZoneInfo  # py3.9+
-								dti = dti.astimezone(ZoneInfo("Europe/Amsterdam"))
+								ts = str(inserted).replace("Z", "+00:00")
+								dti = datetime.fromisoformat(ts)
+								try:
+									from zoneinfo import ZoneInfo  # py3.9+
+									dti = dti.astimezone(ZoneInfo("Europe/Amsterdam"))
+								except Exception:
+									pass
 							except Exception:
 								pass
-						except Exception:
-							pass
-					
-					# Fallback to workout date if no timestamp available
-					if not dti and dt:
-						dti = dt.replace(hour=12, minute=0, second=0, microsecond=0)  # Use noon as default time
-					
-					if dti:
-						hour = int(dti.hour)
-						hour_counts[hour] = hour_counts.get(hour, 0) + 1
-						# Track per weekday using workout.date (dt) to stay consistent with workouts_by_weekday
-						# This avoids mismatches where timestamp timezone shifts weekday differently.
-						weekday_name = dt.strftime("%A") if dt else dti.strftime("%A")
-						if weekday_name in weekday_hour_counts:
-							weekday_hour_counts[weekday_name][hour] = weekday_hour_counts[weekday_name].get(hour, 0) + 1
+						
+						# Fallback to workout date if no timestamp available
+						if not dti and dt:
+							dti = dt.replace(hour=12, minute=0, second=0, microsecond=0)  # Use noon as default time
+						
+						if dti:
+							hour = int(dti.hour)
+							hour_counts[hour] = hour_counts.get(hour, 0) + 1
+							# Track per weekday using workout.date (dt) to stay consistent with workouts_by_weekday
+							weekday_name = dt.strftime("%A") if dt else dti.strftime("%A")
+							if weekday_name in weekday_hour_counts:
+								weekday_hour_counts[weekday_name][hour] = weekday_hour_counts[weekday_name].get(hour, 0) + 1
 
 					# Process exercises for charts (all workouts)
 					exercises = w.get("exercises") or []
@@ -3505,8 +3569,9 @@ def get_gym_dashboard():
 						sets_n = _count_sets(ex)
 						if sets_n <= 0:
 							continue
-						name = _exercise_display(ex)
-						machine_sets[name] = machine_sets.get(name, 0) + sets_n
+						if not top_machines_from_sql:
+							name = _exercise_display(ex)
+							machine_sets[name] = machine_sets.get(name, 0) + sets_n
 						
 						# Calculate volume (weight × reps) for strength exercises
 						sets = ex.get("sets") or []
