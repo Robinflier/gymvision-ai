@@ -2096,43 +2096,50 @@ def exercises_list():
 # /model-classes endpoint removed - no longer using YOLO models
 
 
-def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = None, has_consent: Optional[bool] = None):
+def sync_gym_data_to_analytics_table(
+	user_id: str,
+	gym_name: Optional[str] = None,
+	has_consent: Optional[bool] = None,
+	user_metadata: Optional[Dict[str, Any]] = None
+):
 	"""
 	Sync gym data from user_metadata to gym_analytics table.
 	This function should be called whenever a user updates their gym name or consent.
 	"""
 	if not SUPABASE_AVAILABLE:
 		return False
-	
+
 	SUPABASE_URL = os.getenv("SUPABASE_URL")
 	SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-	
+
 	if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
 		print("[GYM SYNC] Supabase configuration missing")
 		return False
-	
+
 	try:
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-		
-		# Get current user data from auth.users
-		user_response = admin_client.auth.admin.get_user_by_id(user_id)
-		if not user_response.user:
-			print(f"[GYM SYNC] User {user_id} not found")
-			return False
-		
-		user_metadata = user_response.user.user_metadata or {}
+
+		# Reuse provided metadata when available to avoid extra auth.users fetches.
+		if user_metadata is None:
+			user_response = admin_client.auth.admin.get_user_by_id(user_id)
+			if not user_response.user:
+				print(f"[GYM SYNC] User {user_id} not found")
+				return False
+			user_metadata = user_response.user.user_metadata or {}
+		else:
+			user_metadata = user_metadata or {}
+
 		gym_place_id = user_metadata.get("gym_place_id")
-		
+
 		# Use provided values or get from metadata
 		if gym_name is None:
 			gym_name = user_metadata.get("gym_name")
 		if has_consent is None:
 			has_consent = user_metadata.get("data_collection_consent", False)
-		
-		# Find matching gym account if gym_name is provided
+
+		# Find matching gym account only when user has consent and selected a gym.
 		gym_id = None
-		if gym_name:
-			# Search for gym account with matching gym_name
+		if has_consent and gym_name:
 			all_users = admin_client.auth.admin.list_users()
 			# supabase-py v2 returns `.data`; older variants may return `.users`
 			users_list = getattr(all_users, "data", None)
@@ -2147,12 +2154,14 @@ def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = Non
 
 			for user in users_list:
 				user_meta = user.user_metadata or {}
-				if (user_meta.get("is_gym_account") == True and 
-					user_meta.get("gym_name") and 
-					user_meta.get("gym_name").lower().strip() == gym_name.lower().strip()):
+				if (
+					user_meta.get("is_gym_account") == True
+					and user_meta.get("gym_name")
+					and user_meta.get("gym_name").lower().strip() == gym_name.lower().strip()
+				):
 					gym_id = user.id
 					break
-		
+
 		# Parse timestamps
 		consent_given_at = None
 		consent_revoked_at = None
@@ -2160,54 +2169,52 @@ def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = Non
 			consent_given_at_str = user_metadata.get("consent_updated_at")
 			if consent_given_at_str:
 				try:
-					consent_given_at = datetime.fromisoformat(consent_given_at_str.replace('Z', '+00:00'))
-				except:
+					consent_given_at = datetime.fromisoformat(consent_given_at_str.replace("Z", "+00:00"))
+				except Exception:
 					consent_given_at = datetime.now()
 		else:
 			consent_revoked_at_str = user_metadata.get("consent_updated_at")
 			if consent_revoked_at_str:
 				try:
-					consent_revoked_at = datetime.fromisoformat(consent_revoked_at_str.replace('Z', '+00:00'))
-				except:
+					consent_revoked_at = datetime.fromisoformat(consent_revoked_at_str.replace("Z", "+00:00"))
+				except Exception:
 					consent_revoked_at = datetime.now()
-		
+
 		gym_name_updated_at = None
 		gym_name_updated_at_str = user_metadata.get("gym_name_updated_at")
 		if gym_name_updated_at_str:
 			try:
-				gym_name_updated_at = datetime.fromisoformat(gym_name_updated_at_str.replace('Z', '+00:00'))
-			except:
+				gym_name_updated_at = datetime.fromisoformat(gym_name_updated_at_str.replace("Z", "+00:00"))
+			except Exception:
 				pass
-		
-		# Check if record exists
-		existing = admin_client.table("gym_analytics").select("*").eq("user_id", user_id).execute()
-		
+
+		# Check if record exists (only fields we need)
+		existing = admin_client.table("gym_analytics").select("user_id,gym_id").eq("user_id", user_id).execute()
+
 		data_to_upsert = {
 			"user_id": user_id,
 			"gym_name": gym_name,
 			"data_collection_consent": has_consent,
-			"updated_at": datetime.now().isoformat()
+			"updated_at": datetime.now().isoformat(),
 		}
 
 		# Store place_id if the table has the column (backwards compatible)
 		if gym_place_id:
 			data_to_upsert["gym_place_id"] = gym_place_id
-		
+
 		# If consent is revoked, remove gym_id to unlink user from gym dashboard
-		# This ensures their data is no longer visible on the gym dashboard
 		if has_consent and gym_id:
 			data_to_upsert["gym_id"] = gym_id
 		elif not has_consent:
-			# When consent is revoked, remove gym_id to unlink from gym
 			data_to_upsert["gym_id"] = None
-		
+
 		if consent_given_at:
 			data_to_upsert["consent_given_at"] = consent_given_at.isoformat()
 		if consent_revoked_at:
 			data_to_upsert["consent_revoked_at"] = consent_revoked_at.isoformat()
 		if gym_name_updated_at:
 			data_to_upsert["gym_name_updated_at"] = gym_name_updated_at.isoformat()
-		
+
 		def _execute_upsert(payload: dict, exists: bool):
 			if exists:
 				return admin_client.table("gym_analytics").update(payload).eq("user_id", user_id).execute()
@@ -2216,28 +2223,25 @@ def sync_gym_data_to_analytics_table(user_id: str, gym_name: Optional[str] = Non
 
 		exists = bool(existing.data and len(existing.data) > 0)
 		try:
-			result = _execute_upsert(data_to_upsert, exists)
+			_execute_upsert(data_to_upsert, exists)
 		except Exception as e:
-			# If schema doesn't include gym_place_id yet, retry without it (avoids log spam)
+			# If schema doesn't include gym_place_id yet, retry without it.
 			msg = str(e)
 			if "gym_place_id" in msg and ("PGRST204" in msg or "schema cache" in msg):
 				payload = {k: v for k, v in data_to_upsert.items() if k != "gym_place_id"}
-				result = _execute_upsert(payload, exists)
+				_execute_upsert(payload, exists)
 				print("[GYM SYNC] gym_place_id column missing; synced without gym_place_id (run migration to add column).")
 			else:
 				raise
 
-		# Only log if there's a change or first sync (reduce log spam)
-		# Check if data actually changed before logging
+		# Only log if there's a change or first sync
 		if existing.data and len(existing.data) > 0:
 			existing_row = existing.data[0]
-			# Only log if gym_id changed or this is a new record
 			if not exists or (gym_id is not None and existing_row.get("gym_id") != gym_id):
 				print(f"[GYM SYNC] Synced gym analytics for user {user_id}, linked to gym_id: {gym_id}")
 		elif not exists:
-			# First sync - always log
 			print(f"[GYM SYNC] Synced gym analytics for user {user_id}, linked to gym_id: {gym_id}")
-		
+
 		return True
 	except Exception as e:
 		print(f"[GYM SYNC] Error syncing gym data: {e}")
@@ -2432,8 +2436,10 @@ def collect_gym_data():
 		# Update user metadata
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 		
-		# Fetch current metadata to merge
-		current_metadata = admin_client.auth.admin.get_user_by_id(user_id).user.user_metadata or {}
+		# Use metadata from verified access token (avoids extra auth.users call per save).
+		current_metadata = getattr(user_response.user, "user_metadata", None) or {}
+		if not isinstance(current_metadata, dict):
+			current_metadata = {}
 		
 		updated_metadata = {**current_metadata}
 		now_iso = datetime.now().isoformat()
@@ -2461,7 +2467,12 @@ def collect_gym_data():
 		admin_client.auth.admin.update_user_by_id(user_id, {"user_metadata": updated_metadata})
 
 		# Automatically sync to gym_analytics table
-		ok = sync_gym_data_to_analytics_table(user_id, gym_name, data_consent)
+		ok = sync_gym_data_to_analytics_table(
+			user_id,
+			gym_name,
+			data_consent,
+			user_metadata=updated_metadata
+		)
 		if not ok:
 			return jsonify({"error": "Failed to sync gym data to analytics table"}), 500
 
@@ -3938,6 +3949,9 @@ _gym_suggestions_requests: dict[str, list[float]] = defaultdict(list)
 _gym_suggestions_cache: "OrderedDict[str, tuple[float, dict]]" = OrderedDict()
 _GYM_SUGGESTIONS_CACHE_TTL_SECONDS = 300  # 5 minutes
 _GYM_SUGGESTIONS_CACHE_MAX = 500
+_GYM_SUGGESTIONS_RATE_WINDOW_SECONDS = 60
+_GYM_SUGGESTIONS_RATE_MAX_REQUESTS = 30
+_GYM_SUGGESTIONS_RATE_MAX_IPS = 2000
 
 
 @app.route("/api/gym-suggestions", methods=["GET", "OPTIONS"])
@@ -3965,8 +3979,29 @@ def gym_suggestions():
 	# Basic rate limit: 60 requests/minute per IP (best-effort; per-process)
 	ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",")[0].strip()
 	now = time.time()
-	window_seconds = 60
-	max_requests = 30
+	window_seconds = _GYM_SUGGESTIONS_RATE_WINDOW_SECONDS
+	max_requests = _GYM_SUGGESTIONS_RATE_MAX_REQUESTS
+
+	# Cleanup stale IP buckets so this map cannot grow forever.
+	# Keep this lightweight and local (per-process best effort).
+	for known_ip in list(_gym_suggestions_requests.keys()):
+		old_times = _gym_suggestions_requests.get(known_ip) or []
+		fresh_times = [t for t in old_times if now - t < window_seconds]
+		if fresh_times:
+			_gym_suggestions_requests[known_ip] = fresh_times
+		else:
+			_gym_suggestions_requests.pop(known_ip, None)
+
+	# Hard cap the amount of IP buckets as a safety valve.
+	if len(_gym_suggestions_requests) > _GYM_SUGGESTIONS_RATE_MAX_IPS:
+		# Remove oldest buckets first based on latest request timestamp.
+		ordered_ips = sorted(
+			_gym_suggestions_requests.items(),
+			key=lambda item: item[1][-1] if item[1] else 0
+		)
+		for stale_ip, _ in ordered_ips[:len(_gym_suggestions_requests) - _GYM_SUGGESTIONS_RATE_MAX_IPS]:
+			_gym_suggestions_requests.pop(stale_ip, None)
+
 	times = [t for t in _gym_suggestions_requests[ip] if now - t < window_seconds]
 	if len(times) >= max_requests:
 		_gym_suggestions_requests[ip] = times

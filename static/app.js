@@ -74,6 +74,7 @@ var gymPeakLatestCharts = null;
 // Use var instead of const to prevent duplicate declaration error if script runs twice
 var WORKOUT_DRAFT_KEY = 'currentWorkoutDraft';
 var DEFAULT_SET_COUNT = 3;
+var MAX_SETS_PER_EXERCISE = 10;
 
 // Track if exercise selector is already initialized to prevent duplicate initialization
 var exerciseSelectorInitialized = false;
@@ -1620,6 +1621,7 @@ async function showGymDashboardScreen() {
 		dateInput.addEventListener('change', () => {
 			loadGymDashboardData();
 		});
+		window.addEventListener('resize', syncGymDashboardDateInputWidth);
 	}
 
 	// Reports button + modal
@@ -1727,20 +1729,21 @@ async function markGymReportsRead() {
 }
 
 async function refreshGymReportsBadge() {
+	const reportsBtn = document.getElementById('gym-dashboard-reports-btn');
 	const badgeEl = document.getElementById('gym-dashboard-reports-badge');
 	if (!badgeEl) return;
 	try {
 		const data = await fetchGymProblemReports(20);
 		const unread = Number(data.unread_count || 0);
-		if (unread > 0) {
-			badgeEl.textContent = String(unread);
-			badgeEl.classList.remove('hidden');
-		} else {
-			badgeEl.textContent = '0';
-			badgeEl.classList.add('hidden');
-		}
+		badgeEl.classList.remove('hidden');
+		badgeEl.textContent = String(Math.max(0, unread));
+		badgeEl.classList.toggle('is-unread', unread > 0);
+		reportsBtn?.classList.toggle('has-unread', unread > 0);
 	} catch (e) {
-		badgeEl.classList.add('hidden');
+		badgeEl.classList.remove('hidden');
+		badgeEl.textContent = '0';
+		badgeEl.classList.remove('is-unread');
+		reportsBtn?.classList.remove('has-unread');
 	}
 }
 
@@ -1818,6 +1821,17 @@ function initGymDashboardPeriodToggle() {
 		});
 	});
 	updateGymDashboardPeriodUI();
+}
+
+function syncGymDashboardDateInputWidth() {
+	const dateInput = document.getElementById('gym-dashboard-date');
+	const statsBox = document.querySelector('#gym-dashboard-panels .settings-stats-grid .settings-stat-box');
+	if (!dateInput || !statsBox) return;
+	const width = Math.round(statsBox.getBoundingClientRect().width || 0);
+	if (width <= 0) return;
+	dateInput.style.width = `${width}px`;
+	dateInput.style.minWidth = `${width}px`;
+	dateInput.style.maxWidth = `${width}px`;
 }
 
 async function loadGymDashboardData() {
@@ -1908,6 +1922,7 @@ async function loadGymDashboardData() {
 
 		if (loadingEl) loadingEl.style.display = 'none';
 		if (panelsEl) panelsEl.classList.remove('hidden');
+		syncGymDashboardDateInputWidth();
 	} catch (e) {
 		if (requestId !== gymDashboardLoadRequestId) return;
 		if (loadingEl) loadingEl.style.display = 'none';
@@ -2098,11 +2113,6 @@ function renderGymPeakTimes(charts) {
 			if (hourDayWrap) hourDayWrap.classList.remove('hidden');
 			// Hours = hour-of-day buckets
 			let hoursData = getHoursForSelectedDay();
-			if (!hasAny(hoursData) && hourDaySelect && hourDaySelect.value !== 'all' && hasAny(activeCharts.workouts_by_hour)) {
-				hourDaySelect.value = 'all';
-				writeHourDay('all');
-				hoursData = activeCharts.workouts_by_hour || [];
-			}
 			if (hasAny(hoursData)) {
 				renderGymPeakHistogram(containerId, hoursData, { labelMode: 'hour' });
 			} else {
@@ -2144,6 +2154,33 @@ function createHiDPICanvas(parentEl, cssHeight) {
 	canvas.height = Math.round(h * dpr);
 	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 	return { canvas, ctx, width: cssWidth, height: h };
+}
+
+function prepareHiDPICanvas(canvas, fallbackSize = 260, options = {}) {
+	if (!canvas) return null;
+	const ctx = canvas.getContext('2d');
+	if (!ctx) return null;
+	const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+	const rect = canvas.getBoundingClientRect();
+	let cssWidth = Math.max(1, Math.round(rect.width || canvas.clientWidth || fallbackSize));
+	let cssHeight = Math.max(1, Math.round(rect.height || canvas.clientHeight || fallbackSize));
+
+	if (options.square) {
+		let size = Math.max(1, Math.min(cssWidth, cssHeight));
+		if (options.maxSize) size = Math.min(size, Number(options.maxSize) || size);
+		cssWidth = size;
+		cssHeight = size;
+		canvas.style.aspectRatio = '1 / 1';
+	}
+
+	canvas.style.width = `${cssWidth}px`;
+	canvas.style.height = `${cssHeight}px`;
+	canvas.width = Math.round(cssWidth * dpr);
+	canvas.height = Math.round(cssHeight * dpr);
+
+	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	ctx.clearRect(0, 0, cssWidth, cssHeight);
+	return { ctx, width: cssWidth, height: cssHeight };
 }
 
 function renderGymPeakHistogram(containerId, items, opts = {}) {
@@ -2415,12 +2452,9 @@ function renderGymMuscleFocus(items) {
 	const legend = document.getElementById('gym-muscle-legend');
 	const canvas = document.getElementById('gym-muscle-chart');
 	if (!legend || !canvas) return;
-	const ctx = canvas.getContext('2d');
-	if (!ctx) return;
-
-	canvas.width = canvas.clientWidth || 260;
-	canvas.height = canvas.clientHeight || 260;
-	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	const canvasInfo = prepareHiDPICanvas(canvas, 260, { square: true, maxSize: 220 });
+	if (!canvasInfo) return;
+	const { ctx, width, height } = canvasInfo;
 	legend.innerHTML = '';
 
 	const list = Array.isArray(items) ? items : [];
@@ -2440,9 +2474,9 @@ function renderGymMuscleFocus(items) {
 	if (empty) empty.style.display = 'none';
 
 	const total = entries.reduce((sum, [, v]) => sum + v, 0);
-	const centerX = canvas.width / 2;
-	const centerY = canvas.height / 2;
-	const radius = Math.min(canvas.width, canvas.height) / 2 - 10;
+	const centerX = width / 2;
+	const centerY = height / 2;
+	const radius = Math.min(width, height) / 2 - 10;
 	const innerRadius = radius * 0.6;
 
 	// EXACT palette from Progress tab "Muscle Focus"
@@ -2697,12 +2731,9 @@ function renderGymCategories(items) {
 	const legend = document.getElementById('gym-categories-legend');
 	const canvas = document.getElementById('gym-categories-chart');
 	if (!legend || !canvas) return;
-	const ctx = canvas.getContext('2d');
-	if (!ctx) return;
-
-	canvas.width = canvas.clientWidth || 260;
-	canvas.height = canvas.clientHeight || 260;
-	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	const canvasInfo = prepareHiDPICanvas(canvas, 260, { square: true, maxSize: 220 });
+	if (!canvasInfo) return;
+	const { ctx, width, height } = canvasInfo;
 	legend.innerHTML = '';
 
 	const list = Array.isArray(items) ? items : [];
@@ -2722,9 +2753,9 @@ function renderGymCategories(items) {
 	if (empty) empty.style.display = 'none';
 
 	const total = entries.reduce((sum, [, v]) => sum + v, 0);
-	const centerX = canvas.width / 2;
-	const centerY = canvas.height / 2;
-	const radius = Math.min(canvas.width, canvas.height) / 2 - 10;
+	const centerX = width / 2;
+	const centerY = height / 2;
+	const radius = Math.min(width, height) / 2 - 10;
 	const innerRadius = radius * 0.6;
 
 	// Colors for Strength (purple) and Cardio (cyan)
@@ -3640,6 +3671,7 @@ function initExerciseSelector() {
 
 		// Add "Add Custom Exercise" button as a filter button
 		const addCustomBtn = document.createElement('button');
+		addCustomBtn.id = 'exercise-selector-add-custom';
 		addCustomBtn.textContent = '+ Custom';
 		addCustomBtn.className = '';
 		addCustomBtn.style.cssText = 'background: rgba(124,92,255,0.15); border: 1px solid rgba(124,92,255,0.3); color: #7c5cff; font-weight: 600;';
@@ -4203,6 +4235,12 @@ function openExerciseSelector() {
 		selector.classList.remove('hidden');
 		document.body.classList.add('selector-open');
 		console.log('[DEBUG] Selector opened, hidden class removed');
+		const ctx = window.exerciseSelectorContext || null;
+		const addCustomBtn = document.getElementById('exercise-selector-add-custom');
+		if (addCustomBtn) {
+			// Custom exercises are not relevant in report flow or insights lookup.
+			addCustomBtn.style.display = (ctx === 'report_problem' || ctx === 'insights') ? 'none' : '';
+		}
 
 		// Force visibility of "or" and "AI-detect" elements
 		const orDiv = selector.querySelector('.exercise-selector-or');
@@ -5189,6 +5227,10 @@ function renderWorkoutList() {
 		addSetBtn.className = 'workout-edit-add-set';
 		addSetBtn.type = 'button';
 		addSetBtn.textContent = '+ Add Set';
+		if (Array.isArray(ex.sets) && ex.sets.length >= MAX_SETS_PER_EXERCISE) {
+			addSetBtn.disabled = true;
+			addSetBtn.textContent = 'Max sets reached';
+		}
 
 		// Force Navbar to show (User request fix)
 		// Check if we are in workout builder mode and if navbar is hidden, show it.
@@ -5201,8 +5243,17 @@ function renderWorkoutList() {
 			if (!ex.sets) {
 				ex.sets = [];
 			}
-			ex.sets.push({ weight: '', reps: '' });
+			if (ex.sets.length >= MAX_SETS_PER_EXERCISE) {
+				alert(`Max ${MAX_SETS_PER_EXERCISE} sets per exercise`);
+				return;
+			}
+			if (isCardio) {
+				ex.sets.push({ min: '', sec: '', km: '', cal: '', notes: '' });
+			} else {
+				ex.sets.push({ weight: '', reps: '' });
+			}
 			renderWorkoutList();
+			saveWorkoutDraft();
 		});
 
 		li.appendChild(setsContainer);
@@ -7062,12 +7113,9 @@ async function renderMuscleFocus(workouts) {
 	const legend = document.getElementById('progress-muscle-legend');
 	const canvas = document.getElementById('progress-muscle-chart');
 	if (!legend || !canvas) return;
-	const ctx = canvas.getContext('2d');
-	if (!ctx) return;
-
-	canvas.width = canvas.clientWidth || 260;
-	canvas.height = canvas.clientHeight || 260;
-	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	const canvasInfo = prepareHiDPICanvas(canvas, 260, { square: true, maxSize: 260 });
+	if (!canvasInfo) return;
+	const { ctx, width, height } = canvasInfo;
 	legend.innerHTML = '';
 
 	if (!workouts.length) {
@@ -7170,9 +7218,9 @@ async function renderMuscleFocus(workouts) {
 	if (empty) empty.classList.add('hidden');
 
 	const total = entries.reduce((sum, [, v]) => sum + v, 0);
-	const centerX = canvas.width / 2;
-	const centerY = canvas.height / 2;
-	const radius = Math.min(canvas.width, canvas.height) / 2 - 10;
+	const centerX = width / 2;
+	const centerY = height / 2;
+	const radius = Math.min(width, height) / 2 - 10;
 	const innerRadius = radius * 0.6;
 
 	// Color palette with all unique colors including white and brown
@@ -7706,6 +7754,20 @@ function initSettings() {
 	initDeleteAccount();
 }
 
+function updateReportProblemButtonVisibility() {
+	const wrap = document.querySelector('.settings-report-problem-wrap');
+	const btn = document.getElementById('settings-report-problem-btn');
+	if (!wrap && !btn) return;
+
+	const gymInput = document.getElementById('settings-gym-input');
+	const uiGym = (gymInput?.value || '').trim();
+	const storedGym = (localStorage.getItem('user-gym-name') || '').trim();
+	const hasGym = Boolean(uiGym || storedGym);
+
+	if (wrap) wrap.style.display = hasGym ? 'flex' : 'none';
+	if (btn) btn.disabled = !hasGym;
+}
+
 function initSettingsToggles() {
 	// Notifications toggle
 	const notificationsToggle = document.getElementById('settings-notifications-toggle');
@@ -7799,6 +7861,7 @@ async function initGymInput() {
 		if (clearBtn) {
 			clearBtn.style.display = (gymInput.value || '').trim() ? 'flex' : 'none';
 		}
+		updateReportProblemButtonVisibility();
 	});
 
 	// Always use backend-proxied suggestions (API key stays server-side)
@@ -7814,6 +7877,7 @@ async function initGymInput() {
 			gymInput.dataset.placeId = '';
 			clearBtn.style.display = 'none';
 			await saveGymName(null, null);
+			updateReportProblemButtonVisibility();
 			try { gymInput.focus(); } catch (err) { }
 		});
 	}
@@ -7873,6 +7937,7 @@ function setupBackendGymAutocomplete(gymInput, dropdown) {
 				if (p.place_id) gymInput.dataset.placeId = p.place_id;
 				dropdown.style.display = 'none';
 				await saveGymName(gymInput.value, gymInput.dataset.placeId || null);
+				updateReportProblemButtonVisibility();
 			});
 			dropdown.appendChild(item);
 		});
@@ -7890,6 +7955,7 @@ function setupBackendGymAutocomplete(gymInput, dropdown) {
 			localStorage.removeItem('user-gym-name');
 			localStorage.removeItem('user-gym-place-id');
 		}
+		updateReportProblemButtonVisibility();
 		// Cost control: don't query until user typed 3+ chars
 		if (query.length < 3) {
 			if (dropdown) dropdown.style.display = 'none';
@@ -7923,6 +7989,7 @@ function setupBackendGymAutocomplete(gymInput, dropdown) {
 		const gymName = gymInput.value.trim();
 		// IMPORTANT: allow clearing the gym (save null)
 		await saveGymName(gymName || null, gymInput.dataset.placeId || null);
+		updateReportProblemButtonVisibility();
 	});
 
 	// Save on Enter key
@@ -8091,7 +8158,8 @@ async function loadGymName() {
 	}
 }
 
-// Lock for saveDataConsent
+// Debounce + lock for saveDataConsent
+var saveDataConsentDebounceTimer = null;
 var saveDataConsentLock = false;
 
 // Save data collection consent to Supabase user_metadata and sync to analytics table
@@ -8099,63 +8167,70 @@ async function saveDataConsent(hasConsent) {
 	// Update localStorage immediately
 	localStorage.setItem('user-data-consent', hasConsent ? 'true' : 'false');
 
-	// Check lock to prevent concurrent requests
-	if (saveDataConsentLock) {
-		console.log('[CONSENT] Save already in progress, skipping duplicate request');
-		return;
+	if (saveDataConsentDebounceTimer) {
+		clearTimeout(saveDataConsentDebounceTimer);
 	}
 
-	saveDataConsentLock = true;
+	saveDataConsentDebounceTimer = setTimeout(async () => {
+		// Check lock to prevent concurrent requests
+		if (saveDataConsentLock) {
+			console.log('[CONSENT] Save already in progress, skipping duplicate request');
+			return;
+		}
 
-	if (!supabaseClient) {
-		await initSupabase();
-	}
-	if (!supabaseClient) {
-		console.warn('[CONSENT] Supabase not available, saving to localStorage only');
-		saveDataConsentLock = false;
-		return;
-	}
+		saveDataConsentLock = true;
 
-	try {
-		const { data: { session } } = await supabaseClient.auth.getSession();
-		if (!session) {
-			// Not logged in, save to localStorage only
+		if (!supabaseClient) {
+			await initSupabase();
+		}
+		if (!supabaseClient) {
+			console.warn('[CONSENT] Supabase not available, saving to localStorage only');
 			saveDataConsentLock = false;
 			return;
 		}
 
-		// Get current gym snapshot from localStorage
-		const gymNameRaw = localStorage.getItem('user-gym-name');
-		const gymName = (gymNameRaw !== null) ? (gymNameRaw || '').trim() : '';
-		const placeId = (localStorage.getItem('user-gym-place-id') || '').trim();
+		try {
+			const { data: { session } } = await supabaseClient.auth.getSession();
+			if (!session) {
+				// Not logged in, save to localStorage only
+				saveDataConsentLock = false;
+				return;
+			}
 
-		// Call backend endpoint to update user_metadata and sync to analytics table
-		const apiUrl = getApiUrl('/api/collect-gym-data');
-		const response = await fetch(apiUrl, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Authorization': `Bearer ${session.access_token}`
-			},
-			body: JSON.stringify({
-				data_consent: hasConsent,
-				// send gym too (null clears)
-				gym_name: gymName ? gymName : null,
-				gym_place_id: gymName ? (placeId || null) : null
-			})
-		});
+			// Read latest values at send-time (coalesces rapid toggles to one request).
+			const latestConsent = localStorage.getItem('user-data-consent') === 'true';
+			const gymNameRaw = localStorage.getItem('user-gym-name');
+			const gymName = (gymNameRaw !== null) ? (gymNameRaw || '').trim() : '';
+			const placeId = (localStorage.getItem('user-gym-place-id') || '').trim();
 
-		if (!response.ok) {
-			const errorData = await response.json().catch(() => ({}));
-			console.error('[CONSENT] Error saving consent:', errorData);
-		} else {
-			console.log('[CONSENT] Consent saved and synced successfully');
+			// Call backend endpoint to update user_metadata and sync to analytics table
+			const apiUrl = getApiUrl('/api/collect-gym-data');
+			const response = await fetch(apiUrl, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'Authorization': `Bearer ${session.access_token}`
+				},
+				body: JSON.stringify({
+					data_consent: latestConsent,
+					// send gym too (null clears)
+					gym_name: gymName ? gymName : null,
+					gym_place_id: gymName ? (placeId || null) : null
+				})
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json().catch(() => ({}));
+				console.error('[CONSENT] Error saving consent:', errorData);
+			} else {
+				console.log('[CONSENT] Consent saved and synced successfully');
+			}
+		} catch (e) {
+			console.error('[CONSENT] Error saving consent:', e);
+		} finally {
+			saveDataConsentLock = false;
 		}
-	} catch (e) {
-		console.error('[CONSENT] Error saving consent:', e);
-	} finally {
-		saveDataConsentLock = false;
-	}
+	}, 400);
 }
 
 // Load data collection consent from Supabase user_metadata or localStorage
@@ -8236,8 +8311,8 @@ async function submitProblemReport() {
 		alert('Please select an issue');
 		return;
 	}
-	if (note.length > 120) {
-		alert('Note can be max 120 characters');
+	if (note.length > 50) {
+		alert('Note can be max 50 characters');
 		return;
 	}
 
@@ -8362,8 +8437,8 @@ function initReportProblemModal() {
 	if (noteEl && noteEl.dataset.bound !== 'true') {
 		noteEl.dataset.bound = 'true';
 		noteEl.addEventListener('input', () => {
-			if (noteEl.value.length > 120) {
-				noteEl.value = noteEl.value.slice(0, 120);
+			if (noteEl.value.length > 50) {
+				noteEl.value = noteEl.value.slice(0, 50);
 			}
 			if (noteCountEl) noteCountEl.textContent = String(noteEl.value.length);
 		});
@@ -9082,6 +9157,7 @@ async function loadSettings() {
 				const gymName = (localGymRaw !== null) ? (localGymRaw || '') : (user.user_metadata?.gym_name || '');
 				gymInput.value = gymName;
 			}
+			updateReportProblemButtonVisibility();
 
 			// Load data consent
 			const consentToggle = document.getElementById('settings-data-consent-toggle');
@@ -9103,6 +9179,7 @@ async function loadSettings() {
 		if (usernameEl) usernameEl.textContent = '—';
 		if (emailEl) emailEl.textContent = '—';
 	}
+	updateReportProblemButtonVisibility();
 
 	// Calculate and display dynamic stats
 	try {
