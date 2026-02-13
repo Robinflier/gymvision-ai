@@ -156,6 +156,7 @@ MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	"decline_dumbbell_press": {"display": "Decline Dumbbell Press", "muscles": normalize_muscles(["Chest", "Triceps", "Shoulders"]), "video": "https://www.youtube.com/embed/2B6WxyLaIrE", "image": "https://strengthlevel.com/images/illustrations/decline-dumbbell-press.png"},
 	"cable_fly": {"display": "Cable Fly", "muscles": normalize_muscles(["Chest", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/4mfLHnFL0Uw", "image": "/images/cablefly.jpg"},
 	"incline_cable_fly": {"display": "Incline Cable Fly", "muscles": normalize_muscles(["Chest", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/GwpA8-VcEk8", "image": "/images/inclinecablefly.jpg"},
+	"seated_cable_fly": {"display": "Seated Cable Fly", "muscles": normalize_muscles(["Chest", "Shoulders", "-"]), "video": "https://www.youtube.com/embed/2sO5ZlpqUh0", "image": "/images/seatedcablefly.jpg"},
 
 	# Back
 	"pull_up": {"display": "Pull-Up", "muscles": normalize_muscles(["Back", "Biceps", "Shoulders"]), "video": "https://www.youtube.com/embed/eGo4IYlbE5g", "image": "https://strengthlevel.com/images/illustrations/pull-up.png"},
