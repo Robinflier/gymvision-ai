@@ -4430,16 +4430,20 @@ window.startAIWorkout = function () {
 window.startNewWorkout = function (workoutData = null) {
 	console.log('[WORKOUT] startNewWorkout called (global)');
 	const snap = getSettingsGymSnapshot();
+	const startTs = Date.now();
+	const startDate = new Date(startTs);
+	const startDayKey = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`;
 	currentWorkout = {
 		name: workoutData?.name || 'Workout',
 		exercises: workoutData?.exercises || [],
 		gym_name: (workoutData?.gym_name || snap.gym_name) || '',
 		gym_place_id: (workoutData?.gym_place_id || snap.gym_place_id) || '',
-		startTime: new Date(),
+		startTime: startDate,
+		originalDate: startDayKey,
 		duration: 0
 	};
 	editingWorkoutId = null;
-	workoutStartTime = Date.now();
+	workoutStartTime = startTs;
 	setWorkoutTimerDisplay(0);
 	startWorkoutTimer();
 
@@ -5425,13 +5429,25 @@ window.saveWorkout = async function () {
 			currentWorkout.gym_place_id = snap.gym_place_id;
 		}
 
-		// Determine workout date - SIMPLE: use originalDate if editing, today if new
+		// Determine workout date:
+		// - Prefer originalDate (start day)
+		// - Else use workoutStartTime for new workouts
+		// - Else fallback to today
 		let workoutDate;
-		if (editingWorkoutId && currentWorkout.originalDate) {
-			// When editing, use the EXACT original date string - NO CONVERSION
+		if (currentWorkout.originalDate) {
 			workoutDate = currentWorkout.originalDate;
-		} else {
-			// New workout - use today's date
+		} else if (!editingWorkoutId && workoutStartTime) {
+			const started = new Date(workoutStartTime);
+			if (!isNaN(started.getTime())) {
+				const year = started.getFullYear();
+				const month = String(started.getMonth() + 1).padStart(2, '0');
+				const day = String(started.getDate()).padStart(2, '0');
+				workoutDate = `${year}-${month}-${day}`;
+				currentWorkout.originalDate = workoutDate;
+			}
+		}
+		if (!workoutDate) {
+			// Final fallback
 			const today = new Date();
 			const year = today.getFullYear();
 			const month = String(today.getMonth() + 1).padStart(2, '0');
@@ -6325,6 +6341,16 @@ function resumeWorkoutDraft() {
 	} else {
 		// New workout - start the timer
 		workoutStartTime = draftStartTime || Date.now();
+		// Keep start day fixed for new workouts, even if saved later.
+		if (!currentWorkout.originalDate) {
+			const startDate = new Date(workoutStartTime);
+			if (!isNaN(startDate.getTime())) {
+				const year = startDate.getFullYear();
+				const month = String(startDate.getMonth() + 1).padStart(2, '0');
+				const day = String(startDate.getDate()).padStart(2, '0');
+				currentWorkout.originalDate = `${year}-${month}-${day}`;
+			}
+		}
 		startWorkoutTimer();
 	}
 
@@ -6496,12 +6522,16 @@ function reuseWorkout(workout) {
 	if (!workout) return;
 	const source = JSON.parse(JSON.stringify(workout));
 	delete source.id;
+	const startTs = Date.now();
+	const startDate = new Date(startTs);
+	const startDayKey = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}`;
 	const reused = {
 		name: source.name || 'Workout',
 		exercises: [],
 		gym_name: getSettingsGymSnapshot().gym_name,
 		gym_place_id: getSettingsGymSnapshot().gym_place_id,
-		startTime: new Date(),
+		startTime: startDate,
+		originalDate: startDayKey,
 		duration: 0
 	};
 	if (Array.isArray(source.exercises)) {
@@ -6520,7 +6550,7 @@ function reuseWorkout(workout) {
 	}
 	currentWorkout = reused;
 	editingWorkoutId = null;
-	workoutStartTime = Date.now();
+	workoutStartTime = startTs;
 	setWorkoutTimerDisplay(0);
 	startWorkoutTimer();
 
@@ -6728,10 +6758,12 @@ function initOneRepMaxCalculator() {
 		if (resultUnitLabel) resultUnitLabel.textContent = 'kg';
 	}
 
-	// Calculate 1RM using Epley formula: weight × (1 + reps/30)
+	// Calculate 1RM with practical rules:
+	// - 1 rep should always equal the lifted weight exactly
+	// - for 2+ reps use a strength-biased adjusted Epley (fits trained lifters better)
 	function calculate1RM() {
 		let weight = parseFloat(weightInput.value);
-		const reps = parseFloat(repsInput.value);
+		const reps = parseInt(repsInput.value, 10);
 
 		if (!weight || !reps || weight <= 0 || reps <= 0 || reps > 30) {
 			if (resultEl) resultEl.textContent = '—';
@@ -6740,14 +6772,23 @@ function initOneRepMaxCalculator() {
 		// Round weight to 1 decimal place: 17.52 -> 17.5
 		weight = Math.round(weight * 10) / 10;
 
-		// Epley formula: 1RM = weight × (1 + reps/30)
-		const oneRepMax = weight * (1 + reps / 30);
+		let oneRepMax;
+		if (reps === 1) {
+			oneRepMax = weight;
+		} else {
+			// Dynamic coefficient (roughly 0.040 at low reps to 0.044 around 10 reps)
+			// Example outcomes:
+			// - 105 x 3 -> ~117.5
+			// - 80 x 10 -> ~115
+			const coeff = 0.038 + Math.min(reps, 10) * 0.0006;
+			oneRepMax = weight * (1 + reps * coeff);
+		}
 
 		// Round to 1 decimal place
 		const rounded = Math.round(oneRepMax * 10) / 10;
 
 		if (resultEl) {
-			resultEl.textContent = rounded.toFixed(1);
+			resultEl.textContent = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 		}
 	}
 
