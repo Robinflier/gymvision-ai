@@ -3571,8 +3571,11 @@ def get_gym_dashboard():
 						if sets_n <= 0:
 							continue
 						if not top_machines_from_sql:
-							name = _exercise_display(ex)
-							machine_sets[name] = machine_sets.get(name, 0) + sets_n
+							# Only include exercises that have a key in MACHINE_METADATA (exclude custom exercises)
+							ex_key = ex.get("key") or ""
+							if ex_key and ex_key in MACHINE_METADATA:
+								name = _exercise_display(ex)
+								machine_sets[name] = machine_sets.get(name, 0) + sets_n
 						
 						# Calculate volume (weight × reps) for strength exercises
 						sets = ex.get("sets") or []
