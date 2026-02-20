@@ -4484,7 +4484,7 @@ button,
 }
 
 .gym-chart-label {
-	flex: 0 0 44%;
+	flex: 0 0 55%;
 	min-width: 0;
 	color: #dfe0e6;
 	font-size: 13px;
@@ -4495,7 +4495,8 @@ button,
 }
 
 .gym-chart-barwrap {
-	flex: 1;
+	flex: 0 0 120px;
+	max-width: 120px;
 	height: 10px;
 	background: #1a1a1f;
 	border: 1px solid #242429;
