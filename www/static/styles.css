@@ -4480,28 +4480,31 @@ button,
 .gym-chart-row {
 	display: flex;
 	align-items: center;
-	gap: 10px
+	gap: 10px;
+	justify-content: space-between;
 }
 
 .gym-chart-label {
-	flex: 0 0 55%;
+	flex: 1;
 	min-width: 0;
 	color: #dfe0e6;
 	font-size: 13px;
 	font-weight: 700;
 	white-space: nowrap;
 	overflow: hidden;
-	text-overflow: ellipsis
+	text-overflow: ellipsis;
+	margin-right: 10px;
 }
 
 .gym-chart-barwrap {
-	flex: 0 0 120px;
-	max-width: 120px;
+	flex: 0 0 80px;
+	max-width: 80px;
 	height: 10px;
 	background: #1a1a1f;
 	border: 1px solid #242429;
 	border-radius: 999px;
-	overflow: hidden
+	overflow: hidden;
+	margin-left: auto;
 }
 
 .gym-chart-bar {
