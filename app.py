@@ -3480,7 +3480,15 @@ def get_gym_dashboard():
 							continue
 						if sets_count <= 0:
 							continue
-						machine_sets[label] = sets_count
+						# Filter: only include exercises that have a key in MACHINE_METADATA
+						# Check if this label matches a known exercise display name
+						is_known_exercise = False
+						for key, metadata in MACHINE_METADATA.items():
+							if metadata.get("display") == label:
+								is_known_exercise = True
+								break
+						if is_known_exercise:
+							machine_sets[label] = sets_count
 					top_machines_from_sql = True
 				except Exception as e:
 					print(f"[GYM DASHBOARD] Top machines SQL RPC unavailable, falling back to Python: {e}")
