@@ -82,7 +82,7 @@ var exerciseSelectorInitialized = false;
 // ========== WEIGHT UNIT CONVERSION ==========
 // Always use kg - no unit switching
 function getWeightUnit() {
-	return 'kg';
+		return 'kg';
 }
 
 function isKg() {
@@ -1767,8 +1767,19 @@ async function openGymReportsModal() {
 		await refreshGymReportsBadge();
 	} catch (e) {
 		console.error('[GYM REPORTS] Open modal failed:', e);
+		const errorMsg = e?.message || 'Failed to load reports';
+		// Check if it's a session expired error
+		if (errorMsg.includes('Session expired') || errorMsg.includes('Authentication failed') || errorMsg.includes('Invalid token')) {
+			// Force re-authentication
+			if (supabaseClient) {
+				await supabaseClient.auth.signOut();
+			}
+			closeGymReportsModal();
+			showLoginScreen();
+			return;
+		}
 		if (emptyEl) {
-			emptyEl.textContent = e?.message || 'Failed to load reports';
+			emptyEl.textContent = errorMsg;
 			emptyEl.classList.remove('hidden');
 		}
 	} finally {
@@ -1926,8 +1937,18 @@ async function loadGymDashboardData() {
 	} catch (e) {
 		if (requestId !== gymDashboardLoadRequestId) return;
 		if (loadingEl) loadingEl.style.display = 'none';
+		const errorMsg = e?.message || 'Failed to load dashboard';
+		// Check if it's a session expired error
+		if (errorMsg.includes('Session expired') || errorMsg.includes('Authentication failed') || errorMsg.includes('Invalid token')) {
+			// Force re-authentication
+			if (supabaseClient) {
+				await supabaseClient.auth.signOut();
+			}
+			showLoginScreen();
+			return;
+		}
 		if (errorEl) {
-			errorEl.textContent = e?.message || 'Failed to load dashboard';
+			errorEl.textContent = errorMsg;
 			errorEl.classList.add('show');
 		}
 	}
@@ -4787,7 +4808,7 @@ function setWorkoutTimerDisplay(durationMs = 0) {
 			div.textContent = formatDurationDisplay(durationMs);
 			timerEl.parentNode.replaceChild(div, timerEl);
 		} else {
-			timerEl.textContent = formatDurationDisplay(durationMs);
+		timerEl.textContent = formatDurationDisplay(durationMs);
 		}
 	}
 }
@@ -4949,7 +4970,9 @@ function renderWorkoutList() {
 					<div class="workout-exercise-name">${ex.display || ex.key}</div>
 				</div>
 				<div class="workout-exercise-actions">
-					<button class="workout-exercise-notes-btn ${getExerciseNotes(ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`) ? 'has-notes' : ''}" data-exercise-key="${ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`}" data-exercise-index="${idx}" aria-label="Exercise notes" title="Add notes">
+					<button class="workout-actions-menu-btn" data-exercise-index="${idx}" aria-label="Exercise options">⋯</button>
+					<div class="workout-menu-dropdown hidden" data-exercise-index="${idx}">
+						<button class="workout-menu-item workout-menu-notes-btn ${getExerciseNotes(ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`) ? 'has-notes' : ''}" data-exercise-key="${ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`}" data-exercise-index="${idx}" data-action="notes">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 							<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
 							<polyline points="14 2 14 8 20 8"></polyline>
@@ -4957,11 +4980,24 @@ function renderWorkoutList() {
 							<line x1="16" y1="17" x2="8" y2="17"></line>
 							<polyline points="10 9 9 9 8 9"></polyline>
 						</svg>
+							<span>Notes</span>
 					</button>
-					${infoButtonHtml}
-					<button class="workout-edit-exercise-delete" aria-label="Remove exercise">
-						<img src="static/close.png" alt="" />
+						<button class="workout-menu-item workout-menu-info-btn" data-exercise-key="${ex.key || ''}" data-action="info">
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<circle cx="12" cy="12" r="10"></circle>
+								<line x1="12" y1="16" x2="12" y2="12"></line>
+								<line x1="12" y1="8" x2="12.01" y2="8"></line>
+							</svg>
+							<span>Info</span>
+						</button>
+						<button class="workout-menu-item workout-menu-delete-btn" data-exercise-index="${idx}" data-action="delete">
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<polyline points="3 6 5 6 21 6"></polyline>
+								<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+							</svg>
+							<span>Delete</span>
 					</button>
+					</div>
 				</div>
 			</div>
 		`;
@@ -5254,7 +5290,7 @@ function renderWorkoutList() {
 			if (isCardio) {
 				ex.sets.push({ min: '', sec: '', km: '', cal: '', notes: '' });
 			} else {
-				ex.sets.push({ weight: '', reps: '' });
+			ex.sets.push({ weight: '', reps: '' });
 			}
 			renderWorkoutList();
 			saveWorkoutDraft();
@@ -5263,21 +5299,105 @@ function renderWorkoutList() {
 		li.appendChild(setsContainer);
 		li.appendChild(addSetBtn);
 
-		const deleteExerciseBtn = li.querySelector('.workout-edit-exercise-delete');
-		deleteExerciseBtn.addEventListener('click', () => {
-			currentWorkout.exercises.splice(idx, 1);
-			renderWorkoutList();
-			saveWorkoutDraft();
-		});
+		// Handle 3-dots menu button
+		const menuBtn = li.querySelector('.workout-actions-menu-btn');
+		const menuDropdown = li.querySelector('.workout-menu-dropdown');
+		if (menuBtn && menuDropdown) {
+			menuBtn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				// Close all other menus
+				document.querySelectorAll('.workout-menu-dropdown').forEach(m => {
+					if (m !== menuDropdown) m.classList.add('hidden');
+				});
+				// Toggle this menu
+				menuDropdown.classList.toggle('hidden');
+			});
+		}
 
-		const notesBtn = li.querySelector('.workout-exercise-notes-btn');
+		// Handle menu items
+		const notesBtn = li.querySelector('.workout-menu-notes-btn');
 		if (notesBtn) {
-			notesBtn.addEventListener('click', () => {
-				// Use key if available, otherwise create unique key from display + index
+			notesBtn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				menuDropdown?.classList.add('hidden');
 				const exerciseKey = ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`;
 				openExerciseNotesModal(exerciseKey, idx);
 			});
 		}
+
+		const infoBtn = li.querySelector('.workout-menu-info-btn');
+		if (infoBtn) {
+			infoBtn.addEventListener('click', async (e) => {
+				e.stopPropagation();
+				menuDropdown?.classList.add('hidden');
+				const exerciseKey = ex.key || '';
+				if (!exerciseKey) return;
+				
+				// Get video URL
+				let videoUrl = ex.video;
+				if (!videoUrl) {
+					const meta = findExerciseMetadata(ex);
+					videoUrl = meta?.video || '';
+				}
+				
+				if (!videoUrl) {
+					// Try to fetch from API
+					try {
+						const data = await fetchExerciseInfoByKey(exerciseKey);
+						videoUrl = data?.video || '';
+					} catch (err) {
+						console.error('Failed to get exercise info:', err);
+					}
+				}
+				
+				if (!videoUrl) {
+					alert('No video available for this exercise yet.');
+					return;
+				}
+				
+				// Convert YouTube embed URL to watch URL
+				let watchUrl = videoUrl;
+				if (videoUrl.includes('youtube.com/embed/')) {
+					const videoId = videoUrl.match(/embed\/([^?&#]+)/)?.[1];
+					if (videoId) {
+						watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+					}
+				}
+				
+				// Open in browser/app
+				if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser) {
+					try {
+						await window.Capacitor.Plugins.Browser.open({
+							url: watchUrl,
+							windowName: '_system'
+						});
+					} catch (error) {
+						console.error('Failed to open browser:', error);
+						window.open(watchUrl, '_blank');
+					}
+				} else {
+					window.open(watchUrl, '_blank');
+				}
+			});
+		}
+
+		const deleteBtn = li.querySelector('.workout-menu-delete-btn');
+		if (deleteBtn) {
+			deleteBtn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				menuDropdown?.classList.add('hidden');
+				currentWorkout.exercises.splice(idx, 1);
+				renderWorkoutList();
+				saveWorkoutDraft();
+			});
+		}
+
+		// Close menu when clicking outside
+		document.addEventListener('click', (e) => {
+			if (!li.contains(e.target)) {
+				menuDropdown?.classList.add('hidden');
+			}
+		});
 
 		workoutList.appendChild(li);
 	});
@@ -6581,8 +6701,8 @@ function initProgress() {
 	async function handleWeightSubmit(e) {
 		if (e) e.preventDefault();
 		console.log('[PROGRESS] Form submitted');
-		const weight = document.getElementById('progress-weight')?.value;
-		const dateInputValue = document.getElementById('progress-date')?.value;
+			const weight = document.getElementById('progress-weight')?.value;
+			const dateInputValue = document.getElementById('progress-date')?.value;
 		console.log('[PROGRESS] Weight:', weight, 'Date:', dateInputValue);
 		
 		if (!weight || !dateInputValue) {
@@ -6599,8 +6719,8 @@ function initProgress() {
 		// Round to 1 decimal place: 17.52 -> 17.5
 		weightNum = Math.round(weightNum * 10) / 10;
 		
-		// Convert weight from display unit to kg for storage
-		const currentUnit = getWeightUnit();
+				// Convert weight from display unit to kg for storage
+				const currentUnit = getWeightUnit();
 		const value = convertWeightForStorage(weightNum, currentUnit);
 		const dayKey = dateInputValue; // YYYY-MM-DD from input[type=date]
 		
@@ -6664,40 +6784,40 @@ function initProgress() {
 		// Also save to localStorage for backwards compatibility and offline support
 		const progress = JSON.parse(localStorage.getItem('progress') || '[]');
 		const now = new Date(`${dayKey}T12:00:00`);
-		// Remove any existing entries for this day (to prevent duplicates)
-		const filteredProgress = progress.filter(p => {
-			const pDayKey = p.dayKey || (p.date ? p.date.slice(0, 10) : '');
-			return pDayKey !== dayKey;
-		});
-		// Add the new entry with both date and dayKey for consistency
-		filteredProgress.push({
-			date: now.toISOString(),
-			dayKey: dayKey, // Ensure dayKey is always set
-			weight: value
-		});
-		// Ensure all existing entries also have dayKey
-		const normalizedProgress = filteredProgress.map(p => ({
-			...p,
-			dayKey: p.dayKey || (p.date ? p.date.slice(0, 10) : '')
-		}));
-		localStorage.setItem('progress', JSON.stringify(normalizedProgress));
+				// Remove any existing entries for this day (to prevent duplicates)
+				const filteredProgress = progress.filter(p => {
+					const pDayKey = p.dayKey || (p.date ? p.date.slice(0, 10) : '');
+					return pDayKey !== dayKey;
+				});
+				// Add the new entry with both date and dayKey for consistency
+				filteredProgress.push({
+					date: now.toISOString(),
+					dayKey: dayKey, // Ensure dayKey is always set
+					weight: value
+				});
+				// Ensure all existing entries also have dayKey
+				const normalizedProgress = filteredProgress.map(p => ({
+					...p,
+					dayKey: p.dayKey || (p.date ? p.date.slice(0, 10) : '')
+				}));
+				localStorage.setItem('progress', JSON.stringify(normalizedProgress));
 		
-		// Reset weight input
-		const weightInput = document.getElementById('progress-weight');
-		if (weightInput) weightInput.value = '';
-		// Reset date to today after saving
-		const today = new Date();
-		const year = today.getFullYear();
-		const month = String(today.getMonth() + 1).padStart(2, '0');
-		const day = String(today.getDate()).padStart(2, '0');
-		if (dateInput) dateInput.value = `${year}-${month}-${day}`;
-		const dateEl = document.getElementById('progress-date');
-		if (dateEl) {
-			const today = new Date();
-			dateEl.value = today.toISOString().slice(0, 10);
-		}
-		loadProgress();
-	}
+				// Reset weight input
+				const weightInput = document.getElementById('progress-weight');
+				if (weightInput) weightInput.value = '';
+				// Reset date to today after saving
+				const today = new Date();
+				const year = today.getFullYear();
+				const month = String(today.getMonth() + 1).padStart(2, '0');
+				const day = String(today.getDate()).padStart(2, '0');
+				if (dateInput) dateInput.value = `${year}-${month}-${day}`;
+				const dateEl = document.getElementById('progress-date');
+				if (dateEl) {
+					const today = new Date();
+					dateEl.value = today.toISOString().slice(0, 10);
+				}
+				loadProgress();
+			}
 	
 	if (progressForm) {
 		console.log('[PROGRESS] Form found, adding submit listener');
@@ -8117,52 +8237,52 @@ async function saveGymName(gymName, placeId = null) {
 
 		saveGymNameLock = true;
 
-		if (!supabaseClient) {
-			await initSupabase();
-		}
-		if (!supabaseClient) {
-			console.warn('[GYM] Supabase not available, saving to localStorage only');
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		console.warn('[GYM] Supabase not available, saving to localStorage only');
 			saveGymNameLock = false;
+		return;
+	}
+
+	try {
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			// Not logged in, save to localStorage only
+				saveGymNameLock = false;
 			return;
 		}
-
-		try {
-			const { data: { session } } = await supabaseClient.auth.getSession();
-			if (!session) {
-				// Not logged in, save to localStorage only
-				saveGymNameLock = false;
-				return;
-			}
 
 			// Get current values from localStorage (may have changed during debounce)
 			const currentGym = localStorage.getItem('user-gym-name') || '';
 			const currentPlaceId = localStorage.getItem('user-gym-place-id') || '';
 
-			// Call backend endpoint to update user_metadata and sync to analytics table
-			const apiUrl = getApiUrl('/api/collect-gym-data');
-			const response = await fetch(apiUrl, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					'Authorization': `Bearer ${session.access_token}`
-				},
-				body: JSON.stringify({
+		// Call backend endpoint to update user_metadata and sync to analytics table
+		const apiUrl = getApiUrl('/api/collect-gym-data');
+		const response = await fetch(apiUrl, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${session.access_token}`
+			},
+			body: JSON.stringify({
 					gym_name: currentGym || null,
 					gym_place_id: currentGym ? (currentPlaceId || null) : null
-				})
-			});
+			})
+		});
 
-			if (!response.ok) {
-				const errorData = await response.json().catch(() => ({}));
-				console.error('[GYM] Error saving gym name:', errorData);
-			} else {
-				console.log('[GYM] Gym name saved and synced successfully');
-			}
-		} catch (e) {
-			console.error('[GYM] Error saving gym name:', e);
+		if (!response.ok) {
+			const errorData = await response.json().catch(() => ({}));
+			console.error('[GYM] Error saving gym name:', errorData);
+		} else {
+			console.log('[GYM] Gym name saved and synced successfully');
+		}
+	} catch (e) {
+		console.error('[GYM] Error saving gym name:', e);
 		} finally {
 			saveGymNameLock = false;
-		}
+	}
 	}, 500);
 }
 
@@ -8221,56 +8341,56 @@ async function saveDataConsent(hasConsent) {
 
 		saveDataConsentLock = true;
 
-		if (!supabaseClient) {
-			await initSupabase();
-		}
-		if (!supabaseClient) {
-			console.warn('[CONSENT] Supabase not available, saving to localStorage only');
+	if (!supabaseClient) {
+		await initSupabase();
+	}
+	if (!supabaseClient) {
+		console.warn('[CONSENT] Supabase not available, saving to localStorage only');
 			saveDataConsentLock = false;
+		return;
+	}
+
+	try {
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session) {
+			// Not logged in, save to localStorage only
+				saveDataConsentLock = false;
 			return;
 		}
 
-		try {
-			const { data: { session } } = await supabaseClient.auth.getSession();
-			if (!session) {
-				// Not logged in, save to localStorage only
-				saveDataConsentLock = false;
-				return;
-			}
-
 			// Read latest values at send-time (coalesces rapid toggles to one request).
 			const latestConsent = localStorage.getItem('user-data-consent') === 'true';
-			const gymNameRaw = localStorage.getItem('user-gym-name');
-			const gymName = (gymNameRaw !== null) ? (gymNameRaw || '').trim() : '';
-			const placeId = (localStorage.getItem('user-gym-place-id') || '').trim();
+		const gymNameRaw = localStorage.getItem('user-gym-name');
+		const gymName = (gymNameRaw !== null) ? (gymNameRaw || '').trim() : '';
+		const placeId = (localStorage.getItem('user-gym-place-id') || '').trim();
 
 			// Call backend endpoint to update user_metadata and sync to analytics table
 			const apiUrl = getApiUrl('/api/collect-gym-data');
-			const response = await fetch(apiUrl, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					'Authorization': `Bearer ${session.access_token}`
-				},
-				body: JSON.stringify({
+		const response = await fetch(apiUrl, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${session.access_token}`
+			},
+			body: JSON.stringify({
 					data_consent: latestConsent,
-					// send gym too (null clears)
-					gym_name: gymName ? gymName : null,
-					gym_place_id: gymName ? (placeId || null) : null
-				})
-			});
+				// send gym too (null clears)
+				gym_name: gymName ? gymName : null,
+				gym_place_id: gymName ? (placeId || null) : null
+			})
+		});
 
-			if (!response.ok) {
-				const errorData = await response.json().catch(() => ({}));
-				console.error('[CONSENT] Error saving consent:', errorData);
-			} else {
-				console.log('[CONSENT] Consent saved and synced successfully');
-			}
-		} catch (e) {
-			console.error('[CONSENT] Error saving consent:', e);
+		if (!response.ok) {
+			const errorData = await response.json().catch(() => ({}));
+			console.error('[CONSENT] Error saving consent:', errorData);
+		} else {
+			console.log('[CONSENT] Consent saved and synced successfully');
+		}
+	} catch (e) {
+		console.error('[CONSENT] Error saving consent:', e);
 		} finally {
 			saveDataConsentLock = false;
-		}
+	}
 	}, 400);
 }
 

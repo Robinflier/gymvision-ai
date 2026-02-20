@@ -140,6 +140,46 @@ def normalize_problem_report_type(value: Optional[str]) -> Optional[str]:
 	key = (value or "").strip().lower().replace(" ", "_")
 	return PROBLEM_REPORT_TYPES.get(key)
 
+
+def verify_user_token(access_token: str) -> tuple[Optional[Any], Optional[str]]:
+	"""
+	Verify user token and return user object or error message.
+	Handles expired sessions gracefully by returning a clear error message.
+	
+	Returns:
+		tuple: (user_object, error_message)
+		If successful: (user, None)
+		If failed: (None, error_message)
+	"""
+	if not SUPABASE_AVAILABLE:
+		return None, "Supabase not available"
+	
+	SUPABASE_URL = os.getenv("SUPABASE_URL")
+	SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+	
+	if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+		return None, "Supabase configuration missing"
+	
+	try:
+		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+		user_response = supabase_client.auth.get_user(access_token)
+		
+		if user_response.user:
+			return user_response.user, None
+		else:
+			return None, "Invalid token"
+	except Exception as e:
+		error_msg = str(e)
+		# Check if it's a session expired error
+		if "Session from session_id claim in JWT does not exist" in error_msg:
+			return None, "Session expired. Please sign in again."
+		elif "JWT" in error_msg or "token" in error_msg.lower() or "expired" in error_msg.lower():
+			return None, "Session expired. Please sign in again."
+		else:
+			# Log other errors for debugging
+			print(f"[AUTH ERROR] {error_msg}")
+			return None, "Authentication failed. Please sign in again."
+
 MACHINE_METADATA: Dict[str, Dict[str, Any]] = {
 	# Chest
 	"bench_press": {"display": "Bench Press", "muscles": normalize_muscles(["Chest", "Triceps", "Shoulders"]), "video": "https://www.youtube.com/embed/ejI1Nlsul9k", "image": "https://strengthlevel.com/images/illustrations/bench-press.png"},
@@ -2569,12 +2609,10 @@ def gym_problem_reports():
 		return jsonify({"error": "Supabase configuration missing"}), 500
 
 	try:
-		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-		user_response = supabase_client.auth.get_user(access_token)
-		if not user_response.user:
-			return jsonify({"error": "Invalid token"}), 401
+		user, error_msg = verify_user_token(access_token)
+		if not user:
+			return jsonify({"error": error_msg or "Authentication failed"}), 401
 
-		user = user_response.user
 		user_id = user.id
 		user_meta = user.user_metadata or {}
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
@@ -3071,13 +3109,11 @@ def get_gym_dashboard():
 			return jsonify({"error": "Supabase configuration missing"}), 500
 		
 		# Verify user
-		supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-		user_response = supabase_client.auth.get_user(access_token)
+		user, error_msg = verify_user_token(access_token)
+		if not user:
+			return jsonify({"error": error_msg or "Authentication failed"}), 401
 		
-		if not user_response.user:
-			return jsonify({"error": "Invalid token"}), 401
-		
-		user_metadata = user_response.user.user_metadata or {}
+		user_metadata = user.user_metadata or {}
 		
 		# Check if this is a gym account
 		if user_metadata.get("is_gym_account") != True:
@@ -3091,7 +3127,7 @@ def get_gym_dashboard():
 				"message": "Your gym account needs to be verified by an administrator before you can access dashboard data. Please contact support."
 			}), 403
 		
-		gym_id = user_response.user.id
+		gym_id = user.id
 		gym_name = user_metadata.get("gym_name", "Unknown")
 		is_premium = user_metadata.get("is_premium", False) == True  # Premium accounts get full data access
 		period = (request.args.get("period") or "week").lower().strip()

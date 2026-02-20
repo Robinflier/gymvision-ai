@@ -883,13 +883,16 @@
 				<div class="brand brand-logo"><img src="static/logo.png" alt="GymVision" /></div>
 				<div class="icons streak">
 					<button type="button" id="gym-dashboard-reports-btn" class="gym-reports-top-btn">
-						Reports
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path>
+							<path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+						</svg>
 						<span id="gym-dashboard-reports-badge" class="gym-reports-top-badge hidden">0</span>
 					</button>
 				</div>
 			</header>
 			<div style="padding: 22px;">
-				<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; gap: 14px;">
+				<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; gap: 14px;">
 					<h2 id="gym-dashboard-title" style="margin:0;font-size:22px;font-weight:800;flex:1;">Gym Dashboard</h2>
 					<div style="display: flex; align-items: center; gap: 10px;">
 						<label for="gym-dashboard-date" style="color: #c9cad6; font-size: 12px; font-weight: 600; white-space: nowrap;">Date:</label>
@@ -900,7 +903,7 @@
 				<div id="gym-dashboard-loading" class="progress-empty" style="padding:18px 0;">Loading dashboard...</div>
 
 				<div id="gym-dashboard-panels" class="hidden">
-					<div class="settings-stats-grid" style="margin-bottom: 44px;">
+					<div class="settings-stats-grid" style="margin-bottom: 20px; margin-top: 20px;">
 						<div class="settings-stat-box" style="background:linear-gradient(135deg,#18181d,#121215);border:1px solid rgba(255,255,255,0.06);">
 							<div class="settings-stat-value" id="gym-dashboard-total-users">0</div>
 							<div class="settings-stat-label">Users</div>
@@ -914,7 +917,7 @@
 							<div class="settings-stat-label">Exercises</div>
 						</div>
 					</div>
-					<div class="gym-dashboard-controls" style="margin: 16px 0 14px;">
+					<div class="gym-dashboard-controls" style="margin: 20px 0;">
 						<div class="gym-period-toggle" role="tablist" aria-label="Dashboard period">
 							<button type="button" class="gym-period-btn" data-period="week" aria-selected="false">Week</button>
 							<button type="button" class="gym-period-btn" data-period="month" aria-selected="false">Month</button>
