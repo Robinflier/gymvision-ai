@@ -4445,7 +4445,7 @@ button,
 	color: #fff;
 	font-size: 12px;
 	font-weight: 700;
-	padding: 4px;
+	padding: 2px;
 	min-width: 40px;
 	width: 40px;
 	height: 40px;
@@ -4457,16 +4457,16 @@ button,
 }
 
 .gym-reports-icon {
-	width: 28px;
-	height: 28px;
+	width: 32px;
+	height: 32px;
 	object-fit: contain;
 	filter: brightness(0) invert(1);
 }
 
 .gym-reports-top-badge {
 	position: absolute;
-	top: 2px;
-	right: 2px;
+	top: 0px;
+	right: 0px;
 	min-width: 18px;
 	height: 18px;
 	padding: 0 6px;
