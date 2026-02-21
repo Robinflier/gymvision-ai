@@ -1457,9 +1457,8 @@ button,
 	font-weight: 900;
 	color: #fff;
 	line-height: 1;
-	letter-spacing: -2px;
+	letter-spacing: 0;
 	display: inline-block;
-	transform: rotate(90deg);
 }
 
 .workout-menu-dropdown {
