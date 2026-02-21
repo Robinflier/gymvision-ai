@@ -4524,11 +4524,11 @@ button,
 .gym-reports-top-btn {
 	background: rgba(21, 21, 26, 0.95);
 	border: 1px solid rgba(255, 255, 255, 0.14);
-	border-radius: 10px;
+	border-radius: 50%;
 	color: #fff;
 	font-size: 12px;
 	font-weight: 700;
-	padding: 8px 10px;
+	padding: 6px;
 	min-width: 40px;
 	width: 40px;
 	height: 40px;
@@ -4540,10 +4540,10 @@ button,
 	position: relative;
 }
 
-.gym-reports-top-btn svg {
-	width: 18px;
-	height: 18px;
-	stroke: currentColor;
+.gym-reports-icon {
+	width: 24px;
+	height: 24px;
+	object-fit: contain;
 }
 
 .gym-reports-top-badge {
