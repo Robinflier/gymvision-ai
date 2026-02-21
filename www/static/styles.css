@@ -4441,26 +4441,32 @@ button,
 .gym-reports-top-btn {
 	background: rgba(21, 21, 26, 0.95);
 	border: 1px solid rgba(255, 255, 255, 0.14);
-	border-radius: 10px;
+	border-radius: 50%;
 	color: #fff;
 	font-size: 12px;
 	font-weight: 700;
-	padding: 8px 10px;
-	min-width: 86px;
+	padding: 6px;
+	min-width: 40px;
+	width: 40px;
+	height: 40px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	gap: 8px;
-	cursor: pointer
+	cursor: pointer;
+	position: relative;
 }
 
 .gym-reports-icon {
-	width: 20px;
-	height: 20px;
+	width: 24px;
+	height: 24px;
 	object-fit: contain;
+	filter: brightness(0) invert(1);
 }
 
 .gym-reports-top-badge {
+	position: absolute;
+	top: -2px;
+	right: -2px;
 	min-width: 18px;
 	height: 18px;
 	padding: 0 6px;
@@ -4472,7 +4478,8 @@ button,
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	line-height: 1
+	line-height: 1;
+	z-index: 10;
 }
 
 /* Gym dashboard period toggle */
@@ -5182,7 +5189,7 @@ button,
 }
 
 .gym-ranked-label {
-	flex: 0 0 38%;
+	flex: 1 1 auto;
 	min-width: 0;
 	color: #dfe0e6;
 	font-size: 13px;
@@ -5207,6 +5214,7 @@ button,
 	min-width: 78px;
 	max-width: 108px;
 	margin-left: auto;
+	margin-right: 6px;
 	height: 12px;
 	background: #1a1a1f;
 	border: 1px solid #242429;
