@@ -1432,85 +1432,6 @@ button,
 	flex-shrink: 0;
 }
 
-/* Workout actions menu (3-dots) */
-.workout-actions-menu-btn {
-	background: rgba(255, 255, 255, 0.05);
-	border: 1px solid rgba(255, 255, 255, 0.16);
-	color: #fff;
-	border-radius: 8px;
-	padding: 0;
-	cursor: pointer;
-	width: 32px;
-	height: 32px;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	flex-shrink: 0;
-	font-size: 20px;
-	font-weight: 900;
-	line-height: 1;
-	transition: all 0.2s;
-}
-
-.workout-actions-menu-btn:hover {
-	background: rgba(255, 255, 255, 0.1);
-}
-
-.workout-menu-dropdown {
-	position: absolute;
-	top: 36px;
-	right: 0;
-	background: #1a1a1d;
-	border: 1px solid rgba(255, 255, 255, 0.12);
-	border-radius: 12px;
-	padding: 6px;
-	min-width: 140px;
-	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-	z-index: 1000;
-}
-
-.workout-menu-dropdown.hidden {
-	display: none;
-}
-
-.workout-menu-item {
-	width: 100%;
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	padding: 10px 12px;
-	border-radius: 8px;
-	background: transparent;
-	border: none;
-	color: #dfe0e6;
-	font-size: 14px;
-	font-weight: 600;
-	cursor: pointer;
-	transition: all 0.2s;
-	text-align: left;
-}
-
-.workout-menu-item:hover {
-	background: rgba(255, 255, 255, 0.08);
-}
-
-.workout-menu-item svg {
-	flex-shrink: 0;
-	stroke: currentColor;
-}
-
-.workout-menu-item.workout-menu-notes-btn.has-notes {
-	color: #b7a5ff;
-}
-
-.workout-menu-item.workout-menu-delete-btn {
-	color: #ef4444;
-}
-
-.workout-menu-item.workout-menu-delete-btn:hover {
-	background: rgba(239, 68, 68, 0.1);
-}
-
 
 
 .workout-view-header {
@@ -4480,31 +4401,27 @@ button,
 .gym-chart-row {
 	display: flex;
 	align-items: center;
-	gap: 10px;
-	justify-content: space-between;
+	gap: 10px
 }
 
 .gym-chart-label {
-	flex: 1;
+	flex: 0 0 44%;
 	min-width: 0;
 	color: #dfe0e6;
 	font-size: 13px;
 	font-weight: 700;
 	white-space: nowrap;
 	overflow: hidden;
-	text-overflow: ellipsis;
-	margin-right: 10px;
+	text-overflow: ellipsis
 }
 
 .gym-chart-barwrap {
-	flex: 0 0 80px;
-	max-width: 80px;
+	flex: 1;
 	height: 10px;
 	background: #1a1a1f;
 	border: 1px solid #242429;
 	border-radius: 999px;
-	overflow: hidden;
-	margin-left: auto;
+	overflow: hidden
 }
 
 .gym-chart-bar {
@@ -4528,28 +4445,28 @@ button,
 	color: #fff;
 	font-size: 12px;
 	font-weight: 700;
-	padding: 6px;
+	padding: 4px;
 	min-width: 40px;
 	width: 40px;
 	height: 40px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	gap: 8px;
 	cursor: pointer;
 	position: relative;
 }
 
 .gym-reports-icon {
-	width: 24px;
-	height: 24px;
+	width: 28px;
+	height: 28px;
 	object-fit: contain;
+	filter: brightness(0) invert(1);
 }
 
 .gym-reports-top-badge {
 	position: absolute;
-	top: 4px;
-	right: 4px;
+	top: 2px;
+	right: 2px;
 	min-width: 18px;
 	height: 18px;
 	padding: 0 6px;
@@ -5271,7 +5188,7 @@ button,
 }
 
 .gym-ranked-label {
-	flex: 0 0 38%;
+	flex: 0 0 46%;
 	min-width: 0;
 	color: #dfe0e6;
 	font-size: 13px;
@@ -5291,7 +5208,9 @@ button,
 }
 
 .gym-ranked-barwrap {
-	flex: 0.8;
+	flex: 0 0 30%;
+	min-width: 88px;
+	max-width: 132px;
 	height: 12px;
 	background: #1a1a1f;
 	border: 1px solid #242429;
