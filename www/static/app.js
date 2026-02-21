@@ -4970,7 +4970,9 @@ function renderWorkoutList() {
 					<div class="workout-exercise-name">${ex.display || ex.key}</div>
 				</div>
 				<div class="workout-exercise-actions">
-					<button class="workout-actions-menu-btn" data-exercise-index="${idx}" aria-label="Exercise options">⋯</button>
+					<button class="workout-actions-menu-btn" data-exercise-index="${idx}" aria-label="Exercise options">
+						<span class="workout-dots">⋮</span>
+					</button>
 					<div class="workout-menu-dropdown hidden" data-exercise-index="${idx}">
 						<button class="workout-menu-item workout-menu-notes-btn ${getExerciseNotes(ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`) ? 'has-notes' : ''}" data-exercise-key="${ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`}" data-exercise-index="${idx}" data-action="notes">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

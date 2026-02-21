@@ -1432,6 +1432,93 @@ button,
 	flex-shrink: 0;
 }
 
+/* Workout actions menu (3-dots) */
+.workout-actions-menu-btn {
+	background: transparent;
+	border: none;
+	color: #fff;
+	padding: 0;
+	cursor: pointer;
+	width: 32px;
+	height: 32px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	transition: opacity 0.2s;
+}
+
+.workout-actions-menu-btn:hover {
+	opacity: 0.8;
+}
+
+.workout-dots {
+	font-size: 24px;
+	font-weight: 900;
+	color: #fff;
+	line-height: 1;
+	letter-spacing: -2px;
+	display: inline-block;
+	transform: rotate(90deg);
+}
+
+.workout-menu-dropdown {
+	position: absolute;
+	top: 36px;
+	right: 0;
+	background: #1a1a1d;
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 12px;
+	padding: 8px;
+	min-width: 160px;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+	z-index: 1000;
+}
+
+.workout-menu-dropdown.hidden {
+	display: none;
+}
+
+.workout-menu-item {
+	width: 100%;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 14px;
+	border-radius: 8px;
+	background: transparent;
+	border: none;
+	color: #dfe0e6;
+	font-size: 14px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s;
+	text-align: left;
+}
+
+.workout-menu-item:hover {
+	background: rgba(255, 255, 255, 0.08);
+}
+
+.workout-menu-item svg {
+	flex-shrink: 0;
+	stroke: currentColor;
+	width: 16px;
+	height: 16px;
+}
+
+.workout-menu-item.workout-menu-notes-btn.has-notes {
+	color: #b7a5ff;
+}
+
+.workout-menu-item.workout-menu-delete-btn {
+	color: #ef4444;
+}
+
+.workout-menu-item.workout-menu-delete-btn:hover {
+	background: rgba(239, 68, 68, 0.1);
+}
+
 
 
 .workout-view-header {
