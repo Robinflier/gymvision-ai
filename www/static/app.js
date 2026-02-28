@@ -1919,6 +1919,44 @@ async function loadGymDashboardData() {
 		if (workoutsEl) workoutsEl.textContent = totalWorkouts;
 		if (exercisesEl) exercisesEl.textContent = totalExercises;
 
+		// Busy status indicator
+		const busyStatus = data.busy_status || {};
+		const busyIndicatorEl = document.getElementById('gym-busy-indicator');
+		const busyDotEl = document.getElementById('gym-busy-dot');
+		const busyValueEl = document.getElementById('gym-busy-value');
+		
+		if (busyIndicatorEl && busyStatus.status) {
+			const status = busyStatus.status;
+			let statusText = '';
+			let statusColor = '';
+			
+			if (status === 'busy') {
+				statusText = 'Busy';
+				statusColor = '#ef4444';
+			} else if (status === 'moderate') {
+				statusText = 'A little busy';
+				statusColor = '#f97316';
+			} else if (status === 'quiet') {
+				statusText = 'Not busy';
+				statusColor = '#22c55e';
+			} else {
+				statusText = 'Not busy';
+				statusColor = '#22c55e';
+			}
+			
+			if (busyDotEl) {
+				busyDotEl.style.backgroundColor = statusColor;
+				busyDotEl.style.boxShadow = `0 0 12px ${statusColor}40`;
+			}
+			if (busyValueEl) {
+				busyValueEl.textContent = statusText;
+				busyValueEl.style.color = statusColor;
+			}
+			busyIndicatorEl.classList.remove('hidden');
+		} else if (busyIndicatorEl) {
+			busyIndicatorEl.classList.add('hidden');
+		}
+
 		// Charts
 		const charts = stats.charts || {};
 		console.log('[GYM DASHBOARD] Charts data:', {

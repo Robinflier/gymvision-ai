@@ -4568,6 +4568,59 @@ button,
 	z-index: 10;
 }
 
+/* Gym busy status indicator */
+.gym-busy-indicator {
+	background: linear-gradient(135deg, #18181d, #121215);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 12px;
+	padding: 14px 18px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.gym-busy-status {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.gym-busy-dot {
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	background: #6b7280;
+	box-shadow: 0 0 12px rgba(107, 114, 128, 0.4);
+	animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+	0%, 100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.7;
+	}
+}
+
+.gym-busy-text {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.gym-busy-label {
+	color: #c9cad6;
+}
+
+.gym-busy-value {
+	color: #6b7280;
+	font-weight: 700;
+	transition: color 0.3s ease;
+}
+
 /* Gym dashboard period toggle */
 .gym-dashboard-controls {
 	display: flex;

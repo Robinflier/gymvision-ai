@@ -3972,12 +3972,96 @@ def get_gym_dashboard():
 				"exercise_categories": chart.get("exercise_categories", [])  # Include weights/cardio ratio for all accounts
 			}
 		
+		# Calculate busy status
+		busy_status = {"status": "quiet", "current_workouts": 0, "historical_avg": 0, "percentage": 0}
+		try:
+			now = datetime.now(timezone.utc)
+			today = now.date()
+			today_str = today.isoformat()
+			current_weekday = today.weekday()
+			target_gym = (gym_name or "").lower().strip()
+			
+			today_workouts = 0
+			if consent_user_ids and all_workouts:
+				for w in all_workouts:
+					w_gym = (w.get("gym_name") or "").lower().strip()
+					if w_gym and w_gym == target_gym and w.get("date") == today_str:
+						today_workouts += 1
+			
+			historical_workouts = []
+			if consent_user_ids:
+				four_weeks_ago = today - timedelta(days=28)
+				try:
+					for i in range(0, len(consent_user_ids), 50):
+						chunk = consent_user_ids[i:i+50]
+						q = admin_client.table("workouts").select("date,gym_name").in_("user_id", chunk).gte("date", four_weeks_ago.isoformat()).lte("date", (today - timedelta(days=1)).isoformat())
+						res = q.execute()
+						if res.data:
+							for w in res.data:
+								w_gym = (w.get("gym_name") or "").lower().strip()
+								if w_gym and w_gym == target_gym:
+									w_date = w.get("date")
+									if w_date:
+										try:
+											w_date_obj = datetime.fromisoformat(w_date).date()
+											if w_date_obj.weekday() == current_weekday:
+												historical_workouts.append(w_date_obj)
+										except:
+											pass
+				except Exception as e:
+					print(f"[GYM DASHBOARD] Error calculating busy status: {e}")
+			
+			if historical_workouts:
+				weeks = {}
+				for w_date in historical_workouts:
+					iso_year, iso_week, _ = w_date.isocalendar()
+					week_key = f"{iso_year}-W{iso_week:02d}"
+					if week_key not in weeks:
+						weeks[week_key] = []
+					weeks[week_key].append(w_date)
+				
+				if weeks:
+					total_workouts = len(historical_workouts)
+					num_weeks = len(weeks)
+					historical_avg = total_workouts / num_weeks if num_weeks > 0 else 0
+				else:
+					historical_avg = 0
+			else:
+				historical_avg = 0
+			
+			if historical_avg > 0:
+				percentage = (today_workouts / historical_avg) * 100
+				if percentage >= 150:
+					status = "busy"
+				elif percentage >= 100:
+					status = "moderate"
+				else:
+					status = "quiet"
+			else:
+				if today_workouts >= 10:
+					status = "busy"
+				elif today_workouts >= 5:
+					status = "moderate"
+				else:
+					status = "quiet"
+				percentage = 0
+			
+			busy_status = {
+				"status": status,
+				"current_workouts": today_workouts,
+				"historical_avg": round(historical_avg, 1),
+				"percentage": round(percentage, 0) if historical_avg > 0 else 0
+			}
+		except Exception as e:
+			print(f"[GYM DASHBOARD] Error calculating busy status: {e}")
+		
 		return jsonify({
 			"success": True,
 			"gym_id": gym_id,
 			"gym_name": gym_name,
 			"is_premium": is_premium,
-			"statistics": statistics
+			"statistics": statistics,
+			"busy_status": busy_status
 		}), 200
 		
 	except Exception as e:
