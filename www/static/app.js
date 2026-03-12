@@ -7,11 +7,9 @@
 function getApiUrl(path) {
 	// Check if we're in Capacitor (mobile app)
 	if (window.Capacitor && window.Capacitor.isNativePlatform()) {
-		// For images, use local static files in Capacitor (much faster, no network requests)
-		if (path.startsWith('/images/')) {
-			return `static${path}`;
-		}
-		// For API calls, use the backend URL from environment or default to Render URL
+		// Use the backend URL from environment or default to Render URL
+		// Dit geldt nu ook voor /images/, zodat we altijd dezelfde afbeeldingen
+		// uit de backend "images" map halen (bijv. ~/Documents/images).
 		const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
 		return `${backendUrl}${path}`;
 	}
@@ -6130,7 +6128,8 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 				.from('workouts')
 				.select('*')
 				.eq('user_id', session.user.id)
-				.order('date', { ascending: false });
+				.order('date', { ascending: false })
+				.limit(50); // Load only most recent 50 workouts for performance
 
 			if (error) {
 				console.error('[WORKOUT] Error loading workouts:', error);
