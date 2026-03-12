@@ -802,17 +802,11 @@ def list_gym_accounts():
 			traceback.print_exc()
 			return jsonify({"accounts": []}), 200
 		
-		print(f"[ADMIN] Found {len(users_list)} total users")
+		# Log alleen een geaggregeerde samenvatting, geen volledige usergegevens
+		print(f"[ADMIN] Found {len(users_list)} total users (summary only, no PII)")
 		
-		# Debug: print first few users to see their metadata
-		if users_list:
-			try:
-				first_user = users_list[0]
-				print(f"[ADMIN] First user sample: id={getattr(first_user, 'id', 'N/A')}, email={getattr(first_user, 'email', 'N/A')}")
-				print(f"[ADMIN] First user metadata type: {type(getattr(first_user, 'user_metadata', None))}")
-				print(f"[ADMIN] First user metadata: {getattr(first_user, 'user_metadata', None)}")
-			except Exception as e:
-				print(f"[ADMIN] Error inspecting first user: {e}")
+		# Eventueel kun je hier in de toekomst een volledig anonieme samenvatting toevoegen
+		# (bijvoorbeeld aantallen gym-accounts), maar log geen ruwe metadata meer.
 		
 		gym_accounts = []
 		for idx, user in enumerate(users_list):
@@ -849,16 +843,19 @@ def list_gym_accounts():
 				is_gym_value = user_meta.get("is_gym_account")
 				is_gym = is_gym_value == True or is_gym_value == "true" or str(is_gym_value).lower() == "true"
 				
-				# Log all users to see what's happening (not just first 5)
-				if is_gym or idx < 10:  # Log gym accounts and first 10 regular users
-					print(f"[ADMIN] User {user_email} (id={user_id}): is_gym_account={is_gym}, has_metadata={bool(user_meta)}, metadata_keys={list(user_meta.keys()) if user_meta else []}")
-					if user_meta:
-						print(f"[ADMIN]   Full metadata: {user_meta}")
+				# Beperk logging: geen volledige metadata of e-mails meer loggen
+				if is_gym or idx < 10:  # Alleen beperkte, geanonimiseerde info
+					safe_user_id = str(user_id)[:8] if user_id else "unknown"
+					print(
+						f"[ADMIN] User id_prefix={safe_user_id}: "
+						f"is_gym_account={is_gym}, has_metadata={bool(user_meta)}, "
+						f"metadata_keys={list(user_meta.keys()) if user_meta else []}"
+					)
 					if not is_gym and user_meta:
-						# Check if metadata has gym-related fields but is_gym_account is missing/wrong
+						# Check of er mogelijke gym-velden zijn zonder correcte flag,
+						# maar log geen volledige waarden meer.
 						if user_meta.get("gym_name") or user_meta.get("contact_name"):
-							print(f"[ADMIN]   WARNING: User has gym fields but is_gym_account is not set correctly!")
-							print(f"[ADMIN]   is_gym_account value: {user_meta.get('is_gym_account')} (type: {type(user_meta.get('is_gym_account'))})")
+							print("[ADMIN]   WARNING: Possible gym metadata without is_gym_account flag")
 				
 				if is_gym:
 					# Only show gym accounts that are not rejected
@@ -1213,6 +1210,134 @@ def toggle_premium_gym_account(user_id: str):
 		import traceback
 		traceback.print_exc()
 		return jsonify({"error": f"Failed to update premium status: {str(e)}"}), 500
+
+
+@app.route("/api/admin/exercises", methods=["GET", "OPTIONS"])
+def list_all_exercises():
+	"""
+	List all exercises used in workouts, including custom exercises.
+	Shows exercise name, usage count, and whether it's a custom exercise.
+	Only accessible by admin users.
+	"""
+	if request.method == "OPTIONS":
+		return jsonify({}), 200
+	
+	if not SUPABASE_AVAILABLE:
+		return jsonify({"error": "Supabase not available"}), 500
+	
+	# TEMPORARILY DISABLED AUTH FOR TESTING
+	skip_auth = True  # TEMPORARY
+	
+	# Get Authorization header
+	auth_header = request.headers.get("Authorization")
+	
+	if not skip_auth:
+		if not auth_header or not auth_header.startswith("Bearer "):
+			return jsonify({"error": "Authentication required"}), 401
+		
+		access_token = auth_header.replace("Bearer ", "").strip()
+		
+		try:
+			user, error_msg = verify_user_token(access_token)
+			if not user:
+				return jsonify({"error": error_msg or "Authentication failed"}), 401
+			
+			# Check if user is admin
+			if not is_admin_user(user.id, user.email):
+				return jsonify({"error": "Admin access required"}), 403
+		except Exception as e:
+			return jsonify({"error": "Authentication error: " + str(e)}), 401
+	
+	try:
+		SUPABASE_URL = os.getenv("SUPABASE_URL")
+		SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+		
+		if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+			return jsonify({"error": "Supabase configuration missing"}), 500
+		
+		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+		
+		# Get all workouts with exercises
+		result = admin_client.table("workouts").select("exercises").execute()
+		
+		# Count exercises
+		exercise_counts = {}
+		total_workouts = 0
+		workouts_with_exercises = 0
+		
+		for workout in result.data:
+			total_workouts += 1
+			exercises = workout.get("exercises")
+			
+			if not exercises:
+				continue
+			
+			workouts_with_exercises += 1
+			
+			# Handle both array and single exercise formats
+			exercise_list = exercises if isinstance(exercises, list) else [exercises]
+			
+			for exercise in exercise_list:
+				if not exercise or not isinstance(exercise, dict):
+					continue
+				
+				# Get exercise name (display name or key)
+				exercise_name = exercise.get("display") or exercise.get("name") or exercise.get("key") or "Unknown"
+				exercise_key = exercise.get("key", "")
+				is_custom = exercise.get("isCustom", False) or (exercise_key and exercise_key.startswith("custom_"))
+				
+				# Create unique identifier
+				exercise_id = exercise_key if exercise_key else exercise_name.lower().strip()
+				
+				if exercise_id not in exercise_counts:
+					exercise_counts[exercise_id] = {
+						"name": exercise_name,
+						"key": exercise_key,
+						"is_custom": is_custom,
+						"count": 0,
+						"muscles": exercise.get("muscles", []),
+						"is_cardio": exercise.get("isCardio", False),
+						"is_bodyweight": exercise.get("isBodyweight", False)
+					}
+				
+				exercise_counts[exercise_id]["count"] += 1
+		
+		# Convert to list and sort by count (most used first)
+		exercises_list = [
+			{
+				"name": data["name"],
+				"key": data["key"],
+				"is_custom": data["is_custom"],
+				"usage_count": data["count"],
+				"muscles": data["muscles"],
+				"is_cardio": data["is_cardio"],
+				"is_bodyweight": data["is_bodyweight"]
+			}
+			for exercise_id, data in exercise_counts.items()
+		]
+		
+		exercises_list.sort(key=lambda x: x["usage_count"], reverse=True)
+		
+		# Separate custom and standard exercises
+		custom_exercises = [ex for ex in exercises_list if ex["is_custom"]]
+		standard_exercises = [ex for ex in exercises_list if not ex["is_custom"]]
+		
+		return jsonify({
+			"total_workouts": total_workouts,
+			"workouts_with_exercises": workouts_with_exercises,
+			"total_unique_exercises": len(exercises_list),
+			"custom_exercises_count": len(custom_exercises),
+			"standard_exercises_count": len(standard_exercises),
+			"all_exercises": exercises_list,
+			"custom_exercises": custom_exercises,
+			"standard_exercises": standard_exercises
+		}), 200
+		
+	except Exception as e:
+		print(f"[ADMIN] Error listing exercises: {e}")
+		import traceback
+		traceback.print_exc()
+		return jsonify({"error": f"Failed to list exercises: {str(e)}"}), 500
 
 
 # /verify and /resend-code endpoints removed - using Supabase for email verification

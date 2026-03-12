@@ -4,7 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "ios:sync": "npx cap sync ios",
+    "ios:copy": "npx cap copy ios",
+    "ios:sync-fast": "./scripts/sync-ios-fast.sh"
   },
   "keywords": [],
   "author": "",

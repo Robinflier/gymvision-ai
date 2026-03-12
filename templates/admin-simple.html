@@ -36,6 +36,66 @@
 			justify-content: space-between;
 			align-items: center;
 		}
+		.exercise-item {
+			background: #1a1a1b;
+			border: 1px solid #2a2a2b;
+			border-radius: 8px;
+			padding: 20px;
+			margin-bottom: 15px;
+		}
+		.exercise-item h3 {
+			margin-bottom: 8px;
+			color: #fff;
+			display: flex;
+			align-items: center;
+			gap: 10px;
+		}
+		.exercise-item p {
+			color: #888;
+			margin: 4px 0;
+			font-size: 14px;
+		}
+		.exercise-badge {
+			padding: 4px 8px;
+			border-radius: 4px;
+			font-size: 11px;
+			font-weight: 600;
+			margin-left: 8px;
+		}
+		.badge-custom {
+			background: #f59e0b;
+			color: white;
+		}
+		.badge-cardio {
+			background: #10b981;
+			color: white;
+		}
+		.badge-bodyweight {
+			background: #3b82f6;
+			color: white;
+		}
+		.stats-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+			gap: 15px;
+			margin-bottom: 30px;
+		}
+		.stat-card {
+			background: #1a1a1b;
+			border: 1px solid #2a2a2b;
+			border-radius: 8px;
+			padding: 20px;
+		}
+		.stat-card h3 {
+			font-size: 14px;
+			color: #888;
+			margin-bottom: 8px;
+		}
+		.stat-card .stat-value {
+			font-size: 32px;
+			font-weight: 700;
+			color: #667eea;
+		}
 		.account-info h3 {
 			margin-bottom: 8px;
 			color: #fff;
@@ -187,11 +247,25 @@
 	<div id="admin-content" class="admin-content">
 	<div class="header">
 		<h1>🔐 Admin Dashboard</h1>
-		<p>Approve or reject gym account requests</p>
+		<p>Manage gym accounts and view exercise analytics</p>
+	</div>
+
+	<div style="margin-bottom: 30px; display: flex; gap: 10px;">
+		<button class="btn" id="tab-gym-accounts" onclick="switchTab('gym-accounts')" style="background: #667eea; color: white;">Gym Accounts</button>
+		<button class="btn" id="tab-exercises" onclick="switchTab('exercises')" style="background: #1a1a1b; color: #888; border: 1px solid #2a2a2b;">All Exercises</button>
 	</div>
 
 	<div id="error-message" class="error" style="display: none;"></div>
-	<div id="accounts-list" class="loading">Loading gym accounts...</div>
+	
+	<!-- Gym Accounts Tab -->
+	<div id="tab-content-gym-accounts">
+		<div id="accounts-list" class="loading">Loading gym accounts...</div>
+	</div>
+
+	<!-- Exercises Tab -->
+	<div id="tab-content-exercises" style="display: none;">
+		<div id="exercises-list" class="loading">Loading exercises...</div>
+	</div>
 	</div>
 
 	<script>
@@ -199,6 +273,8 @@
 		const AUTH_KEY = 'admin_authenticated';
 		
 		let accounts = [];
+		let exercisesData = null;
+		let currentTab = 'gym-accounts';
 
 		// Check if already authenticated
 		function checkAuth() {
@@ -220,6 +296,27 @@
 			document.getElementById('password-modal').classList.add('hidden');
 			document.getElementById('admin-content').classList.add('authenticated');
 			loadAccounts();
+		}
+
+		function switchTab(tab) {
+			currentTab = tab;
+			
+			// Update button styles
+			document.getElementById('tab-gym-accounts').style.background = tab === 'gym-accounts' ? '#667eea' : '#1a1a1b';
+			document.getElementById('tab-gym-accounts').style.color = tab === 'gym-accounts' ? 'white' : '#888';
+			document.getElementById('tab-gym-accounts').style.border = tab === 'gym-accounts' ? 'none' : '1px solid #2a2a2b';
+			
+			document.getElementById('tab-exercises').style.background = tab === 'exercises' ? '#667eea' : '#1a1a1b';
+			document.getElementById('tab-exercises').style.color = tab === 'exercises' ? 'white' : '#888';
+			document.getElementById('tab-exercises').style.border = tab === 'exercises' ? 'none' : '1px solid #2a2a2b';
+			
+			// Show/hide content
+			document.getElementById('tab-content-gym-accounts').style.display = tab === 'gym-accounts' ? 'block' : 'none';
+			document.getElementById('tab-content-exercises').style.display = tab === 'exercises' ? 'block' : 'none';
+			
+			if (tab === 'exercises') {
+				loadExercises();
+			}
 		}
 
 		function checkPassword() {
@@ -346,6 +443,96 @@
 			if (!dateString) return 'N/A';
 			const date = new Date(dateString);
 			return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+		}
+
+		async function loadExercises() {
+			const container = document.getElementById('exercises-list');
+			container.innerHTML = '<div class="loading">Loading exercises...</div>';
+
+			try {
+				const response = await fetch('/api/admin/exercises');
+				
+				if (!response.ok) {
+					const errorText = await response.text();
+					container.innerHTML = '<div class="error">Error ' + response.status + ': ' + errorText + '</div>';
+					return;
+				}
+
+				const data = await response.json();
+				exercisesData = data;
+
+				renderExercises();
+			} catch (error) {
+				container.innerHTML = '<div class="error">Error: ' + error.message + '</div>';
+			}
+		}
+
+		function renderExercises() {
+			if (!exercisesData) return;
+
+			const container = document.getElementById('exercises-list');
+			
+			// Stats
+			const statsHtml = `
+				<div class="stats-grid">
+					<div class="stat-card">
+						<h3>Total Workouts</h3>
+						<div class="stat-value">${exercisesData.total_workouts || 0}</div>
+					</div>
+					<div class="stat-card">
+						<h3>Unique Exercises</h3>
+						<div class="stat-value">${exercisesData.total_unique_exercises || 0}</div>
+					</div>
+					<div class="stat-card">
+						<h3>Custom Exercises</h3>
+						<div class="stat-value">${exercisesData.custom_exercises_count || 0}</div>
+					</div>
+					<div class="stat-card">
+						<h3>Standard Exercises</h3>
+						<div class="stat-value">${exercisesData.standard_exercises_count || 0}</div>
+					</div>
+				</div>
+			`;
+
+			// Custom exercises section
+			const customExercises = exercisesData.custom_exercises || [];
+			const customHtml = customExercises.length > 0 ? `
+				<h2 style="margin: 30px 0 20px 0; color: #fff;">Custom Exercises (${customExercises.length})</h2>
+				<p style="color: #888; margin-bottom: 20px;">These are exercises that users have created manually. Consider adding popular ones to the standard exercise list.</p>
+				${customExercises.map(ex => `
+					<div class="exercise-item">
+						<h3>
+							${escapeHtml(ex.name)}
+							<span class="exercise-badge badge-custom">Custom</span>
+							${ex.is_cardio ? '<span class="exercise-badge badge-cardio">Cardio</span>' : ''}
+							${ex.is_bodyweight ? '<span class="exercise-badge badge-bodyweight">Bodyweight</span>' : ''}
+						</h3>
+						<p><strong>Used in:</strong> ${ex.usage_count} workout${ex.usage_count !== 1 ? 's' : ''}</p>
+						${ex.muscles && ex.muscles.length > 0 ? `<p><strong>Muscles:</strong> ${ex.muscles.join(', ')}</p>` : ''}
+						${ex.key ? `<p style="color: #666; font-size: 12px;"><strong>Key:</strong> ${escapeHtml(ex.key)}</p>` : ''}
+					</div>
+				`).join('')}
+			` : '<p style="color: #888; margin: 30px 0;">No custom exercises found yet.</p>';
+
+			// All exercises (top 50 most used)
+			const allExercises = (exercisesData.all_exercises || []).slice(0, 50);
+			const allExercisesHtml = `
+				<h2 style="margin: 30px 0 20px 0; color: #fff;">Most Used Exercises (Top 50)</h2>
+				${allExercises.map(ex => `
+					<div class="exercise-item">
+						<h3>
+							${escapeHtml(ex.name)}
+							${ex.is_custom ? '<span class="exercise-badge badge-custom">Custom</span>' : ''}
+							${ex.is_cardio ? '<span class="exercise-badge badge-cardio">Cardio</span>' : ''}
+							${ex.is_bodyweight ? '<span class="exercise-badge badge-bodyweight">Bodyweight</span>' : ''}
+						</h3>
+						<p><strong>Used in:</strong> ${ex.usage_count} workout${ex.usage_count !== 1 ? 's' : ''}</p>
+						${ex.muscles && ex.muscles.length > 0 ? `<p><strong>Muscles:</strong> ${ex.muscles.join(', ')}</p>` : ''}
+					</div>
+				`).join('')}
+			`;
+
+			container.innerHTML = statsHtml + customHtml + allExercisesHtml;
 		}
 
 	</script>

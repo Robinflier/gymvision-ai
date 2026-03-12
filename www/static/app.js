@@ -4936,7 +4936,7 @@ function startWorkoutTimer() {
 function setWorkoutTimerDisplay(durationMs = 0) {
 	const timerEl = document.getElementById('workout-timer');
 	if (!timerEl) return;
-
+	
 	// Break duration into parts
 	const totalSeconds = Math.max(0, Math.floor((durationMs || 0) / 1000));
 	const hours = Math.floor(totalSeconds / 3600);
@@ -4956,11 +4956,11 @@ function setWorkoutTimerDisplay(durationMs = 0) {
 			timerEl.innerHTML = '';
 
 			const createTimerInput = (id, value) => {
-				const input = document.createElement('input');
-				input.type = 'text';
+			const input = document.createElement('input');
+			input.type = 'text';
 				input.id = id;
 				input.className = 'workout-timer-input workout-timer-input--small';
-				input.inputMode = 'numeric';
+			input.inputMode = 'numeric';
 				input.maxLength = 2;
 				input.value = String(value).padStart(2, '0');
 				return input;
@@ -5017,15 +5017,15 @@ function setWorkoutTimerDisplay(durationMs = 0) {
 					}
 				});
 
-				input.addEventListener('blur', () => {
-					updateWorkoutDurationFromTimer();
-				});
+			input.addEventListener('blur', () => {
+				updateWorkoutDurationFromTimer();
+			});
 
-				input.addEventListener('keypress', (e) => {
-					if (e.key === 'Enter') {
+			input.addEventListener('keypress', (e) => {
+				if (e.key === 'Enter') {
 						e.preventDefault();
-						e.target.blur();
-					}
+					e.target.blur();
+				}
 				});
 			});
 		} else {
@@ -5071,7 +5071,7 @@ function updateWorkoutDurationFromTimer() {
 	
 	// Update current workout duration
 	currentWorkout.duration = clampedMs;
-
+	
 	// Normalize display values in the inputs
 	const normalizedTotalSeconds = Math.floor(clampedMs / 1000);
 	const normalizedHours = Math.floor(normalizedTotalSeconds / 3600);
@@ -8835,13 +8835,13 @@ function initReportProblemModal() {
 	const noteEl = document.getElementById('report-problem-note');
 	const noteCountEl = document.getElementById('report-problem-note-count');
 
-		if (openBtn && openBtn.dataset.bound !== 'true') {
-			openBtn.dataset.bound = 'true';
-			openBtn.addEventListener('click', async () => {
+	if (openBtn && openBtn.dataset.bound !== 'true') {
+		openBtn.dataset.bound = 'true';
+		openBtn.addEventListener('click', async () => {
 				// Only load exercises if we don't have any (cached or otherwise)
-				if (!allExercises || allExercises.length === 0) {
-					try { await loadExercises(); } catch (e) { }
-				}
+			if (!allExercises || allExercises.length === 0) {
+				try { await loadExercises(); } catch (e) { }
+			}
 			setReportProblemExercise(null);
 			const issueEl = document.getElementById('report-problem-issue');
 			if (issueEl) issueEl.value = '';
@@ -10074,9 +10074,9 @@ async function loadExercises(forceRefresh = false) {
 			allExercises = exercisesCache.data;
 			loadCustomExercises();
 		} else {
-			allExercises = []; // Set empty array on error
-			// Still load custom exercises from localStorage
-			loadCustomExercises();
+		allExercises = []; // Set empty array on error
+		// Still load custom exercises from localStorage
+		loadCustomExercises();
 		}
 	}
 }

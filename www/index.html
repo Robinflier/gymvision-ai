@@ -395,6 +395,15 @@
 				</div>
 			</section>
 
+			<section class="card progress-most-used-card">
+				<div class="progress-pr-header">
+					<h3>Most Used Exercises</h3>
+				</div>
+				<div id="progress-most-used-exercises" class="progress-most-used-content">
+					<div class="progress-empty">No exercises yet. Complete workouts to see your most used exercises!</div>
+				</div>
+			</section>
+
 			<section class="card progress-exercise-insights-card">
 				<div class="progress-pr-header">
 					<h3>Exercise Insights</h3>
@@ -671,6 +680,24 @@
 			</div>
 		</div>
 
+	<!-- AI Coach Modal -->
+	<div id="ai-coach-modal" class="ai-coach-modal hidden">
+		<div class="ai-coach-backdrop"></div>
+		<div class="ai-coach-content">
+			<div class="ai-coach-header">
+				<h3>AI Coach</h3>
+				<button id="ai-coach-close" class="ai-coach-close" type="button">✕</button>
+			</div>
+			<div class="ai-coach-tabs">
+				<button class="ai-coach-tab active" data-tab="first-set">First set</button>
+				<button class="ai-coach-tab" data-tab="next-sets">Next sets</button>
+			</div>
+			<div class="ai-coach-messages" id="ai-coach-messages">
+				<!-- Messages will be added here -->
+			</div>
+		</div>
+	</div>
+
 	<div id="exercise-selector" class="exercise-selector hidden">
 		<div class="exercise-selector-panel">
 			<div class="exercise-selector-header">
@@ -896,7 +923,7 @@
 						<input type="date" id="gym-dashboard-date" style="max-width: 136px; padding: 6px 10px; background: #15151a; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; color: #fff; font-size: 13px; font-weight: 600; font-family: 'Inter', sans-serif; box-sizing: border-box;">
 					</div>
 				</div>
-				<div id="gym-busy-indicator" class="gym-busy-indicator hidden" style="margin-bottom: 20px;">
+				<div id="gym-busy-indicator" class="gym-busy-indicator hidden" style="display: none !important; margin-bottom: 20px;">
 					<div class="gym-busy-status">
 						<div class="gym-busy-dot" id="gym-busy-dot"></div>
 						<div class="gym-busy-text">
