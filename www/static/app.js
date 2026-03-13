@@ -10058,8 +10058,10 @@ async function loadExercises(forceRefresh = false) {
 		const data = await res.json();
 		allExercises = data.exercises || [];
 
-		// Load custom exercises and merge them
+		// Load custom exercises (local) and merge ze
 		loadCustomExercises();
+		// En sync daarna met Supabase zodat server-side custom oefeningen ook terugkomen
+		await syncCustomExercisesFromSupabase();
 
 		// Cache the result
 		exercisesCache.data = allExercises;
@@ -10072,36 +10074,80 @@ async function loadExercises(forceRefresh = false) {
 		if (exercisesCache.data) {
 			allExercises = exercisesCache.data;
 			loadCustomExercises();
+			await syncCustomExercisesFromSupabase();
 		} else {
-		allExercises = []; // Set empty array on error
-		// Still load custom exercises from localStorage
-		loadCustomExercises();
+			allExercises = []; // Set empty array on error
+			// Still load custom exercises from localStorage en Supabase
+			loadCustomExercises();
+			await syncCustomExercisesFromSupabase();
 		}
 	}
 }
 
-// Save custom exercise to localStorage
-function saveCustomExercise(exercise) {
+// Save custom exercise to localStorage + Supabase (if logged in)
+async function saveCustomExercise(exercise) {
+	// Always mark as custom
+	exercise.isCustom = true;
+
 	try {
+		// 1) Local cache (backwards compatible)
 		const customExercises = getCustomExercises();
-		// Check if exercise already exists (by key or display name for custom exercises)
 		const existingIndex = customExercises.findIndex(ex =>
 			ex.key === exercise.key ||
 			(ex.isCustom && ex.display === exercise.display)
 		);
 
 		if (existingIndex >= 0) {
-			// Update existing
 			customExercises[existingIndex] = exercise;
 		} else {
-			// Add new
 			customExercises.push(exercise);
 		}
 
 		localStorage.setItem('custom-exercises', JSON.stringify(customExercises));
-		console.log('[CUSTOM EXERCISE] Saved:', exercise.display);
+		console.log('[CUSTOM EXERCISE] Saved locally:', exercise.display);
 	} catch (e) {
-		console.error('[CUSTOM EXERCISE] Error saving:', e);
+		console.error('[CUSTOM EXERCISE] Error saving locally:', e);
+	}
+
+	// 2) Persist to Supabase so we never lose them on updates
+	try {
+		if (!supabaseClient) {
+			await initSupabase();
+		}
+		if (!supabaseClient) {
+			return;
+		}
+
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session || !session.user) {
+			return; // not logged in → local-only, same gedrag als vroeger
+		}
+
+		// Minimal payload to store server-side
+		const payload = {
+			user_id: session.user.id,
+			key: exercise.key || null,
+			display: exercise.display || null,
+			muscles: Array.isArray(exercise.muscles) ? exercise.muscles : [],
+			is_cardio: !!exercise.isCardio,
+			is_bodyweight: !!exercise.isBodyweight,
+		};
+
+		// Upsert by (user_id, key or display) so bestaande oefeningen niet verdwijnen
+		const { error } = await supabaseClient
+			.from('custom_exercises')
+			.upsert(payload, {
+				onConflict: 'user_id,key,display'
+			});
+
+		if (error) {
+			console.error('[CUSTOM EXERCISE] Supabase upsert error:', error);
+		} else {
+			console.log('[CUSTOM EXERCISE] Saved to Supabase:', exercise.display);
+		}
+	} catch (e) {
+		// Faal stil: liever alleen lokale opslag dan errors in de UI
+		console.error('[CUSTOM EXERCISE] Error saving to Supabase:', e);
 	}
 }
 
@@ -10126,6 +10172,74 @@ function loadCustomExercises() {
 		console.log(`[CUSTOM EXERCISE] Loaded ${customExercises.length} custom exercises`);
 	} catch (e) {
 		console.error('[CUSTOM EXERCISE] Error loading:', e);
+	}
+}
+
+// Extra: laad custom oefeningen uit Supabase en merge ze met localStorage,
+// zodat ze bij updates / herinstallaties terugkomen zodra de gebruiker inlogt.
+async function syncCustomExercisesFromSupabase() {
+	try {
+		if (!supabaseClient) {
+			await initSupabase();
+		}
+		if (!supabaseClient) {
+			return;
+		}
+
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session || !session.user) {
+			return;
+		}
+
+		const { data, error } = await supabaseClient
+			.from('custom_exercises')
+			.select('*')
+			.eq('user_id', session.user.id);
+
+		if (error) {
+			console.error('[CUSTOM EXERCISE] Supabase load error:', error);
+			return;
+		}
+
+		const serverExercises = (data || []).map(row => ({
+			key: row.key,
+			display: row.display,
+			muscles: Array.isArray(row.muscles) ? row.muscles : [],
+			isCardio: !!row.is_cardio,
+			isBodyweight: !!row.is_bodyweight,
+			isCustom: true,
+		}));
+
+		// Merge server -> localStorage (server is waarheid)
+		const local = getCustomExercises();
+		const merged = [...local];
+
+		serverExercises.forEach(ex => {
+			const exists = merged.find(m =>
+				(m.key && ex.key && m.key === ex.key) ||
+				(m.display && ex.display && m.display === ex.display)
+			);
+			if (!exists) {
+				merged.push(ex);
+			}
+		});
+
+		localStorage.setItem('custom-exercises', JSON.stringify(merged));
+
+		// En merge ook in allExercises voor de huidige sessie
+		serverExercises.forEach(ex => {
+			const exists = allExercises.find(m =>
+				(m.key && ex.key && m.key === ex.key) ||
+				(m.isCustom && m.display === ex.display)
+			);
+			if (!exists) {
+				allExercises.push(ex);
+			}
+		});
+
+		console.log(`[CUSTOM EXERCISE] Synced ${serverExercises.length} exercises from Supabase`);
+	} catch (e) {
+		console.error('[CUSTOM EXERCISE] Error syncing from Supabase:', e);
 	}
 }
 
