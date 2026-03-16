@@ -3522,52 +3522,57 @@ def get_gym_dashboard():
 		}
 
 		try:
-			consent_user_ids = []
+			analytics_consent_user_ids: List[str] = []
 			if analytics_consent.data:
 				for row in analytics_consent.data:
 					uid = row.get("user_id")
 					if uid:
-						consent_user_ids.append(uid)
-			consent_user_ids = list(dict.fromkeys(consent_user_ids))  # de-dupe keep order
+						analytics_consent_user_ids.append(str(uid))
+			consent_user_ids = list(dict.fromkeys(analytics_consent_user_ids))  # de-dupe keep order
 
-			# Fallback for recreated gym accounts: derive user_ids directly from workouts by gym name
-			# when gym_analytics consent links are missing.
-			if not consent_user_ids and gym_name:
-				def _workout_user_ids_by_gym_name(end_date: Optional[str] = None) -> List[str]:
-					user_ids: List[str] = []
-					seen: set = set()
-					offset = 0
-					page_size = 1000
-					while True:
-						q = admin_client.table("workouts").select("user_id,gym_name,date").range(offset, offset + page_size - 1)
-						if end_date:
-							q = q.lte("date", end_date)
-						res = q.execute()
-						rows = res.data or []
-						if not rows:
-							break
-						for w in rows:
-							uid = w.get("user_id")
-							if not uid:
-								continue
-							if _gym_names_match((w.get("gym_name") or "").strip(), gym_name):
-								uid_s = str(uid)
-								if uid_s not in seen:
-									seen.add(uid_s)
-									user_ids.append(uid_s)
-						if len(rows) < page_size:
-							break
-						offset += page_size
-						if offset > 200000:
-							break
-					return user_ids
+			def _workout_user_ids_by_gym_name(end_date: Optional[str] = None) -> List[str]:
+				user_ids: List[str] = []
+				seen: set = set()
+				offset = 0
+				page_size = 1000
+				while True:
+					q = admin_client.table("workouts").select("user_id,gym_name,date").range(offset, offset + page_size - 1)
+					if end_date:
+						q = q.lte("date", end_date)
+					res = q.execute()
+					rows = res.data or []
+					if not rows:
+						break
+					for w in rows:
+						uid = w.get("user_id")
+						if not uid:
+							continue
+						if _gym_names_match((w.get("gym_name") or "").strip(), gym_name):
+							uid_s = str(uid)
+							if uid_s not in seen:
+								seen.add(uid_s)
+								user_ids.append(uid_s)
+					if len(rows) < page_size:
+						break
+					offset += page_size
+					if offset > 200000:
+						break
+				return user_ids
 
+			# Always augment with users derived from workouts.gym_name, so recreated accounts
+			# don't collapse to only the few rows currently linked in gym_analytics.
+			if gym_name:
 				try:
 					fallback_end_date = selected_date if selected_date else None
-					consent_user_ids = _workout_user_ids_by_gym_name(fallback_end_date)
-					print(f"[GYM DASHBOARD] Fallback user_id discovery by gym_name found {len(consent_user_ids)} users")
+					workout_name_user_ids = _workout_user_ids_by_gym_name(fallback_end_date)
+					if workout_name_user_ids:
+						consent_user_ids = list(dict.fromkeys(consent_user_ids + workout_name_user_ids))
+					print(
+						f"[GYM DASHBOARD] User ids: analytics_consent={len(analytics_consent_user_ids)}, "
+						f"workouts_by_name={len(workout_name_user_ids)}, merged={len(consent_user_ids)}"
+					)
 				except Exception as e:
-					print(f"[GYM DASHBOARD] Fallback user_id discovery failed: {e}")
+					print(f"[GYM DASHBOARD] Workout-name user discovery failed: {e}")
 
 			if consent_user_ids:
 				# For charts: always anchor period to selected_date when present, otherwise today (UTC)
@@ -3907,7 +3912,7 @@ def get_gym_dashboard():
 
 				# Users KPI should follow the same workout source-of-truth for this gym name.
 				total_users = len(matched_stats_user_ids)
-				consent_set = set(str(uid) for uid in consent_user_ids)
+				consent_set = set(analytics_consent_user_ids)
 				users_with_consent = len([uid for uid in matched_stats_user_ids if uid in consent_set])
 				users_linked = total_users
 
