@@ -3322,8 +3322,13 @@ def get_gym_dashboard():
 				if not uid:
 					continue
 				row_gym_name = row.get("gym_name")
-				# Keep rows that are either explicitly linked to this gym_id OR match by normalized gym name.
-				if row.get("gym_id") != gym_id and not _gym_names_match(row_gym_name, gym_name):
+				row_gym_id = row.get("gym_id")
+				# Keep rows explicitly linked to this gym_id.
+				# For name-based fallback, only include rows that are currently unlinked (gym_id is NULL).
+				# This prevents pulling rows that already belong to another gym account.
+				if row_gym_id not in (None, "", gym_id):
+					continue
+				if row_gym_id != gym_id and not _gym_names_match(row_gym_name, gym_name):
 					continue
 				analytics_map[str(uid)] = row
 		analytics_all_data = list(analytics_map.values())
