@@ -8472,6 +8472,10 @@ var saveGymNameDebounceTimer = null;
 var saveGymNameLock = false;
 var lastSavedGymName = null;
 var lastSavedPlaceId = null;
+// Shared throttle/dedupe for collect-gym-data
+var collectGymDataInFlight = false;
+var collectGymDataLastPayload = '';
+var collectGymDataLastSentAt = 0;
 
 // Save gym name to Supabase user_metadata and sync to analytics table
 async function saveGymName(gymName, placeId = null) {
@@ -8537,16 +8541,34 @@ async function saveGymName(gymName, placeId = null) {
 
 		// Call backend endpoint to update user_metadata and sync to analytics table
 		const apiUrl = getApiUrl('/api/collect-gym-data');
+
+		// Deduplicate + throttle (prevents bursts)
+		const payloadObj = {
+			gym_name: currentGym || null,
+			gym_place_id: currentGym ? (currentPlaceId || null) : null
+		};
+		const payloadStr = JSON.stringify(payloadObj);
+		const now = Date.now();
+		if (collectGymDataInFlight) {
+			console.log('[GYM] collect-gym-data already in-flight, skipping');
+			saveGymNameLock = false;
+			return;
+		}
+		if (payloadStr === collectGymDataLastPayload && (now - collectGymDataLastSentAt) < 60_000) {
+			saveGymNameLock = false;
+			return;
+		}
+		collectGymDataInFlight = true;
+		collectGymDataLastPayload = payloadStr;
+		collectGymDataLastSentAt = now;
+
 		const response = await fetch(apiUrl, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
 				'Authorization': `Bearer ${session.access_token}`
 			},
-			body: JSON.stringify({
-					gym_name: currentGym || null,
-					gym_place_id: currentGym ? (currentPlaceId || null) : null
-			})
+			body: payloadStr
 		});
 
 		if (!response.ok) {
@@ -8561,6 +8583,7 @@ async function saveGymName(gymName, placeId = null) {
 	} catch (e) {
 		console.error('[GYM] Error saving gym name:', e);
 		} finally {
+			collectGymDataInFlight = false;
 			saveGymNameLock = false;
 	}
 	}, 1500); // Increased debounce time to reduce API calls
@@ -8646,18 +8669,36 @@ async function saveDataConsent(hasConsent) {
 
 			// Call backend endpoint to update user_metadata and sync to analytics table
 			const apiUrl = getApiUrl('/api/collect-gym-data');
+
+			// Deduplicate + throttle
+			const payloadObj = {
+				data_consent: latestConsent,
+				// send gym too (null clears)
+				gym_name: gymName ? gymName : null,
+				gym_place_id: gymName ? (placeId || null) : null
+			};
+			const payloadStr = JSON.stringify(payloadObj);
+			const now = Date.now();
+			if (collectGymDataInFlight) {
+				console.log('[CONSENT] collect-gym-data already in-flight, skipping');
+				saveDataConsentLock = false;
+				return;
+			}
+			if (payloadStr === collectGymDataLastPayload && (now - collectGymDataLastSentAt) < 60_000) {
+				saveDataConsentLock = false;
+				return;
+			}
+			collectGymDataInFlight = true;
+			collectGymDataLastPayload = payloadStr;
+			collectGymDataLastSentAt = now;
+
 		const response = await fetch(apiUrl, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
 				'Authorization': `Bearer ${session.access_token}`
 			},
-			body: JSON.stringify({
-					data_consent: latestConsent,
-				// send gym too (null clears)
-				gym_name: gymName ? gymName : null,
-				gym_place_id: gymName ? (placeId || null) : null
-			})
+			body: payloadStr
 		});
 
 		if (!response.ok) {
@@ -8669,6 +8710,7 @@ async function saveDataConsent(hasConsent) {
 	} catch (e) {
 		console.error('[CONSENT] Error saving consent:', e);
 		} finally {
+			collectGymDataInFlight = false;
 			saveDataConsentLock = false;
 	}
 	}, 400);

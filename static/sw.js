@@ -1,10 +1,9 @@
-const CACHE_NAME = 'gv-ai-v69';
+const CACHE_NAME = 'gv-ai-v70';
 const ASSETS = [
 	'/',
 	'/static/styles.css',
 	'/static/app.js',
 	'/static/manifest.webmanifest',
-	'/static/images/benchpress.jpg',
 	'/static/refresh-button.png',
 	'/static/close.png',
 	'/static/check.png',
@@ -30,6 +29,22 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
 	const req = event.request;
 	if (req.method !== 'GET') return;
+
+	// Fix legacy paths: some older clients still request /static/images/*
+	// Our canonical route is /images/* (served by backend resolver).
+	try {
+		const url = new URL(req.url);
+		if (url.origin === self.location.origin && url.pathname.startsWith('/static/images/')) {
+			const filename = url.pathname.split('/').pop();
+			if (filename) {
+				event.respondWith(fetch(`/images/${filename}`));
+				return;
+			}
+		}
+	} catch (e) {
+		// ignore URL parsing errors
+	}
+
 	event.respondWith(
 		caches.match(req).then((cached) => cached || fetch(req))
 	);
