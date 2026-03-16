@@ -383,6 +383,14 @@ body {
 	margin: 0 auto
 }
 
+/* Disable long-press preview / callout on images (iOS) */
+img {
+	-webkit-touch-callout: none;
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-user-drag: none;
+}
+
 /* iOS Touch Fix - Ensure all buttons are touchable */
 .btn,
 button,
@@ -1189,6 +1197,37 @@ button,
 	flex-shrink: 0
 }
 
+.workout-timer-editing {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 0;
+	border: none;
+	background: transparent;
+}
+
+.workout-timer-column {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 2px;
+}
+
+.workout-timer-label {
+	font-size: 10px;
+	line-height: 1;
+	color: #5b5d6f;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	font-weight: 600;
+}
+
+.workout-timer-separator {
+	color: #5b5d6f;
+	font-weight: 700;
+	font-size: 13px;
+}
+
 .workout-label {
 	color: var(--sub);
 	font-size: 14px;
@@ -1430,6 +1469,92 @@ button,
 	align-items: flex-start;
 	justify-content: flex-end;
 	flex-shrink: 0;
+}
+
+/* Workout actions menu (3-dots) */
+.workout-actions-menu-btn {
+	background: transparent;
+	border: none;
+	color: #fff;
+	padding: 0;
+	cursor: pointer;
+	width: 32px;
+	height: 32px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	transition: opacity 0.2s;
+}
+
+.workout-actions-menu-btn:hover {
+	opacity: 0.8;
+}
+
+.workout-dots {
+	font-size: 24px;
+	font-weight: 900;
+	color: #fff;
+	line-height: 1;
+	letter-spacing: 0;
+	display: inline-block;
+}
+
+.workout-menu-dropdown {
+	position: absolute;
+	top: 36px;
+	right: 0;
+	background: #1a1a1d;
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 12px;
+	padding: 8px;
+	min-width: 160px;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+	z-index: 1000;
+}
+
+.workout-menu-dropdown.hidden {
+	display: none;
+}
+
+.workout-menu-item {
+	width: 100%;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 14px;
+	border-radius: 8px;
+	background: transparent;
+	border: none;
+	color: #dfe0e6;
+	font-size: 14px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s;
+	text-align: left;
+}
+
+.workout-menu-item:hover {
+	background: rgba(255, 255, 255, 0.08);
+}
+
+.workout-menu-item svg {
+	flex-shrink: 0;
+	stroke: currentColor;
+	width: 16px;
+	height: 16px;
+}
+
+.workout-menu-item.workout-menu-notes-btn.has-notes {
+	color: #b7a5ff;
+}
+
+.workout-menu-item.workout-menu-delete-btn {
+	color: #ef4444;
+}
+
+.workout-menu-item.workout-menu-delete-btn:hover {
+	background: rgba(239, 68, 68, 0.1);
 }
 
 
@@ -3429,6 +3554,25 @@ button,
 	pointer-events: none
 }
 
+.progress-most-used-card {
+	padding: 22px 22px 26px;
+	display: flex;
+	flex-direction: column;
+	gap: 18px;
+	margin-top: 8px
+}
+
+.progress-most-used-card .progress-pr-header h3 {
+	margin: 0;
+	font-size: 18px;
+	font-weight: 700;
+	color: #fff
+}
+
+.progress-most-used-content {
+	padding: 0;
+}
+
 .progress-exercise-insights-card {
 	padding: 22px 22px 6px;
 	display: flex;
@@ -4240,8 +4384,8 @@ button,
 }
 
 .settings-report-problem-btn {
-	width: 70%;
-	padding: 8px 12px;
+	width: 52.5%;
+	padding: 6px 12px;
 	border-radius: 10px;
 	border: 1px solid rgba(255, 255, 255, 0.2);
 	background: rgba(255, 255, 255, 0.15);
@@ -4441,20 +4585,32 @@ button,
 .gym-reports-top-btn {
 	background: rgba(21, 21, 26, 0.95);
 	border: 1px solid rgba(255, 255, 255, 0.14);
-	border-radius: 10px;
+	border-radius: 50%;
 	color: #fff;
 	font-size: 12px;
 	font-weight: 700;
-	padding: 8px 10px;
-	min-width: 86px;
+	padding: 6px;
+	min-width: 40px;
+	width: 40px;
+	height: 40px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	gap: 8px;
-	cursor: pointer
+	cursor: pointer;
+	position: relative;
+}
+
+.gym-reports-icon {
+	width: 22px;
+	height: 22px;
+	object-fit: contain;
+	filter: brightness(0) invert(1);
 }
 
 .gym-reports-top-badge {
+	position: absolute;
+	top: -2px;
+	right: -2px;
 	min-width: 18px;
 	height: 18px;
 	padding: 0 6px;
@@ -4466,7 +4622,61 @@ button,
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	line-height: 1
+	line-height: 1;
+	z-index: 10;
+}
+
+/* Gym busy status indicator */
+.gym-busy-indicator {
+	background: linear-gradient(135deg, #18181d, #121215);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 12px;
+	padding: 14px 18px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.gym-busy-status {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.gym-busy-dot {
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	background: #6b7280;
+	box-shadow: 0 0 12px rgba(107, 114, 128, 0.4);
+	animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+	0%, 100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.7;
+	}
+}
+
+.gym-busy-text {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.gym-busy-label {
+	color: #c9cad6;
+}
+
+.gym-busy-value {
+	color: #6b7280;
+	font-weight: 700;
+	transition: color 0.3s ease;
 }
 
 /* Gym dashboard period toggle */
@@ -5176,7 +5386,7 @@ button,
 }
 
 .gym-ranked-label {
-	flex: 0 0 38%;
+	flex: 1 1 auto;
 	min-width: 0;
 	color: #dfe0e6;
 	font-size: 13px;
@@ -5196,7 +5406,12 @@ button,
 }
 
 .gym-ranked-barwrap {
-	flex: 0.8;
+	flex: 0 0 24%;
+	width: 98px;
+	min-width: 78px;
+	max-width: 98px;
+	margin-left: auto;
+	margin-right: 6px;
 	height: 12px;
 	background: #1a1a1f;
 	border: 1px solid #242429;
@@ -6773,6 +6988,13 @@ body.ai-detect-chat-open {
 	min-width: 60px;
 	max-width: 80px;
 	font-family: 'Inter', sans-serif;
+}
+
+.workout-timer-input--small {
+	min-width: 32px;
+	max-width: 40px;
+	padding: 2px 4px;
+	font-size: 13px;
 }
 
 .workout-timer-input:focus {

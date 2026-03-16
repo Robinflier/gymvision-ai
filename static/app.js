@@ -7,11 +7,9 @@
 function getApiUrl(path) {
 	// Check if we're in Capacitor (mobile app)
 	if (window.Capacitor && window.Capacitor.isNativePlatform()) {
-		// For images, use local static files in Capacitor (much faster, no network requests)
-		if (path.startsWith('/images/')) {
-			return `static${path}`;
-		}
-		// For API calls, use the backend URL from environment or default to Render URL
+		// Use the backend URL from environment or default to Render URL
+		// Dit geldt nu ook voor /images/, zodat we altijd dezelfde afbeeldingen
+		// uit de backend "images" map halen (bijv. ~/Documents/images).
 		const backendUrl = window.BACKEND_URL || 'https://gymvision-ai.onrender.com';
 		return `${backendUrl}${path}`;
 	}
@@ -295,12 +293,36 @@ function isCardioExercise(exercise) {
 }
 
 // Helper function to fetch user from backend with Authorization header
-async function getUserCredits() {
-	/**Get user credits from backend.*/
+// Cache for user credits to avoid repeated API calls
+var creditsCache = {
+	data: null,
+	timestamp: null,
+	ttl: 30 * 1000 // 30 seconds cache (credits can change more frequently)
+};
+
+// Invalidate credits cache (call this after using credits)
+function invalidateCreditsCache() {
+	creditsCache.data = null;
+	creditsCache.timestamp = null;
+}
+
+async function getUserCredits(forceRefresh = false) {
+	/**Get user credits from backend with caching.*/
+	// Check if we have cached data that's still valid
+	if (!forceRefresh && creditsCache.data && creditsCache.timestamp) {
+		const age = Date.now() - creditsCache.timestamp;
+		if (age < creditsCache.ttl) {
+			return creditsCache.data;
+		}
+	}
+
 	try {
 		const session = await supabaseClient.auth.getSession();
 		if (!session.data.session) {
-			return { credits_remaining: 10, last_reset_month: null };
+			const defaultCredits = { credits_remaining: 10, last_reset_month: null };
+			creditsCache.data = defaultCredits;
+			creditsCache.timestamp = Date.now();
+			return defaultCredits;
 		}
 
 		const apiUrl = getApiUrl('/api/user-credits');
@@ -313,22 +335,33 @@ async function getUserCredits() {
 
 		if (res.ok) {
 			const data = await res.json();
-			return {
+			const credits = {
 				credits_remaining: data.credits_remaining || 10,
 				last_reset_month: data.last_reset_month
 			};
+			// Cache the result
+			creditsCache.data = credits;
+			creditsCache.timestamp = Date.now();
+			return credits;
 		}
 	} catch (e) {
 		console.error('[CREDITS] Error fetching credits:', e);
+		// If we have cached data, use it even if it's stale
+		if (creditsCache.data) {
+			return creditsCache.data;
+		}
 	}
-	return { credits_remaining: 10, last_reset_month: null };
+	const defaultCredits = { credits_remaining: 10, last_reset_month: null };
+	creditsCache.data = defaultCredits;
+	creditsCache.timestamp = Date.now();
+	return defaultCredits;
 }
 
 // Update AI detect buttons based on credits
-async function updateAIDetectButtons() {
+async function updateAIDetectButtons(forceRefresh = false) {
 	/**Disable AI detect buttons if user has no credits.*/
 	try {
-		const creditsInfo = await getUserCredits();
+		const creditsInfo = await getUserCredits(forceRefresh);
 		const aiDetectBtn = document.getElementById('exercise-selector-ai-detect');
 		const aiDetectChatFile = document.getElementById('ai-detect-chat-file');
 		const aiDetectChatFileLabel = document.querySelector('.ai-detect-chat-file-label');
@@ -532,6 +565,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 	try {
 		console.log('[INIT] Starting app initialization...');
 		console.log('[INIT] Platform:', window.Capacitor?.isNativePlatform() ? 'NATIVE' : 'WEB');
+
+		// Disable iOS long-press preview / context menu on images inside the app
+		document.addEventListener(
+			'contextmenu',
+			(e) => {
+				const target = e.target;
+				if (target && target.tagName === 'IMG') {
+					e.preventDefault();
+				}
+			},
+			{ passive: false }
+		);
 
 		// Hide loading overlay after a short delay to prevent flash
 		const loadingOverlay = document.getElementById('app-loading-overlay');
@@ -1767,8 +1812,19 @@ async function openGymReportsModal() {
 		await refreshGymReportsBadge();
 	} catch (e) {
 		console.error('[GYM REPORTS] Open modal failed:', e);
+		const errorMsg = e?.message || 'Failed to load reports';
+		// Check if it's a session expired error
+		if (errorMsg.includes('Session expired') || errorMsg.includes('Authentication failed') || errorMsg.includes('Invalid token')) {
+			// Force re-authentication
+			if (supabaseClient) {
+				await supabaseClient.auth.signOut();
+			}
+			closeGymReportsModal();
+			showLoginScreen();
+			return;
+		}
 		if (emptyEl) {
-			emptyEl.textContent = e?.message || 'Failed to load reports';
+			emptyEl.textContent = errorMsg;
 			emptyEl.classList.remove('hidden');
 		}
 	} finally {
@@ -1908,6 +1964,54 @@ async function loadGymDashboardData() {
 		if (workoutsEl) workoutsEl.textContent = totalWorkouts;
 		if (exercisesEl) exercisesEl.textContent = totalExercises;
 
+		// Busy status indicator - DISABLED: Live status removed from dashboard display
+		// Code preserved but indicator is permanently hidden
+		const busyStatus = data.busy_status || {};
+		const busyIndicatorEl = document.getElementById('gym-busy-indicator');
+		const busyDotEl = document.getElementById('gym-busy-dot');
+		const busyValueEl = document.getElementById('gym-busy-value');
+		
+		// Always keep indicator hidden
+		if (busyIndicatorEl) {
+			busyIndicatorEl.style.display = 'none';
+			busyIndicatorEl.classList.add('hidden');
+		}
+		
+		// Code preserved but not executed (commented out)
+		/*
+		if (busyIndicatorEl && busyStatus.status) {
+			const status = busyStatus.status;
+			let statusText = '';
+			let statusColor = '';
+			
+			if (status === 'busy') {
+				statusText = 'Busy';
+				statusColor = '#ef4444';
+			} else if (status === 'moderate') {
+				statusText = 'A little busy';
+				statusColor = '#f97316';
+			} else if (status === 'quiet') {
+				statusText = 'Not busy';
+				statusColor = '#22c55e';
+			} else {
+				statusText = 'Not busy';
+				statusColor = '#22c55e';
+			}
+			
+			if (busyDotEl) {
+				busyDotEl.style.backgroundColor = statusColor;
+				busyDotEl.style.boxShadow = `0 0 12px ${statusColor}40`;
+			}
+			if (busyValueEl) {
+				busyValueEl.textContent = statusText;
+				busyValueEl.style.color = statusColor;
+			}
+			busyIndicatorEl.classList.remove('hidden');
+		} else if (busyIndicatorEl) {
+			busyIndicatorEl.classList.add('hidden');
+		}
+		*/
+
 		// Charts
 		const charts = stats.charts || {};
 		console.log('[GYM DASHBOARD] Charts data:', {
@@ -1926,8 +2030,18 @@ async function loadGymDashboardData() {
 	} catch (e) {
 		if (requestId !== gymDashboardLoadRequestId) return;
 		if (loadingEl) loadingEl.style.display = 'none';
+		const errorMsg = e?.message || 'Failed to load dashboard';
+		// Check if it's a session expired error
+		if (errorMsg.includes('Session expired') || errorMsg.includes('Authentication failed') || errorMsg.includes('Invalid token')) {
+			// Force re-authentication
+			if (supabaseClient) {
+				await supabaseClient.auth.signOut();
+			}
+			showLoginScreen();
+			return;
+		}
 		if (errorEl) {
-			errorEl.textContent = e?.message || 'Failed to load dashboard';
+			errorEl.textContent = errorMsg;
 			errorEl.classList.add('show');
 		}
 	}
@@ -2445,6 +2559,72 @@ function renderGymMachinesChart(containerId, items, unitLabel) {
 	});
 
 	el.appendChild(wrap);
+}
+
+// Calculate and render most used exercises for user dashboard
+function renderMostUsedExercises(workouts) {
+	const containerId = 'progress-most-used-exercises';
+	const el = document.getElementById(containerId);
+	if (!el) return;
+
+	// Count exercises by sets (including custom exercises)
+	const exerciseCounts = {};
+	
+	if (!Array.isArray(workouts) || workouts.length === 0) {
+		el.innerHTML = `<div class="progress-empty">No exercises yet. Complete workouts to see your most used exercises!</div>`;
+		return;
+	}
+
+	// Loop through all workouts
+	workouts.forEach(workout => {
+		if (!workout || !Array.isArray(workout.exercises)) return;
+		
+		// Loop through all exercises in the workout
+		workout.exercises.forEach(exercise => {
+			if (!exercise) return;
+			
+			// Get exercise name (handle custom exercises)
+			let exerciseName = '';
+			if (exercise.isCustom && exercise.display) {
+				// Custom exercise - use display name
+				exerciseName = exercise.display;
+			} else if (exercise.display) {
+				// Regular exercise with display name
+				exerciseName = exercise.display;
+			} else if (exercise.key) {
+				// Fallback to key if no display name
+				exerciseName = exercise.key;
+			} else {
+				// Skip if no name available
+				return;
+			}
+			
+			// Count sets for this exercise
+			const sets = Array.isArray(exercise.sets) ? exercise.sets : [];
+			const setCount = sets.length;
+			
+			if (setCount > 0) {
+				// Add to count (sum up sets across all workouts)
+				if (!exerciseCounts[exerciseName]) {
+					exerciseCounts[exerciseName] = 0;
+				}
+				exerciseCounts[exerciseName] += setCount;
+			}
+		});
+	});
+
+	// Convert to array and sort by count (descending)
+	const exerciseList = Object.entries(exerciseCounts)
+		.map(([label, value]) => ({ label, value }))
+		.sort((a, b) => b.value - a.value);
+
+	// Render using the same chart function as gym dashboard
+	if (exerciseList.length === 0) {
+		el.innerHTML = `<div class="progress-empty">No exercises yet. Complete workouts to see your most used exercises!</div>`;
+		return;
+	}
+
+	renderGymMachinesChart(containerId, exerciseList, 'sets');
 }
 
 function renderGymMuscleFocus(items) {
@@ -3561,8 +3741,9 @@ function initExerciseSelector() {
 							const errorData = await res.json();
 							if (errorData.error === 'no_credits') {
 								alert('You are out of your monthly credits');
-								// Update buttons to reflect no credits
-								updateAIDetectButtons();
+								// Update buttons to reflect no credits (force refresh to get latest)
+								invalidateCreditsCache();
+								updateAIDetectButtons(true);
 								return;
 							}
 						}
@@ -3588,6 +3769,8 @@ function initExerciseSelector() {
 					// Update credits display if provided
 					if (data.credits_remaining !== undefined) {
 						showCreditsMessage(data.credits_remaining);
+						// Invalidate cache since credits changed
+						invalidateCreditsCache();
 					}
 
 					// Extract exercise name - be VERY lenient, accept anything
@@ -4752,70 +4935,130 @@ function setWorkoutTimerDisplay(durationMs = 0) {
 	const timerEl = document.getElementById('workout-timer');
 	if (!timerEl) return;
 	
-	// If editing a workout, make timer editable
+	// Break duration into parts
+	const totalSeconds = Math.max(0, Math.floor((durationMs || 0) / 1000));
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const seconds = totalSeconds % 60;
+
+	// If editing a workout, show 3 separate numeric inputs (HH : MM : SS)
 	if (editingWorkoutId) {
-		// Convert to editable input
-		if (timerEl.tagName !== 'INPUT') {
+		timerEl.classList.add('workout-timer-editing');
+
+		let hoursInput = document.getElementById('workout-timer-hours');
+		let minutesInput = document.getElementById('workout-timer-minutes');
+		let secondsInput = document.getElementById('workout-timer-seconds');
+
+		// Create the segmented inputs once
+		if (!hoursInput || !minutesInput || !secondsInput) {
+			timerEl.innerHTML = '';
+
+			const createTimerInput = (id, value) => {
 			const input = document.createElement('input');
 			input.type = 'text';
-			input.id = 'workout-timer';
-			input.className = 'workout-timer-value workout-timer-input';
-			input.value = formatDurationDisplay(durationMs);
-			input.maxLength = 8; // H:MM:SS format
-			input.placeholder = '00:00';
+				input.id = id;
+				input.className = 'workout-timer-input workout-timer-input--small';
 			input.inputMode = 'numeric';
-			timerEl.parentNode.replaceChild(input, timerEl);
-			
-			// Add event listener to update duration
+				input.maxLength = 2;
+				input.value = String(value).padStart(2, '0');
+				return input;
+			};
+
+			const createLabeledTimerInput = (id, value, labelText) => {
+				const wrapper = document.createElement('div');
+				wrapper.className = 'workout-timer-column';
+
+				const label = document.createElement('div');
+				label.className = 'workout-timer-label';
+				label.textContent = labelText;
+
+				const input = createTimerInput(id, value);
+
+				wrapper.appendChild(label);
+				wrapper.appendChild(input);
+
+				return { wrapper, input };
+			};
+
+			const hoursGroup = createLabeledTimerInput('workout-timer-hours', hours, 'h');
+			const minutesGroup = createLabeledTimerInput('workout-timer-minutes', minutes, 'm');
+			const secondsGroup = createLabeledTimerInput('workout-timer-seconds', seconds, 's');
+
+			hoursInput = hoursGroup.input;
+			minutesInput = minutesGroup.input;
+			secondsInput = secondsGroup.input;
+
+			const sep1 = document.createElement('span');
+			sep1.className = 'workout-timer-separator';
+			sep1.textContent = ':';
+
+			const sep2 = document.createElement('span');
+			sep2.className = 'workout-timer-separator';
+			sep2.textContent = ':';
+
+			timerEl.appendChild(hoursGroup.wrapper);
+			timerEl.appendChild(sep1);
+			timerEl.appendChild(minutesGroup.wrapper);
+			timerEl.appendChild(sep2);
+			timerEl.appendChild(secondsGroup.wrapper);
+
+			const inputs = [hoursInput, minutesInput, secondsInput];
+
+			// Basic UX: keep only digits, move to next field after 2 chars, save on blur/enter
+			inputs.forEach((input, index) => {
+				input.addEventListener('input', (e) => {
+					const target = e.target;
+					target.value = target.value.replace(/\D/g, '').slice(0, 2);
+					if (target.value.length >= 2 && index < inputs.length - 1) {
+						inputs[index + 1].focus();
+						inputs[index + 1].select();
+					}
+				});
+
 			input.addEventListener('blur', () => {
 				updateWorkoutDurationFromTimer();
 			});
+
 			input.addEventListener('keypress', (e) => {
 				if (e.key === 'Enter') {
+						e.preventDefault();
 					e.target.blur();
 				}
+				});
 			});
 		} else {
-			timerEl.value = formatDurationDisplay(durationMs);
+			// Update existing inputs when duration changes
+			hoursInput.value = String(hours).padStart(2, '0');
+			minutesInput.value = String(minutes).padStart(2, '0');
+			secondsInput.value = String(seconds).padStart(2, '0');
 		}
 	} else {
-		// Not editing - just display
-		if (timerEl.tagName === 'INPUT') {
-			const div = document.createElement('div');
-			div.id = 'workout-timer';
-			div.className = 'workout-timer-value';
-			div.textContent = formatDurationDisplay(durationMs);
-			timerEl.parentNode.replaceChild(div, timerEl);
-		} else {
+		// Not editing - simple, compact display
+		timerEl.classList.remove('workout-timer-editing');
 		timerEl.textContent = formatDurationDisplay(durationMs);
-		}
 	}
 }
 
 function updateWorkoutDurationFromTimer() {
-	const timerInput = document.getElementById('workout-timer');
-	if (!timerInput || !editingWorkoutId || !currentWorkout) return;
+	const hoursInput = document.getElementById('workout-timer-hours');
+	const minutesInput = document.getElementById('workout-timer-minutes');
+	const secondsInput = document.getElementById('workout-timer-seconds');
+
+	if (!hoursInput || !minutesInput || !secondsInput || !editingWorkoutId || !currentWorkout) return;
 	
-	const timeString = timerInput.value.trim();
-	if (!timeString) return;
-	
-	// Parse time string (HH:MM:SS or MM:SS format)
-	const parts = timeString.split(':').map(p => parseInt(p) || 0);
-	let hours = 0, minutes = 0, seconds = 0;
-	
-	if (parts.length === 3) {
-		// H:MM:SS format
-		hours = parts[0];
-		minutes = parts[1];
-		seconds = parts[2];
-	} else if (parts.length === 2) {
-		// MM:SS format
-		minutes = parts[0];
-		seconds = parts[1];
-	} else {
-		// Invalid format
-		return;
-	}
+	let hours = parseInt(hoursInput.value, 10);
+	let minutes = parseInt(minutesInput.value, 10);
+	let seconds = parseInt(secondsInput.value, 10);
+
+	if (isNaN(hours)) hours = 0;
+	if (isNaN(minutes)) minutes = 0;
+	if (isNaN(seconds)) seconds = 0;
+
+	// Clamp values to sensible ranges
+	const maxHours = 4; // we clamp to 4h total anyway
+	hours = Math.max(0, Math.min(maxHours, hours));
+	minutes = Math.max(0, Math.min(59, minutes));
+	seconds = Math.max(0, Math.min(59, seconds));
 	
 	// Calculate total milliseconds
 	const totalMs = (hours * 3600 + minutes * 60 + seconds) * 1000;
@@ -4827,8 +5070,15 @@ function updateWorkoutDurationFromTimer() {
 	// Update current workout duration
 	currentWorkout.duration = clampedMs;
 	
-	// Update display
-	timerInput.value = formatDurationDisplay(clampedMs);
+	// Normalize display values in the inputs
+	const normalizedTotalSeconds = Math.floor(clampedMs / 1000);
+	const normalizedHours = Math.floor(normalizedTotalSeconds / 3600);
+	const normalizedMinutes = Math.floor((normalizedTotalSeconds % 3600) / 60);
+	const normalizedSeconds = normalizedTotalSeconds % 60;
+
+	hoursInput.value = String(normalizedHours).padStart(2, '0');
+	minutesInput.value = String(normalizedMinutes).padStart(2, '0');
+	secondsInput.value = String(normalizedSeconds).padStart(2, '0');
 }
 
 async function addExerciseToWorkout(exercise) {
@@ -4952,7 +5202,11 @@ function renderWorkoutList() {
 					<button class="workout-ai-coach-btn" data-exercise-index="${idx}" aria-label="AI Coach" title="AI Coach">
 						<img src="static/ai.png" alt="AI Coach" class="workout-ai-coach-icon" />
 					</button>
-					<button class="workout-exercise-notes-btn ${getExerciseNotes(ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`) ? 'has-notes' : ''}" data-exercise-key="${ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`}" data-exercise-index="${idx}" aria-label="Exercise notes" title="Add notes">
+					<button class="workout-actions-menu-btn" data-exercise-index="${idx}" aria-label="Exercise options">
+						<span class="workout-dots">⋮</span>
+					</button>
+					<div class="workout-menu-dropdown hidden" data-exercise-index="${idx}">
+						<button class="workout-menu-item workout-menu-notes-btn ${getExerciseNotes(ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`) ? 'has-notes' : ''}" data-exercise-key="${ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`}" data-exercise-index="${idx}" data-action="notes">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 							<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
 							<polyline points="14 2 14 8 20 8"></polyline>
@@ -4960,11 +5214,24 @@ function renderWorkoutList() {
 							<line x1="16" y1="17" x2="8" y2="17"></line>
 							<polyline points="10 9 9 9 8 9"></polyline>
 						</svg>
+							<span>Notes</span>
 					</button>
-					${infoButtonHtml}
-					<button class="workout-edit-exercise-delete" aria-label="Remove exercise">
-						<img src="static/close.png" alt="" />
+						<button class="workout-menu-item workout-menu-info-btn" data-exercise-key="${ex.key || ''}" data-action="info">
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<circle cx="12" cy="12" r="10"></circle>
+								<line x1="12" y1="16" x2="12" y2="12"></line>
+								<line x1="12" y1="8" x2="12.01" y2="8"></line>
+							</svg>
+							<span>Info</span>
+						</button>
+						<button class="workout-menu-item workout-menu-delete-btn" data-exercise-index="${idx}" data-action="delete">
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<polyline points="3 6 5 6 21 6"></polyline>
+								<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+							</svg>
+							<span>Delete</span>
 					</button>
+					</div>
 				</div>
 			</div>
 		`;
@@ -5266,31 +5533,116 @@ function renderWorkoutList() {
 		li.appendChild(setsContainer);
 		li.appendChild(addSetBtn);
 
-		const deleteExerciseBtn = li.querySelector('.workout-edit-exercise-delete');
-		deleteExerciseBtn.addEventListener('click', () => {
-			currentWorkout.exercises.splice(idx, 1);
-			renderWorkoutList();
-			saveWorkoutDraft();
-		});
+		// Handle AI Coach button - hide for cardio exercises
+		const aiCoachBtn = li.querySelector('.workout-ai-coach-btn');
+		if (isCardio && aiCoachBtn) {
+			aiCoachBtn.remove();
+		} else if (aiCoachBtn) {
+			aiCoachBtn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				openAICoachModal(ex, idx);
+			});
+		}
 
-		const notesBtn = li.querySelector('.workout-exercise-notes-btn');
+		// Handle 3-dots menu button
+		const menuBtn = li.querySelector('.workout-actions-menu-btn');
+		const menuDropdown = li.querySelector('.workout-menu-dropdown');
+		if (menuBtn && menuDropdown) {
+			menuBtn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				// Close all other menus
+				document.querySelectorAll('.workout-menu-dropdown').forEach(m => {
+					if (m !== menuDropdown) m.classList.add('hidden');
+				});
+				// Toggle this menu
+				menuDropdown.classList.toggle('hidden');
+			});
+		}
+
+		// Handle menu items
+		const notesBtn = li.querySelector('.workout-menu-notes-btn');
 		if (notesBtn) {
-			notesBtn.addEventListener('click', () => {
-				// Use key if available, otherwise create unique key from display + index
+			notesBtn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				menuDropdown?.classList.add('hidden');
 				const exerciseKey = ex.key || `exercise_${idx}_${(ex.display || '').toLowerCase().replace(/\s+/g, '_')}`;
 				openExerciseNotesModal(exerciseKey, idx);
 			});
 		}
 
-		// Hide AI coach button for cardio exercises
-		const aiCoachBtn = li.querySelector('.workout-ai-coach-btn');
-		if (isCardio && aiCoachBtn) {
-			aiCoachBtn.remove();
-		} else if (aiCoachBtn) {
-			aiCoachBtn.addEventListener('click', () => {
-				openAICoachModal(ex, idx);
+		const infoBtn = li.querySelector('.workout-menu-info-btn');
+		if (infoBtn) {
+			infoBtn.addEventListener('click', async (e) => {
+				e.stopPropagation();
+				menuDropdown?.classList.add('hidden');
+				const exerciseKey = ex.key || '';
+				if (!exerciseKey) return;
+				
+				// Get video URL
+				let videoUrl = ex.video;
+				if (!videoUrl) {
+					const meta = findExerciseMetadata(ex);
+					videoUrl = meta?.video || '';
+				}
+				
+				if (!videoUrl) {
+					// Try to fetch from API
+					try {
+						const data = await fetchExerciseInfoByKey(exerciseKey);
+						videoUrl = data?.video || '';
+					} catch (err) {
+						console.error('Failed to get exercise info:', err);
+					}
+				}
+				
+				if (!videoUrl) {
+					alert('No video available for this exercise yet.');
+					return;
+				}
+				
+				// Convert YouTube embed URL to watch URL
+				let watchUrl = videoUrl;
+				if (videoUrl.includes('youtube.com/embed/')) {
+					const videoId = videoUrl.match(/embed\/([^?&#]+)/)?.[1];
+					if (videoId) {
+						watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+					}
+				}
+				
+				// Open in browser/app
+				if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser) {
+					try {
+						await window.Capacitor.Plugins.Browser.open({
+							url: watchUrl,
+							windowName: '_system'
+						});
+					} catch (error) {
+						console.error('Failed to open browser:', error);
+						window.open(watchUrl, '_blank');
+					}
+				} else {
+					window.open(watchUrl, '_blank');
+				}
 			});
 		}
+
+		const deleteBtn = li.querySelector('.workout-menu-delete-btn');
+		if (deleteBtn) {
+			deleteBtn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				menuDropdown?.classList.add('hidden');
+				currentWorkout.exercises.splice(idx, 1);
+				renderWorkoutList();
+				saveWorkoutDraft();
+			});
+		}
+
+		// Close menu when clicking outside
+		document.addEventListener('click', (e) => {
+			if (!li.contains(e.target)) {
+				menuDropdown?.classList.add('hidden');
+			}
+		});
 
 		workoutList.appendChild(li);
 	});
@@ -5776,7 +6128,8 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 				.from('workouts')
 				.select('*')
 				.eq('user_id', session.user.id)
-				.order('date', { ascending: false });
+				.order('date', { ascending: false })
+				.limit(50); // Load only most recent 50 workouts for performance
 
 			if (error) {
 				console.error('[WORKOUT] Error loading workouts:', error);
@@ -6885,6 +7238,7 @@ async function loadProgress() {
 	updateExerciseInsightsOptions(workouts);
 	renderPRTimeline(workouts);
 	renderProgressiveOverloadTracker(workouts);
+	renderMostUsedExercises(workouts);
 }
 
 function renderWeightChart(progress) {
@@ -8116,12 +8470,27 @@ function initDataConsentToggle() {
 // Debouncing and lock for saveGymName
 var saveGymNameDebounceTimer = null;
 var saveGymNameLock = false;
+var lastSavedGymName = null;
+var lastSavedPlaceId = null;
 
 // Save gym name to Supabase user_metadata and sync to analytics table
 async function saveGymName(gymName, placeId = null) {
 	// Normalize and update localStorage immediately (so switching tabs doesn't revert)
 	const normalizedGym = (typeof gymName === 'string') ? gymName.trim() : '';
 	const normalizedPlaceId = (typeof placeId === 'string') ? placeId.trim() : '';
+	
+	// Check if value actually changed to avoid unnecessary API calls
+	if (normalizedGym === lastSavedGymName && normalizedPlaceId === lastSavedPlaceId) {
+		// Value hasn't changed, just update localStorage and return
+		localStorage.setItem('user-gym-name', normalizedGym);
+		if (normalizedPlaceId && normalizedGym) {
+			localStorage.setItem('user-gym-place-id', normalizedPlaceId);
+		} else {
+			localStorage.removeItem('user-gym-place-id');
+		}
+		return;
+	}
+	
 	// IMPORTANT: keep the key present even when cleared (empty string) so we don't fall back to stale Supabase metadata
 	localStorage.setItem('user-gym-name', normalizedGym);
 	if (normalizedPlaceId && normalizedGym) {
@@ -8135,7 +8504,7 @@ async function saveGymName(gymName, placeId = null) {
 		clearTimeout(saveGymNameDebounceTimer);
 	}
 
-	// Debounce: wait 500ms before actually saving
+	// Debounce: wait 1500ms before actually saving (increased from 500ms to reduce API calls)
 	saveGymNameDebounceTimer = setTimeout(async () => {
 		// Check lock to prevent concurrent requests
 		if (saveGymNameLock) {
@@ -8185,13 +8554,16 @@ async function saveGymName(gymName, placeId = null) {
 			console.error('[GYM] Error saving gym name:', errorData);
 		} else {
 			console.log('[GYM] Gym name saved and synced successfully');
+			// Update last saved values to prevent duplicate calls
+			lastSavedGymName = currentGym;
+			lastSavedPlaceId = currentPlaceId;
 		}
 	} catch (e) {
 		console.error('[GYM] Error saving gym name:', e);
 		} finally {
 			saveGymNameLock = false;
 	}
-	}, 500);
+	}, 1500); // Increased debounce time to reduce API calls
 }
 
 // Load gym name from Supabase user_metadata or localStorage
@@ -8465,6 +8837,7 @@ function initReportProblemModal() {
 	if (openBtn && openBtn.dataset.bound !== 'true') {
 		openBtn.dataset.bound = 'true';
 		openBtn.addEventListener('click', async () => {
+				// Only load exercises if we don't have any (cached or otherwise)
 			if (!allExercises || allExercises.length === 0) {
 				try { await loadExercises(); } catch (e) { }
 			}
@@ -9639,7 +10012,26 @@ function initExerciseCard() {
 }
 
 // ========== UTILITY FUNCTIONS ==========
-async function loadExercises() {
+// Cache for exercises to avoid repeated API calls
+var exercisesCache = {
+	data: null,
+	timestamp: null,
+	ttl: 5 * 60 * 1000 // 5 minutes cache
+};
+
+async function loadExercises(forceRefresh = false) {
+	// Check if we have cached data that's still valid
+	if (!forceRefresh && exercisesCache.data && exercisesCache.timestamp) {
+		const age = Date.now() - exercisesCache.timestamp;
+		if (age < exercisesCache.ttl) {
+			// Use cached data
+			allExercises = exercisesCache.data;
+			// Still load custom exercises from localStorage (they might have changed)
+			loadCustomExercises();
+			return;
+		}
+	}
+
 	// Check if user is logged in
 	if (supabaseClient) {
 		const { data: { session } } = await supabaseClient.auth.getSession();
@@ -9666,40 +10058,96 @@ async function loadExercises() {
 		const data = await res.json();
 		allExercises = data.exercises || [];
 
-		// Load custom exercises and merge them
+		// Load custom exercises (local) and merge ze
 		loadCustomExercises();
+		// En sync daarna met Supabase zodat server-side custom oefeningen ook terugkomen
+		await syncCustomExercisesFromSupabase();
+
+		// Cache the result
+		exercisesCache.data = allExercises;
+		exercisesCache.timestamp = Date.now();
 
 		console.log(`[DEBUG] Loaded ${allExercises.length} exercises`);
 	} catch (e) {
 		console.error('Failed to load exercises:', e);
-		allExercises = []; // Set empty array on error
-		// Still load custom exercises from localStorage
-		loadCustomExercises();
+		// If we have cached data, use it even if it's stale
+		if (exercisesCache.data) {
+			allExercises = exercisesCache.data;
+			loadCustomExercises();
+			await syncCustomExercisesFromSupabase();
+		} else {
+			allExercises = []; // Set empty array on error
+			// Still load custom exercises from localStorage en Supabase
+			loadCustomExercises();
+			await syncCustomExercisesFromSupabase();
+		}
 	}
 }
 
-// Save custom exercise to localStorage
-function saveCustomExercise(exercise) {
+// Save custom exercise to localStorage + Supabase (if logged in)
+async function saveCustomExercise(exercise) {
+	// Always mark as custom
+	exercise.isCustom = true;
+
 	try {
+		// 1) Local cache (backwards compatible)
 		const customExercises = getCustomExercises();
-		// Check if exercise already exists (by key or display name for custom exercises)
 		const existingIndex = customExercises.findIndex(ex =>
 			ex.key === exercise.key ||
 			(ex.isCustom && ex.display === exercise.display)
 		);
 
 		if (existingIndex >= 0) {
-			// Update existing
 			customExercises[existingIndex] = exercise;
 		} else {
-			// Add new
 			customExercises.push(exercise);
 		}
 
 		localStorage.setItem('custom-exercises', JSON.stringify(customExercises));
-		console.log('[CUSTOM EXERCISE] Saved:', exercise.display);
+		console.log('[CUSTOM EXERCISE] Saved locally:', exercise.display);
 	} catch (e) {
-		console.error('[CUSTOM EXERCISE] Error saving:', e);
+		console.error('[CUSTOM EXERCISE] Error saving locally:', e);
+	}
+
+	// 2) Persist to Supabase so we never lose them on updates
+	try {
+		if (!supabaseClient) {
+			await initSupabase();
+		}
+		if (!supabaseClient) {
+			return;
+		}
+
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session || !session.user) {
+			return; // not logged in → local-only, same gedrag als vroeger
+		}
+
+		// Minimal payload to store server-side
+		const payload = {
+			user_id: session.user.id,
+			key: exercise.key || null,
+			display: exercise.display || null,
+			muscles: Array.isArray(exercise.muscles) ? exercise.muscles : [],
+			is_cardio: !!exercise.isCardio,
+			is_bodyweight: !!exercise.isBodyweight,
+		};
+
+		// Upsert by (user_id, key or display) so bestaande oefeningen niet verdwijnen
+		const { error } = await supabaseClient
+			.from('custom_exercises')
+			.upsert(payload, {
+				onConflict: 'user_id,key,display'
+			});
+
+		if (error) {
+			console.error('[CUSTOM EXERCISE] Supabase upsert error:', error);
+		} else {
+			console.log('[CUSTOM EXERCISE] Saved to Supabase:', exercise.display);
+		}
+	} catch (e) {
+		// Faal stil: liever alleen lokale opslag dan errors in de UI
+		console.error('[CUSTOM EXERCISE] Error saving to Supabase:', e);
 	}
 }
 
@@ -9724,6 +10172,74 @@ function loadCustomExercises() {
 		console.log(`[CUSTOM EXERCISE] Loaded ${customExercises.length} custom exercises`);
 	} catch (e) {
 		console.error('[CUSTOM EXERCISE] Error loading:', e);
+	}
+}
+
+// Extra: laad custom oefeningen uit Supabase en merge ze met localStorage,
+// zodat ze bij updates / herinstallaties terugkomen zodra de gebruiker inlogt.
+async function syncCustomExercisesFromSupabase() {
+	try {
+		if (!supabaseClient) {
+			await initSupabase();
+		}
+		if (!supabaseClient) {
+			return;
+		}
+
+		const { data: { session } } = await supabaseClient.auth.getSession();
+		if (!session || !session.user) {
+			return;
+		}
+
+		const { data, error } = await supabaseClient
+			.from('custom_exercises')
+			.select('*')
+			.eq('user_id', session.user.id);
+
+		if (error) {
+			console.error('[CUSTOM EXERCISE] Supabase load error:', error);
+			return;
+		}
+
+		const serverExercises = (data || []).map(row => ({
+			key: row.key,
+			display: row.display,
+			muscles: Array.isArray(row.muscles) ? row.muscles : [],
+			isCardio: !!row.is_cardio,
+			isBodyweight: !!row.is_bodyweight,
+			isCustom: true,
+		}));
+
+		// Merge server -> localStorage (server is waarheid)
+		const local = getCustomExercises();
+		const merged = [...local];
+
+		serverExercises.forEach(ex => {
+			const exists = merged.find(m =>
+				(m.key && ex.key && m.key === ex.key) ||
+				(m.display && ex.display && m.display === ex.display)
+			);
+			if (!exists) {
+				merged.push(ex);
+			}
+		});
+
+		localStorage.setItem('custom-exercises', JSON.stringify(merged));
+
+		// En merge ook in allExercises voor de huidige sessie
+		serverExercises.forEach(ex => {
+			const exists = allExercises.find(m =>
+				(m.key && ex.key && m.key === ex.key) ||
+				(m.isCustom && m.display === ex.display)
+			);
+			if (!exists) {
+				allExercises.push(ex);
+			}
+		});
+
+		console.log(`[CUSTOM EXERCISE] Synced ${serverExercises.length} exercises from Supabase`);
+	} catch (e) {
+		console.error('[CUSTOM EXERCISE] Error syncing from Supabase:', e);
 	}
 }
 
