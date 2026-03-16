@@ -2442,8 +2442,10 @@ def _find_gym_account_id_by_name(admin_client: Any, gym_name: Optional[str]) -> 
 		return None
 	try:
 		all_users = admin_client.auth.admin.list_users()
+		matches: List[Tuple[str, str]] = []
 		for user in _extract_users_list(all_users):
 			user_id = getattr(user, "id", None) or (user.get("id") if isinstance(user, dict) else None)
+			created_at = getattr(user, "created_at", None) or (user.get("created_at") if isinstance(user, dict) else None) or ""
 			user_meta = getattr(user, "user_metadata", None)
 			if user_meta is None and isinstance(user, dict):
 				user_meta = user.get("user_metadata") or user.get("raw_user_meta_data")
@@ -2452,10 +2454,31 @@ def _find_gym_account_id_by_name(admin_client: Any, gym_name: Optional[str]) -> 
 				continue
 			candidate = (user_meta.get("gym_name") or "").strip().lower()
 			if candidate and candidate == target:
-				return user_id
+				matches.append((str(created_at), str(user_id)))
+		if matches:
+			# Prefer the most recently created gym account when duplicate names exist.
+			matches.sort(key=lambda x: x[0], reverse=True)
+			return matches[0][1]
 	except Exception as e:
 		print(f"[GYM REPORTS] Failed to resolve gym account by name: {e}")
 	return None
+
+
+def _normalize_gym_name(value: Optional[str]) -> str:
+	if not value:
+		return ""
+	return "".join(ch for ch in value.lower() if ch.isalnum())
+
+
+def _gym_names_match(a: Optional[str], b: Optional[str]) -> bool:
+	na = _normalize_gym_name(a)
+	nb = _normalize_gym_name(b)
+	if not na or not nb:
+		return False
+	if na == nb:
+		return True
+	# Handle variants like "fitbutiq" vs "fitbutiqfitness".
+	return na in nb or nb in na
 
 
 @app.route("/api/gym-data", methods=["GET", "OPTIONS"])
@@ -2971,25 +2994,16 @@ def delete_gym_account():
 		# Use service role key to delete the user
 		admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 		
-		# IMPORTANT: Delete all data associated with this gym account BEFORE deleting the user
-		# This ensures GDPR compliance - right to be forgotten
-		
-		# 1. Delete all gym_analytics data where gym_id points to this account
-		try:
-			delete_analytics = admin_client.table("gym_analytics").delete().eq("gym_id", user_id).execute()
-			print(f"[GYM DELETE] Deleted gym_analytics data for gym_id: {user_id}")
-		except Exception as e:
-			print(f"[GYM DELETE] Warning: Could not delete gym_analytics data: {e}")
-		
-		# 2. Unlink all gym_analytics data where user_id points to this account (set gym_id to NULL)
-		# This handles cases where users had this gym linked but the gym account is being deleted
+		# Keep member analytics history and only unlink it from this gym account.
+		# Deleting these rows destroys historical dashboard visibility after account recreation.
+		# Unlink all gym_analytics data where gym_id points to this account (set gym_id to NULL)
 		try:
 			unlink_analytics = admin_client.table("gym_analytics").update({"gym_id": None}).eq("gym_id", user_id).execute()
 			print(f"[GYM DELETE] Unlinked gym_analytics data for gym_id: {user_id}")
 		except Exception as e:
 			print(f"[GYM DELETE] Warning: Could not unlink gym_analytics data: {e}")
 		
-		# 3. Delete user from Supabase auth (this will cascade delete from other tables with ON DELETE CASCADE)
+		# Delete user from Supabase auth (cascades only where this account owns rows).
 		delete_response = admin_client.auth.admin.delete_user(user_id)
 		
 		print(f"[GYM DELETE] Account and all associated data deleted: {user_id}")
@@ -3662,16 +3676,12 @@ def get_gym_dashboard():
 			
 				# Process workouts for charts (all_workouts)
 				for w in all_workouts:
-					# Filter to workouts that were actually saved with this gym (snapshot on the workout).
-					w_gym = (w.get("gym_name") or "").lower().strip()
-					
-					# CRITICAL: Only use workouts where gym_name is actually set (not "gym -" or empty)
-					# Skip workouts without a gym name or with "gym -"
-					if not w_gym or w_gym == "-" or w_gym == "gym -":
-						continue
-					
-					# If gym_name is present, it must match the target gym
-					if w_gym and target_gym and w_gym != target_gym:
+					w_gym_raw = (w.get("gym_name") or "").strip()
+					w_gym = w_gym_raw.lower()
+					is_placeholder = (not w_gym) or (w_gym in ["-", "gym -"])
+					# Keep workouts with missing/placeholder gym_name for linked users.
+					# Only exclude when a concrete gym_name is present and clearly belongs to another gym.
+					if (not is_placeholder) and target_gym and (not _gym_names_match(w_gym_raw, gym_name)):
 						continue
 
 					# Parse workout date for charts
@@ -3821,15 +3831,10 @@ def get_gym_dashboard():
 				# Calculate statistics (workouts and exercises) from stats_workouts
 				# This is separate from charts to ensure we count ALL workouts up to selected_date
 				for w in stats_workouts:
-					# Filter to workouts that were actually saved with this gym
-					w_gym = (w.get("gym_name") or "").lower().strip()
-					
-					# CRITICAL: Only use workouts where gym_name is actually set (not "gym -" or empty)
-					if not w_gym or w_gym == "-" or w_gym == "gym -":
-						continue
-					
-					# If gym_name is present, it must match the target gym
-					if w_gym and target_gym and w_gym != target_gym:
+					w_gym_raw = (w.get("gym_name") or "").strip()
+					w_gym = w_gym_raw.lower()
+					is_placeholder = (not w_gym) or (w_gym in ["-", "gym -"])
+					if (not is_placeholder) and target_gym and (not _gym_names_match(w_gym_raw, gym_name)):
 						continue
 					
 					# Count workout and exercises for statistics
@@ -4115,8 +4120,10 @@ def get_gym_dashboard():
 			today_workouts = 0
 			if consent_user_ids and all_workouts:
 				for w in all_workouts:
-					w_gym = (w.get("gym_name") or "").lower().strip()
-					if w_gym and w_gym == target_gym and w.get("date") == today_str:
+					w_gym_raw = (w.get("gym_name") or "").strip()
+					w_gym = w_gym_raw.lower()
+					is_placeholder = (not w_gym) or (w_gym in ["-", "gym -"])
+					if ((is_placeholder or _gym_names_match(w_gym_raw, gym_name)) and w.get("date") == today_str):
 						today_workouts += 1
 			
 			historical_workouts = []
@@ -4129,8 +4136,10 @@ def get_gym_dashboard():
 						res = q.execute()
 						if res.data:
 							for w in res.data:
-								w_gym = (w.get("gym_name") or "").lower().strip()
-								if w_gym and w_gym == target_gym:
+								w_gym_raw = (w.get("gym_name") or "").strip()
+								w_gym = w_gym_raw.lower()
+								is_placeholder = (not w_gym) or (w_gym in ["-", "gym -"])
+								if is_placeholder or _gym_names_match(w_gym_raw, gym_name):
 									w_date = w.get("date")
 									if w_date:
 										try:
