@@ -3701,11 +3701,8 @@ def get_gym_dashboard():
 				# Process workouts for charts (all_workouts)
 				for w in all_workouts:
 					w_gym_raw = (w.get("gym_name") or "").strip()
-					w_gym = w_gym_raw.lower()
-					is_placeholder = (not w_gym) or (w_gym in ["-", "gym -"])
-					# Keep workouts with missing/placeholder gym_name for linked users.
-					# Only exclude when a concrete gym_name is present and clearly belongs to another gym.
-					if (not is_placeholder) and target_gym and (not _gym_names_match(w_gym_raw, gym_name)):
+					# Source of truth: count only workouts explicitly logged for this gym name.
+					if not _gym_names_match(w_gym_raw, gym_name):
 						continue
 
 					# Parse workout date for charts
@@ -3854,18 +3851,26 @@ def get_gym_dashboard():
 
 				# Calculate statistics (workouts and exercises) from stats_workouts
 				# This is separate from charts to ensure we count ALL workouts up to selected_date
+				matched_stats_user_ids = set()
 				for w in stats_workouts:
 					w_gym_raw = (w.get("gym_name") or "").strip()
-					w_gym = w_gym_raw.lower()
-					is_placeholder = (not w_gym) or (w_gym in ["-", "gym -"])
-					if (not is_placeholder) and target_gym and (not _gym_names_match(w_gym_raw, gym_name)):
+					if not _gym_names_match(w_gym_raw, gym_name):
 						continue
 					
 					# Count workout and exercises for statistics
 					total_workouts += 1
+					uid = w.get("user_id")
+					if uid:
+						matched_stats_user_ids.add(str(uid))
 					exercises = w.get("exercises") or []
 					if isinstance(exercises, list):
 						total_exercises += len(exercises)
+
+				# Users KPI should follow the same workout source-of-truth for this gym name.
+				total_users = len(matched_stats_user_ids)
+				consent_set = set(str(uid) for uid in consent_user_ids)
+				users_with_consent = len([uid for uid in matched_stats_user_ids if uid in consent_set])
+				users_linked = total_users
 
 				top_machines = sorted(machine_sets.items(), key=lambda kv: kv[1], reverse=True)  # Show all machines
 				top_muscles = sorted(muscle_sets.items(), key=lambda kv: kv[1], reverse=True)  # Show all muscles, not just top 8
@@ -3952,8 +3957,7 @@ def get_gym_dashboard():
 				# Filter today's workouts to matching gym
 				today_workouts_filtered = [
 					w for w in today_workouts
-					if (w.get("gym_name") or "").lower().strip() == target_gym
-					and (w.get("gym_name") or "").lower().strip() not in ("", "-", "gym -")
+					if _gym_names_match((w.get("gym_name") or "").strip(), gym_name)
 				]
 				today_workouts_count = len(today_workouts_filtered)
 				today_exercises_count = sum([len(w.get("exercises") or []) for w in today_workouts_filtered])
@@ -3976,8 +3980,7 @@ def get_gym_dashboard():
 				# Filter yesterday's workouts to matching gym
 				yesterday_workouts_filtered = [
 					w for w in yesterday_workouts
-					if (w.get("gym_name") or "").lower().strip() == target_gym
-					and (w.get("gym_name") or "").lower().strip() not in ("", "-", "gym -")
+					if _gym_names_match((w.get("gym_name") or "").strip(), gym_name)
 				]
 				comparison_data["yesterday"]["workouts"] = len(yesterday_workouts_filtered)
 				comparison_data["yesterday"]["exercises"] = sum([
@@ -4000,8 +4003,7 @@ def get_gym_dashboard():
 					last_week_workouts = [
 						w for w in all_workouts
 						if last_week_start <= w.get("date", "") <= last_week_end
-						and (w.get("gym_name") or "").lower().strip() == target_gym
-						and (w.get("gym_name") or "").lower().strip() not in ("", "-", "gym -")
+						and _gym_names_match((w.get("gym_name") or "").strip(), gym_name)
 					]
 					comparison_data["last_week"]["workouts"] = len(last_week_workouts)
 					comparison_data["last_week"]["exercises"] = sum([len(w.get("exercises") or []) for w in last_week_workouts])
@@ -4013,8 +4015,7 @@ def get_gym_dashboard():
 					last_month_workouts = [
 						w for w in all_workouts
 						if last_month_start <= w.get("date", "") <= last_month_end
-						and (w.get("gym_name") or "").lower().strip() == target_gym
-						and (w.get("gym_name") or "").lower().strip() not in ("", "-", "gym -")
+						and _gym_names_match((w.get("gym_name") or "").strip(), gym_name)
 					]
 					comparison_data["last_month"]["workouts"] = len(last_month_workouts)
 					comparison_data["last_month"]["exercises"] = sum([len(w.get("exercises") or []) for w in last_month_workouts])
@@ -4145,9 +4146,7 @@ def get_gym_dashboard():
 			if consent_user_ids and all_workouts:
 				for w in all_workouts:
 					w_gym_raw = (w.get("gym_name") or "").strip()
-					w_gym = w_gym_raw.lower()
-					is_placeholder = (not w_gym) or (w_gym in ["-", "gym -"])
-					if ((is_placeholder or _gym_names_match(w_gym_raw, gym_name)) and w.get("date") == today_str):
+					if _gym_names_match(w_gym_raw, gym_name) and w.get("date") == today_str:
 						today_workouts += 1
 			
 			historical_workouts = []
@@ -4161,9 +4160,7 @@ def get_gym_dashboard():
 						if res.data:
 							for w in res.data:
 								w_gym_raw = (w.get("gym_name") or "").strip()
-								w_gym = w_gym_raw.lower()
-								is_placeholder = (not w_gym) or (w_gym in ["-", "gym -"])
-								if is_placeholder or _gym_names_match(w_gym_raw, gym_name):
+								if _gym_names_match(w_gym_raw, gym_name):
 									w_date = w.get("date")
 									if w_date:
 										try:
