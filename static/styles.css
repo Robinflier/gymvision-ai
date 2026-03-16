@@ -5007,6 +5007,26 @@ button,
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2)
 }
 
+/* Gym dashboard desktop layout: two charts per row */
+@media (min-width: 1200px) {
+	#gym-dashboard-content #gym-dashboard-panels {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 14px;
+		align-items: start;
+	}
+
+	#gym-dashboard-content #gym-dashboard-panels>.settings-stats-grid,
+	#gym-dashboard-content #gym-dashboard-panels>.gym-dashboard-controls,
+	#gym-dashboard-content #gym-dashboard-panels>.gym-dashboard-account-actions {
+		grid-column: 1 / -1;
+	}
+
+	#gym-dashboard-content #gym-dashboard-panels>section.card {
+		margin: 0 !important;
+	}
+}
+
 .report-problem-modal,
 .gym-reports-modal {
 	position: fixed;
