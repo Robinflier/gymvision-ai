@@ -3299,13 +3299,12 @@ def get_gym_dashboard():
 		# link them now so the dashboard isn't empty.
 		try:
 			unlinked = admin_client.table("gym_analytics").select("user_id,gym_name,gym_id,data_collection_consent").eq("data_collection_consent", True).execute()
-			target = (gym_name or "").lower().strip()
-			if unlinked.data and target:
+			if unlinked.data and gym_name:
 				for row in unlinked.data:
 					if row.get("gym_id"):
 						continue
-					row_gym = (row.get("gym_name") or "").lower().strip()
-					if row_gym and row_gym == target:
+					row_gym = row.get("gym_name")
+					if row_gym and _gym_names_match(row_gym, gym_name):
 						try:
 							admin_client.table("gym_analytics").update({"gym_id": gym_id}).eq("user_id", row.get("user_id")).execute()
 						except Exception:
@@ -3313,9 +3312,29 @@ def get_gym_dashboard():
 		except Exception:
 			pass
 		
-		# Get users linked to this gym (all), and the subset with consent
-		analytics_all = admin_client.table("gym_analytics").select("*").eq("gym_id", gym_id).execute()
-		analytics_consent = admin_client.table("gym_analytics").select("*").eq("gym_id", gym_id).eq("data_collection_consent", True).execute()
+		# Get users for this gym by both id and gym_name, then merge by user_id.
+		analytics_by_id = admin_client.table("gym_analytics").select("*").eq("gym_id", gym_id).execute()
+		analytics_by_name = admin_client.table("gym_analytics").select("*").ilike("gym_name", gym_name).execute()
+		analytics_map: Dict[str, Dict[str, Any]] = {}
+		for source in [analytics_by_id.data or [], analytics_by_name.data or []]:
+			for row in source:
+				uid = row.get("user_id")
+				if not uid:
+					continue
+				row_gym_name = row.get("gym_name")
+				# Keep rows that are either explicitly linked to this gym_id OR match by normalized gym name.
+				if row.get("gym_id") != gym_id and not _gym_names_match(row_gym_name, gym_name):
+					continue
+				analytics_map[str(uid)] = row
+		analytics_all_data = list(analytics_map.values())
+		analytics_consent_data = [r for r in analytics_all_data if r.get("data_collection_consent") == True]
+		
+		class _Rows:
+			def __init__(self, data):
+				self.data = data
+		
+		analytics_all = _Rows(analytics_all_data)
+		analytics_consent = _Rows(analytics_consent_data)
 		
 		# Calculate statistics
 		# If a specific date is selected, only count users that were linked to the gym up to and including that date
