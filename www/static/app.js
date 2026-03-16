@@ -1896,6 +1896,7 @@ async function loadGymDashboardData() {
 	const loadingEl = document.getElementById('gym-dashboard-loading');
 	const panelsEl = document.getElementById('gym-dashboard-panels');
 	const titleEl = document.getElementById('gym-dashboard-title');
+	const topLogoutEl = document.getElementById('gym-dashboard-logout-top');
 	const period = getGymDashboardPeriod();
 	updateGymDashboardPeriodUI();
 
@@ -1903,6 +1904,7 @@ async function loadGymDashboardData() {
 		errorEl.classList.remove('show');
 		errorEl.textContent = '';
 	}
+	if (topLogoutEl) topLogoutEl.style.display = 'none';
 	if (loadingEl) loadingEl.style.display = '';
 	if (panelsEl) panelsEl.classList.add('hidden');
 
@@ -2043,6 +2045,10 @@ async function loadGymDashboardData() {
 		if (errorEl) {
 			errorEl.textContent = errorMsg;
 			errorEl.classList.add('show');
+		}
+		if (topLogoutEl) {
+			const isNotVerified = (errorMsg || '').toLowerCase().includes('gym account not verified');
+			topLogoutEl.style.display = isNotVerified ? 'inline-flex' : 'none';
 		}
 	}
 }
