@@ -5013,7 +5013,7 @@ button,
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 14px;
-		align-items: start;
+		align-items: stretch;
 	}
 
 	#gym-dashboard-content #gym-dashboard-panels>.settings-stats-grid,
@@ -5024,6 +5024,29 @@ button,
 
 	#gym-dashboard-content #gym-dashboard-panels>section.card {
 		margin: 0 !important;
+		height: 100%;
+		display: flex;
+		flex-direction: column;
+	}
+
+	#gym-dashboard-content #gym-dashboard-panels>section.card>.gym-chart,
+	#gym-dashboard-content #gym-dashboard-panels>section.card>#gym-dashboard-chart-muscles,
+	#gym-dashboard-content #gym-dashboard-panels>section.card>#gym-dashboard-chart-categories {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+	}
+
+	#gym-dashboard-content #gym-dashboard-panels #gym-dashboard-chart-muscles .progress-muscle-content,
+	#gym-dashboard-content #gym-dashboard-panels #gym-dashboard-chart-categories .progress-muscle-content {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		justify-content: space-between;
+	}
+
+	#gym-dashboard-content #gym-dashboard-panels .gym-chart-line {
+		flex: 1;
 	}
 }
 
