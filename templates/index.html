@@ -408,6 +408,15 @@
 				</div>
 			</section>
 
+			<section class="card progress-most-used-card">
+				<div class="progress-pr-header">
+					<h3>Most Used Exercises</h3>
+				</div>
+				<div id="progress-most-used-exercises" class="progress-most-used-content">
+					<div class="progress-empty">No exercises yet. Complete workouts to see your most used exercises!</div>
+				</div>
+			</section>
+
 			<section class="card progress-pr-timeline-card">
 				<div class="progress-pr-header">
 					<h3>Personal Records Timeline</h3>
@@ -670,6 +679,24 @@
 				</div>
 			</div>
 		</div>
+
+	<!-- AI Coach Modal -->
+	<div id="ai-coach-modal" class="ai-coach-modal hidden">
+		<div class="ai-coach-backdrop"></div>
+		<div class="ai-coach-content">
+			<div class="ai-coach-header">
+				<h3>AI Coach</h3>
+				<button id="ai-coach-close" class="ai-coach-close" type="button">✕</button>
+			</div>
+			<div class="ai-coach-tabs">
+				<button class="ai-coach-tab active" data-tab="first-set">First set</button>
+				<button class="ai-coach-tab" data-tab="next-sets">Next sets</button>
+			</div>
+			<div class="ai-coach-messages" id="ai-coach-messages">
+				<!-- Messages will be added here -->
+			</div>
+		</div>
+	</div>
 
 	<div id="exercise-selector" class="exercise-selector hidden">
 		<div class="exercise-selector-panel">
