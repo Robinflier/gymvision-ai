@@ -6130,12 +6130,40 @@ async function loadWorkouts(prefetchedWorkouts = null) {
 	} else {
 		// Load from Supabase
 		try {
-			const { data, error } = await supabaseClient
-				.from('workouts')
-				.select('*')
-				.eq('user_id', session.user.id)
-				.order('date', { ascending: false })
-				.limit(50); // Load only most recent 50 workouts for performance
+			const PAGE_SIZE = 1000;
+			const allWorkouts = [];
+			let from = 0;
+			let hasMore = true;
+			let error = null;
+
+			// Load all user workouts in pages so older workouts never disappear from the list.
+			while (hasMore) {
+				const to = from + PAGE_SIZE - 1;
+				const { data: pageData, error: pageError } = await supabaseClient
+					.from('workouts')
+					.select('*')
+					.eq('user_id', session.user.id)
+					.order('date', { ascending: false })
+					.order('id', { ascending: false })
+					.range(from, to);
+
+				if (pageError) {
+					error = pageError;
+					break;
+				}
+
+				const batch = Array.isArray(pageData) ? pageData : [];
+				if (batch.length === 0) {
+					hasMore = false;
+					break;
+				}
+
+				allWorkouts.push(...batch);
+				from += PAGE_SIZE;
+				hasMore = batch.length === PAGE_SIZE;
+			}
+
+			const data = allWorkouts;
 
 			if (error) {
 				console.error('[WORKOUT] Error loading workouts:', error);
